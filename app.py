@@ -397,6 +397,11 @@ class App:
         self.root.overrideredirect(True)
         self._connected = False
         self._interactive = False      # click-through temporarily lifted by holding Shift
+        self._game_hwnd = None         # cached game window (for "only above the game window")
+        self._follow_failed = False
+        self._game_next_search = 0.0
+        self._game_warned = 0.0
+        self._follow_logged = 0.0
         self._prev_fg = None           # window that had focus before we became interactive
         self._owner = None             # invisible owner window: owned windows never get a taskbar button
         self.root.report_callback_exception = lambda exc, val, tb: log.error("UI 오류", exc_info=(exc, val, tb))
@@ -431,6 +436,7 @@ class App:
         self.root.bind("<FocusIn>", lambda e: self._stack_back())
         self.root.after(50, self.poll)
         self.root.after(80, self._hover_tick)
+        self.root.after(500, self._follow_game)
         self.root.after(400, self._fix_taskbar)
         log.info("시작 | python %s | 번역=%s | 목표=%s | 로그 파일: %s", sys.version.split()[0],
                  self.cfg.get("translator"), self.cfg.get("target_lang"), logsetup.PATH)
@@ -726,6 +732,140 @@ class App:
         except Exception:
             log.exception("창 목록 조회 실패")
 
+    # ------------------------------------------------------------------ "only above the game window"
+    @staticmethod
+    def _exe_of(hwnd):
+        """File name of the program that owns the window (lower case), '' if unknown."""
+        try:
+            u, k = _user32(), ctypes.windll.kernel32
+            k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            k.OpenProcess.restype = wintypes.HANDLE
+            k.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                     ctypes.POINTER(wintypes.DWORD)]
+            k.CloseHandle.argtypes = [wintypes.HANDLE]
+            pid = wintypes.DWORD(0)
+            u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+            u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            h = k.OpenProcess(0x1000, False, pid.value)          # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return ""
+            try:
+                buf = ctypes.create_unicode_buffer(520)
+                n = wintypes.DWORD(520)
+                if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+                    return os.path.basename(buf.value).lower()
+            finally:
+                k.CloseHandle(h)
+        except Exception:
+            pass
+        return ""
+
+    def _find_game(self):
+        """The game window: a visible top-level window of Wow*.exe (any language), else one with the configured title."""
+        u = _user32()
+        u.IsWindow.argtypes = [wintypes.HWND]
+        u.IsWindowVisible.argtypes = [wintypes.HWND]
+        u.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        u.EnumWindows.argtypes = [ctypes.c_void_p, wintypes.LPARAM]
+        u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+        u.GetWindow.restype = wintypes.HWND
+        u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        g = self._game_hwnd
+        if g and u.IsWindow(g) and u.IsWindowVisible(g):
+            return g
+        if g:
+            log.info("게임 창이 사라졌습니다")
+        self._game_hwnd = None
+        now = time.monotonic()
+        if now < self._game_next_search:                       # searching = enumerating every window: not too often
+            return None
+        self._game_next_search = now + 2.0
+        title = (self.cfg.get("wow_window_title") or "").strip().lower()
+        me = (_hwnd(self.root), _hwnd(self.back))
+        by_exe, by_title = [], []
+        buf = ctypes.create_unicode_buffer(256)
+        rect = wintypes.RECT()
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def cb(h, _lp):
+            if h in me or not u.IsWindowVisible(h) or u.GetWindow(h, 4):      # GW_OWNER: top-level windows only
+                return True
+            u.GetWindowTextW(h, buf, 256)
+            text = buf.value
+            u.GetWindowRect(h, ctypes.byref(rect))
+            area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
+            exe = self._exe_of(h)
+            if exe.startswith("wow") and exe.endswith(".exe"):
+                by_exe.append((area, h, text, exe))
+            elif title and text.strip().lower() == title:
+                by_title.append((area, h, text, exe))
+            return True
+
+        u.EnumWindows(cb, 0)
+        pool = by_exe or by_title
+        if pool:
+            area, h, text, exe = max(pool)
+            self._game_hwnd = h
+            log.info("게임 창 찾음: hwnd=%s 제목=%r 프로그램=%s 크기(면적)=%d", h, text, exe or "?", area)
+            return h
+        if now - self._game_warned > 60:
+            self._game_warned = now
+            log.warning("게임 창을 찾지 못했습니다 (Wow*.exe 창 없음, 제목 %r 일치 없음). 와우가 실행 중인지 확인하세요", title)
+        return None
+
+    def _follow_game(self):
+        """Keep this window directly above the game window in the z-order (and below every other window)."""
+        try:
+            if self.cfg.get("topmost_wow_only"):
+                self._place_above_game()
+        except Exception:
+            if not self._follow_failed:
+                self._follow_failed = True
+                log.exception("게임 창 위 배치 실패")
+        self.root.after(250, self._follow_game)
+
+    def _place_above_game(self):
+        u = _user32()
+        u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+        u.GetWindow.restype = wintypes.HWND
+        u.IsIconic.argtypes = [wintypes.HWND]
+        u.IsWindow.argtypes = [wintypes.HWND]
+        u.IsWindowVisible.argtypes = [wintypes.HWND]
+        g = self._find_game()
+        if not g or u.IsIconic(g):
+            return
+        me, back = _hwnd(self.root), _hwnd(self.back)
+        mine = (me, back) if self.two_window else (me,)
+        # the windows directly above the game must be: ours (front window topmost of the pair)
+        above = u.GetWindow(g, 3)                          # GW_HWNDPREV
+        want = list(mine)[::-1]                            # nearest to the game first: back, then root
+        ok = True
+        cur = above
+        for h in want:
+            if cur != h:
+                ok = False
+                break
+            cur = u.GetWindow(cur, 3)
+        if ok:
+            return
+        # the nearest window above the game that is not one of ours
+        p = above
+        while p and p in mine:
+            p = u.GetWindow(p, 3)
+        topmost = lambda h: bool(u.GetWindowLongW(h, -20) & 0x8)       # WS_EX_TOPMOST
+        if topmost(g):
+            ia = p if p else -1                                       # HWND_TOPMOST
+        else:
+            ia = p if (p and not topmost(p)) else -2                  # HWND_NOTOPMOST: top of the normal windows
+        flags = 0x1 | 0x2 | 0x10                                      # NOSIZE | NOMOVE | NOACTIVATE
+        ok1 = u.SetWindowPos(me, ia, 0, 0, 0, 0, flags)
+        if self.two_window:
+            u.SetWindowPos(back, me, 0, 0, 0, 0, flags)
+        now = time.monotonic()
+        if now - self._follow_logged > 10:                 # leave a trace in the log tab without flooding it
+            self._follow_logged = now
+            log.info("게임 창 위로 재배치 | 게임=%s 바로 위 창=%s 기준=%s 결과=%s", g, above, ia, bool(ok1))
+
     def _stack_back(self):
         """Put the background window directly below the text window."""
         if not self.two_window:
@@ -874,7 +1014,7 @@ class App:
     # ------------------------------------------------------------------ window settings
     def apply_window_settings(self):
         self.font.configure(size=int(self.cfg["font_size"]))
-        top = bool(self.cfg["topmost"])
+        top = bool(self.cfg["topmost"]) and not self.cfg.get("topmost_wow_only")
         self.root.attributes("-topmost", top)
         self.back.attributes("-topmost", top)
         self.apply_opacity()
