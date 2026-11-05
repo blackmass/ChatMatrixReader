@@ -1,0 +1,590 @@
+"""Options window (right-click on the main window)."""
+import ctypes
+import json
+import logging
+import os
+import threading
+import time
+import tkinter as tk
+from ctypes import wintypes
+from tkinter import ttk, messagebox
+
+import config
+import glossary
+import logsetup
+import translator
+import credits
+import i18n
+from i18n import tr
+from translator import TRANSLATOR_LABELS, LANGS
+
+PAD = {"padx": 6, "pady": 3}
+
+
+class OptionsWindow:
+    def __init__(self, app):
+        self.app = app
+        cfg = app.cfg
+        self.win = win = tk.Toplevel(app.root)
+        win.title(tr("옵션"))
+        win.resizable(False, False)
+
+        mp = cfg.get("manual_pos")
+        self.v = {
+            "translator": tk.StringVar(value=tr(TRANSLATOR_LABELS.get(cfg["translator"], TRANSLATOR_LABELS["none"]))),
+            "target_lang": tk.StringVar(value=cfg["target_lang"]),
+            "api_url": tk.StringVar(value=cfg["api_url"]),
+            "api_model": tk.StringVar(value=cfg["api_model"]),
+            "api_key": tk.StringVar(value=cfg["api_key"]),
+            "google_api_key": tk.StringVar(value=cfg["google_api_key"]),
+            "disable_reasoning": tk.BooleanVar(value=bool(cfg["disable_reasoning"])),
+            "reasoning_off_body": tk.StringVar(value=cfg["reasoning_off_body"]),
+            "temperature": tk.StringVar(value=str(cfg["temperature"])),
+            "timeout": tk.StringVar(value=str(cfg["timeout"])),
+            "skip_same_lang": tk.BooleanVar(value=bool(cfg["skip_same_lang"])),
+            "glossary_file": tk.StringVar(value=cfg["glossary_file"]),
+            "glossary_google": tk.BooleanVar(value=bool(cfg["glossary_google"])),
+            "glossary_style": tk.StringVar(value=tr(glossary.GLOSSARY_STYLES.get(cfg["glossary_style"], glossary.GLOSSARY_STYLES["paren"]))),
+            "glossary_info": tk.StringVar(value=""),
+            "test_text": tk.StringVar(value="LFM M+ 12 need tank and healer, inv pls"),
+            "test_result": tk.StringVar(value=""),
+            "bg_opacity": tk.DoubleVar(value=float(cfg["bg_opacity"])),
+            "text_opacity": tk.DoubleVar(value=float(cfg["text_opacity"])),
+            "topmost": tk.BooleanVar(value=bool(cfg["topmost"])),
+            "click_through": tk.BooleanVar(value=bool(cfg["click_through"])),
+            "font_size": tk.IntVar(value=int(cfg["font_size"])),
+            "max_lines": tk.IntVar(value=int(cfg["max_lines"])),
+            "poll_hz": tk.IntVar(value=int(cfg["poll_hz"])),
+            "pos_x": tk.StringVar(value=str(mp[0]) if mp else ""),
+            "pos_y": tk.StringVar(value=str(mp[1]) if mp else ""),
+        }
+        self.openai_widgets = []
+        self.google_widgets = []
+        self.test_widgets = []
+
+        nb = ttk.Notebook(win)
+        nb.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+        self._tab_translate(nb)
+        self._tab_window(nb)
+        self._tab_capture(nb)
+        self._tab_log(nb)
+        self._tab_other(nb)
+        self.nb = nb
+
+        row = ttk.Frame(win)
+        row.pack(anchor="e", padx=8, pady=(2, 8))
+        ttk.Button(row, text=tr("저장"), command=self.save).pack(side="left")
+        ttk.Button(row, text=tr("닫기"), command=win.destroy).pack(side="left", padx=6)
+        ttk.Button(row, text=tr("프로그램 종료"), command=app.on_close).pack(side="left", padx=(18, 0))
+        self.refresh_states()
+        self._place_beside_main()
+
+    # ------------------------------------------------------------------
+    def alive(self):
+        return self.win.winfo_exists()
+
+    def lift(self):
+        self.win.deiconify()
+        self.win.lift()
+        self.win.focus_force()
+
+    def _mode(self):
+        rev = {tr(label): key for key, label in TRANSLATOR_LABELS.items()}
+        return rev.get(self.v["translator"].get(), "none")
+
+    # ------------------------------------------------------------------ tabs
+    def _tab_translate(self, nb):
+        v = self.v
+        tab = ttk.Frame(nb)
+        nb.add(tab, text=tr("번역"))
+
+        top = ttk.Frame(tab)
+        top.pack(fill="x", padx=6, pady=(8, 2))
+        ttk.Label(top, text=tr("번역 방식")).grid(row=0, column=0, sticky="w", **PAD)
+        cb = ttk.Combobox(top, textvariable=v["translator"], values=[tr(x) for x in TRANSLATOR_LABELS.values()],
+                          state="readonly", width=34)
+        cb.grid(row=0, column=1, **PAD)
+        cb.bind("<<ComboboxSelected>>", lambda e: self.refresh_states())
+        ttk.Label(top, text=tr("목표 언어")).grid(row=1, column=0, sticky="w", **PAD)
+        ttk.Combobox(top, textvariable=v["target_lang"], values=LANGS, width=34).grid(row=1, column=1, **PAD)
+
+        # --- OpenAI compatible
+        g1 = ttk.LabelFrame(tab, text=tr("OpenAI 호환 API (LM Studio 등)"))
+        g1.pack(fill="x", padx=8, pady=4)
+        ttk.Label(g1, text="API URL").grid(row=0, column=0, sticky="w", **PAD)
+        e1 = ttk.Entry(g1, textvariable=v["api_url"], width=44)
+        e1.grid(row=0, column=1, columnspan=2, sticky="w", **PAD)
+        ttk.Label(g1, text=tr("모델")).grid(row=1, column=0, sticky="w", **PAD)
+        self.model_cb = ttk.Combobox(g1, textvariable=v["api_model"], width=34)
+        self.model_cb.grid(row=1, column=1, sticky="w", **PAD)
+        b1 = ttk.Button(g1, text=tr("목록 불러오기"), command=self.fetch_models)
+        b1.grid(row=1, column=2, **PAD)
+        ttk.Label(g1, text="API Key").grid(row=2, column=0, sticky="w", **PAD)
+        e2 = ttk.Entry(g1, textvariable=v["api_key"], width=44, show="*")
+        e2.grid(row=2, column=1, columnspan=2, sticky="w", **PAD)
+        ttk.Label(g1, text=tr("온도 / 시간제한(초)")).grid(row=3, column=0, sticky="w", **PAD)
+        tt = ttk.Frame(g1)
+        tt.grid(row=3, column=1, sticky="w", **PAD)
+        s1 = ttk.Spinbox(tt, from_=0.0, to=2.0, increment=0.1, textvariable=v["temperature"], width=6)
+        s1.pack(side="left")
+        s2 = ttk.Spinbox(tt, from_=2, to=300, textvariable=v["timeout"], width=6)
+        s2.pack(side="left", padx=(8, 0))
+        c1 = ttk.Checkbutton(g1, text=tr("추론(reasoning) 끄기 - 아래 JSON을 요청에 추가"), variable=v["disable_reasoning"])
+        c1.grid(row=4, column=0, columnspan=3, sticky="w", **PAD)
+        e5 = ttk.Entry(g1, textvariable=v["reasoning_off_body"], width=62)
+        e5.grid(row=5, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(g1, text=tr("모델마다 끄는 방법이 다릅니다. 서버가 거부(400)하면 자동으로 빼고 다시 요청합니다.\n"
+                              "URL은 http://localhost:1234 처럼 써도 /v1 을 자동으로 붙입니다."),
+                  foreground="#666", justify="left").grid(row=6, column=0, columnspan=3, sticky="w", **PAD)
+        self.openai_widgets += [e1, self.model_cb, b1, e2, s1, s2, c1, e5]
+
+        # --- Google
+        g2 = ttk.LabelFrame(tab, text=tr("Google 번역"))
+        g2.pack(fill="x", padx=8, pady=4)
+        ttk.Label(g2, text=tr("API Key (선택)")).grid(row=0, column=0, sticky="w", **PAD)
+        e3 = ttk.Entry(g2, textvariable=v["google_api_key"], width=44, show="*")
+        e3.grid(row=0, column=1, sticky="w", **PAD)
+        ttk.Label(g2, text=tr("비우면 키 없이 쓰는 비공식 무료 방식입니다 (제한되거나 바뀔 수 있음).\n"
+                              "Cloud Translation API 키를 넣으면 공식 방식을 사용합니다."),
+                  foreground="#666", justify="left").grid(row=1, column=0, columnspan=2, sticky="w", **PAD)
+        self.google_widgets += [e3]
+
+        # --- glossary
+        gg = ttk.LabelFrame(tab, text=tr("단어장 (Google, AI 공통)"))
+        gg.pack(fill="x", padx=8, pady=4)
+        ttk.Label(gg, text=tr("파일")).grid(row=0, column=0, sticky="w", **PAD)
+        ttk.Entry(gg, textvariable=v["glossary_file"], width=34).grid(row=0, column=1, sticky="w", **PAD)
+        gb = ttk.Frame(gg)
+        gb.grid(row=0, column=2, sticky="w", **PAD)
+        ttk.Button(gb, text=tr("열기"), command=self.open_glossary).pack(side="left")
+        ttk.Button(gb, text=tr("항목 수 확인"), command=self.check_glossary).pack(side="left", padx=4)
+        gc = ttk.Checkbutton(gg, text=tr("Google 번역에도 단어장 적용"), variable=v["glossary_google"])
+        gc.grid(row=1, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(gg, text=tr("적용 방식")).grid(row=2, column=0, sticky="w", **PAD)
+        gs = ttk.Combobox(gg, textvariable=v["glossary_style"], values=[tr(x) for x in glossary.GLOSSARY_STYLES.values()],
+                          state="readonly", width=34)
+        gs.grid(row=2, column=1, sticky="w", **PAD)
+        ttk.Label(gg, textvariable=v["glossary_info"], foreground="#666").grid(row=3, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(gg, text=tr("AI(OpenAI 호환)에는 프롬프트의 {{Glossary.txt}} 자리에 파일 내용이 들어갑니다. 파일은 저장하면 바로 반영됩니다."),
+                  foreground="#666").grid(row=4, column=0, columnspan=3, sticky="w", **PAD)
+        self.google_widgets += [gc, gs]
+
+        # --- prompt
+        g3 = ttk.LabelFrame(tab, text=tr("프롬프트 (OpenAI 호환 API 전용. {target_lang}: 목표 언어, {{파일명}}: 그 파일 내용)"))
+        g3.pack(fill="both", padx=8, pady=4)
+        holder = ttk.Frame(g3)
+        holder.pack(fill="both", padx=6, pady=(4, 2))
+        self.prompt = tk.Text(holder, width=66, height=8, wrap="word", font=("Malgun Gothic", 9), undo=True)
+        sb = ttk.Scrollbar(holder, orient="vertical", command=self.prompt.yview)
+        self.prompt.configure(yscrollcommand=sb.set)
+        self.prompt.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.prompt.insert("1.0", self.app.cfg["prompt"])
+        br = ttk.Frame(g3)
+        br.pack(anchor="w", padx=6, pady=(0, 4))
+        b2 = ttk.Button(br, text=tr("기본 프롬프트로 되돌리기"), command=self.reset_prompt)
+        b2.pack(side="left")
+        ttk.Label(br, text=tr("약어 설명은 Glossary 아래에 한 줄씩 추가하세요."), foreground="#666").pack(side="left", padx=8)
+        self.openai_widgets += [self.prompt, b2]
+
+        # --- common
+        ttk.Checkbutton(tab, text=tr("목표 언어와 같은 문장은 번역 생략 (한국어 등 글자로 판별 가능한 경우)"),
+                        variable=v["skip_same_lang"]).pack(anchor="w", padx=10, pady=2)
+
+        # --- test
+        g4 = ttk.LabelFrame(tab, text=tr("테스트 (저장하지 않아도 지금 입력한 설정으로 시험)"))
+        g4.pack(fill="x", padx=8, pady=(4, 8))
+        e4 = ttk.Entry(g4, textvariable=v["test_text"], width=52)
+        e4.grid(row=0, column=0, **PAD)
+        b3 = ttk.Button(g4, text=tr("테스트"), command=self.run_test)
+        b3.grid(row=0, column=1, **PAD)
+        ttk.Label(g4, textvariable=v["test_result"], wraplength=470, justify="left").grid(
+            row=1, column=0, columnspan=2, sticky="w", **PAD)
+        self.test_widgets += [e4, b3]
+
+    def _tab_window(self, nb):
+        v, cfg, app = self.v, self.app.cfg, self.app
+        tab = ttk.Frame(nb)
+        nb.add(tab, text=tr("창"))
+
+        ttk.Label(tab, text=tr("투명도")).grid(row=0, column=0, sticky="nw", **PAD)
+        sl = ttk.Frame(tab)
+        sl.grid(row=0, column=1, sticky="w", **PAD)
+
+        def on_opacity(_=None):
+            cfg["bg_opacity"] = round(float(v["bg_opacity"].get()), 2)
+            cfg["text_opacity"] = round(float(v["text_opacity"].get()), 2)
+            app.apply_opacity()
+
+        ttk.Label(sl, text=tr("배경")).grid(row=0, column=0, sticky="w")
+        ttk.Scale(sl, from_=0.05, to=1.0, variable=v["bg_opacity"], command=on_opacity,
+                  length=200).grid(row=0, column=1, padx=6, pady=2)
+        ttk.Label(sl, text=tr("글자")).grid(row=1, column=0, sticky="w")
+        ttk.Scale(sl, from_=0.3, to=1.0, variable=v["text_opacity"], command=on_opacity,
+                  length=200).grid(row=1, column=1, padx=6, pady=2)
+        ttk.Label(sl, text=tr("두 값이 다르면 창 2개로 합성합니다."), foreground="#666").grid(
+            row=2, column=0, columnspan=2, sticky="w")
+
+        def on_topmost():
+            cfg["topmost"] = bool(v["topmost"].get())
+            app.root.attributes("-topmost", cfg["topmost"])
+            app.back.attributes("-topmost", cfg["topmost"])      # the background window must follow
+            app._stack_back()
+
+        ttk.Checkbutton(tab, text=tr("항상 위에 표시"), variable=v["topmost"],
+                        command=on_topmost).grid(row=1, column=0, columnspan=2, sticky="w", **PAD)
+
+        def on_click_through():
+            if v["click_through"].get():
+                if not app.hotkey.ok:
+                    v["click_through"].set(False)
+                    messagebox.showwarning(tr("클릭 통과"), tr("Ctrl+Alt+O 단축키를 등록하지 못해서 켤 수 없습니다.\n"
+                                                         "(다시 옵션을 열 방법이 없어지기 때문입니다)"), parent=self.win)
+                    return
+                if not messagebox.askyesno(
+                        tr("클릭 통과"),
+                        tr("켜면 평소에는 이 창이 마우스 입력을 받지 않습니다.\n"
+                           "Shift를 누른 채로 창 위에 마우스를 올리면 클릭, 드래그 선택(선택하면 자동 복사), 스크롤, 창 이동이 됩니다.\n"
+                           "옵션은 Ctrl+Alt+O 로도 열 수 있습니다.\n\n계속할까요?"), parent=self.win):
+                    v["click_through"].set(False)
+                    return
+            cfg["click_through"] = bool(v["click_through"].get())
+            app.set_click_through(cfg["click_through"])
+            config.save(cfg)
+
+        ttk.Checkbutton(tab, text=tr("클릭 통과 (마우스 입력이 창 뒤로 전달됨. Shift를 누르고 있는 동안만 조작 가능)"), variable=v["click_through"],
+                        command=on_click_through).grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("글자 크기")).grid(row=3, column=0, sticky="w", **PAD)
+        ttk.Spinbox(tab, from_=8, to=32, textvariable=v["font_size"], width=6).grid(row=3, column=1, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("최대 보관 줄 수")).grid(row=4, column=0, sticky="w", **PAD)
+        ttk.Spinbox(tab, from_=50, to=5000, increment=50, textvariable=v["max_lines"],
+                    width=6).grid(row=4, column=1, sticky="w", **PAD)
+        ttk.Button(tab, text=tr("화면 지우기"), command=app.clear_text).grid(row=5, column=0, sticky="w", **PAD)
+
+    def _tab_capture(self, nb):
+        v = self.v
+        tab = ttk.Frame(nb)
+        nb.add(tab, text=tr("캡처"))
+        ttk.Label(tab, text=tr("초당 읽기 횟수")).grid(row=0, column=0, sticky="w", **PAD)
+        ttk.Spinbox(tab, from_=5, to=60, textvariable=v["poll_hz"], width=6).grid(row=0, column=1, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("수동 좌표 X, Y (비우면 자동 탐색)")).grid(row=1, column=0, sticky="w", **PAD)
+        pos = ttk.Frame(tab)
+        pos.grid(row=1, column=1, sticky="w", **PAD)
+        ttk.Entry(pos, textvariable=v["pos_x"], width=7).pack(side="left")
+        ttk.Entry(pos, textvariable=v["pos_y"], width=7).pack(side="left", padx=(4, 0))
+        ttk.Button(tab, text=tr("매트릭스 다시 찾기"), command=self.app.worker.research).grid(
+            row=2, column=0, sticky="w", **PAD)
+
+    def _tab_log(self, nb):
+        tab = ttk.Frame(nb)
+        nb.add(tab, text=tr("로그"))
+        holder = ttk.Frame(tab)
+        holder.pack(fill="both", expand=True, padx=6, pady=(8, 2))
+        self.log_text = tk.Text(holder, width=86, height=26, wrap="none", font=("Consolas", 9), state="disabled")
+        sb = ttk.Scrollbar(holder, orient="vertical", command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self.log_text.pack(side="left", fill="both", expand=True)
+        self.log_text.tag_configure("warn", foreground="#b00020")
+        bar = ttk.Frame(tab)
+        bar.pack(anchor="w", padx=6, pady=(0, 2))
+        ttk.Button(bar, text=tr("새로고침"), command=self.refresh_log).pack(side="left")
+        ttk.Button(bar, text=tr("모두 복사"), command=self.copy_log).pack(side="left", padx=6)
+        ttk.Button(bar, text=tr("로그 파일 열기"), command=self.open_log_file).pack(side="left")
+        ttk.Label(tab, text=tr("파일: {path}", path=logsetup.PATH), foreground="#666").pack(anchor="w", padx=8, pady=(0, 6))
+        self._log_sig = None
+        self.refresh_log()
+        self.win.after(1000, self._log_tick)
+
+    def _tab_other(self, nb):
+        tab = ttk.Frame(nb)
+        nb.add(tab, text=tr("기타"))
+        self.other_tab = tab
+
+        gl = ttk.LabelFrame(tab, text=tr("언어"))
+        gl.pack(fill="x", padx=8, pady=(10, 4))
+        auto_label = tr("자동 (시스템 언어)")
+        langs = i18n.available()
+        self._lang_items = [(i18n.AUTO, auto_label)] + langs          # (config value, label)
+        cur = self.app.cfg.get("language", i18n.AUTO)
+        label = next((lb for code, lb in self._lang_items if code.lower() == (cur or "").lower()), auto_label)
+        self.v["language"] = tk.StringVar(value=label)
+        cb = ttk.Combobox(gl, textvariable=self.v["language"], values=[lb for _, lb in self._lang_items],
+                          state="readonly", width=34)
+        cb.grid(row=0, column=0, sticky="w", **PAD)
+        cb.bind("<<ComboboxSelected>>", self.on_language)
+        ttk.Button(gl, text=tr("새로고침"), command=self.reload_languages).grid(row=0, column=1, **PAD)
+        ttk.Label(gl, text=tr("현재: {code}   (언어 파일: {folder})", code=i18n.current(), folder=i18n.LOCALE_DIR),
+                  foreground="#666", wraplength=520, justify="left").grid(row=1, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(gl, text=tr("언어를 바꾸면 옵션창이 다시 열립니다 (저장하지 않은 변경은 사라집니다). "
+                              "locale 폴더에 번역 파일(.txt)을 넣으면 목록에 나타납니다."),
+                  foreground="#666", wraplength=520, justify="left").grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
+
+        gc = ttk.LabelFrame(tab, text=tr("정보"))
+        gc.pack(fill="both", expand=True, padx=8, pady=4)
+        self.credit_box = gc
+        self.fill_credits()
+        ttk.Label(tab, text=tr("{file} 파일을 고치면 이 목록이 바뀝니다.", file=credits.FILE_NAME),
+                  foreground="#666").pack(anchor="w", padx=10, pady=(0, 6))
+
+    def fill_credits(self):
+        for w in self.credit_box.winfo_children():
+            w.destroy()
+        items, err = credits.load()
+        if err:
+            ttk.Label(self.credit_box, text=err, foreground="#b00020", wraplength=520,
+                      justify="left").grid(row=0, column=0, sticky="w", **PAD)
+            return
+        if not items:
+            ttk.Label(self.credit_box, text=tr("(비어 있음)"), foreground="#666").grid(
+                row=0, column=0, sticky="w", **PAD)
+        for r, (key, val) in enumerate(items):
+            ttk.Label(self.credit_box, text=key).grid(row=r, column=0, sticky="nw", **PAD)
+            var = tk.StringVar(value=val)
+            e = ttk.Entry(self.credit_box, textvariable=var, width=52, state="readonly")   # selectable / copyable
+            e._var = var          # keep a reference: a StringVar that is garbage collected shows an empty box
+            e.grid(row=r, column=1, sticky="w", **PAD)
+            if credits.is_url(val):
+                ttk.Button(self.credit_box, text=tr("열기"), width=6,
+                           command=lambda u=val: credits.open_url(u)).grid(row=r, column=2, **PAD)
+
+    def reload_languages(self):
+        self.on_language()
+
+    def on_language(self, _event=None):
+        label = self.v["language"].get()
+        code = next((c for c, lb in self._lang_items if lb == label), i18n.AUTO)
+        self.app.cfg["language"] = code
+        used = i18n.init(code)
+        config.save(self.app.cfg)
+        logging.getLogger("cmr.options").info("언어 선택: %r -> %s", code or "auto", used)
+        tab_index = self.nb.index(self.other_tab)
+        # rebuild after this event handler has finished (the combobox that fired it is destroyed)
+        self.app.root.after(30, lambda: self.app.reopen_options(select_tab=tab_index))
+
+    def _log_tick(self):
+        if not self.alive():
+            return
+        self.refresh_log()
+        self.win.after(1000, self._log_tick)
+
+    def refresh_log(self):
+        lines = logsetup.ring.snapshot()
+        sig = (len(lines), lines[-1] if lines else "")
+        if sig == self._log_sig:
+            return
+        self._log_sig = sig
+        at_bottom = self.log_text.yview()[1] >= 0.999
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        for line in lines:
+            bad = " WARNING " in line or " ERROR " in line
+            self.log_text.insert("end", line + "\n", "warn" if bad else "")
+        self.log_text.configure(state="disabled")
+        if at_bottom:
+            self.log_text.see("end")
+
+    def copy_log(self):
+        self.win.clipboard_clear()
+        self.win.clipboard_append("\n".join(logsetup.ring.snapshot()))
+
+    def open_log_file(self):
+        try:
+            os.startfile(logsetup.PATH)
+        except OSError as e:
+            messagebox.showinfo(tr("로그"), tr("로그 파일을 열 수 없습니다: {e}", e=e), parent=self.win)
+
+    # ------------------------------------------------------------------ states
+    @staticmethod
+    def _set_enabled(widgets, on):
+        for w in widgets:
+            if isinstance(w, tk.Text):
+                w.configure(state="normal" if on else "disabled", bg="white" if on else "#ececec")
+            else:
+                w.state(["!disabled"] if on else ["disabled"])
+
+    def refresh_states(self):
+        mode = self._mode()
+        self._set_enabled(self.openai_widgets, mode == "openai")
+        self._set_enabled(self.google_widgets, mode == "google")
+        self._set_enabled(self.test_widgets, mode != "none")
+
+    def open_glossary(self):
+        name = self.v["glossary_file"].get().strip() or glossary.DEFAULT_NAME
+        glossary.ensure_default(name)
+        path = glossary.resolve(name)
+        try:
+            if not os.path.exists(path):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("# 단어 = 뜻   (# 로 시작하는 줄은 주석)\n")   # file content, stays as is
+            os.startfile(path)
+        except OSError as e:
+            messagebox.showerror(tr("단어장"), tr("파일을 열 수 없습니다: {e}", e=e), parent=self.win)
+
+    def check_glossary(self):
+        name = self.v["glossary_file"].get().strip() or glossary.DEFAULT_NAME
+        path = glossary.resolve(name)
+        if not os.path.exists(path):
+            self.v["glossary_info"].set(tr("파일이 없습니다: {path}", path=path))
+            return
+        n = len(glossary.entries(name))
+        self.v["glossary_info"].set(tr("{n}개 항목을 읽었습니다  ({path})", n=n, path=path))
+
+    def _place_beside_main(self):
+        """The chat window may be 'always on top' and would cover an ordinary window: open the options next to it."""
+        try:
+            w, r = self.win, self.app.root
+            w.update_idletasks()
+            ow, oh = w.winfo_reqwidth(), w.winfo_reqheight()
+            l, t, rt, b = 0, 0, w.winfo_screenwidth(), w.winfo_screenheight()
+            try:                                                   # work area of the monitor the chat window is on
+                class MI(ctypes.Structure):
+                    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+                u = ctypes.WinDLL("user32")
+                u.GetParent.argtypes = [wintypes.HWND]
+                u.GetParent.restype = wintypes.HWND
+                u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+                u.MonitorFromWindow.restype = wintypes.HANDLE
+                u.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MI)]
+                wid = r.winfo_id()
+                mi = MI()
+                mi.cbSize = ctypes.sizeof(MI)
+                if u.GetMonitorInfoW(u.MonitorFromWindow(u.GetParent(wid) or wid, 2), ctypes.byref(mi)):
+                    l, t, rt, b = mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom
+            except Exception:
+                pass
+            rx, ry, rw, rh = r.winfo_x(), r.winfo_y(), r.winfo_width(), r.winfo_height()
+            gap = 8
+            y = max(t, min(ry, b - oh))
+            for x in (rx + rw + gap, rx - ow - gap):               # right of the chat window, else left of it
+                if x >= l and x + ow <= rt:
+                    w.geometry(f"+{x}+{y}")
+                    return
+            x = max(l, min(rx, rt - ow))
+            for y2 in (ry + rh + gap, ry - oh - gap):              # else below, else above
+                if y2 >= t and y2 + oh <= b:
+                    w.geometry(f"+{x}+{y2}")
+                    return
+        except tk.TclError:
+            pass
+
+    def reset_prompt(self):
+        self.prompt.delete("1.0", "end")
+        self.prompt.insert("1.0", translator.DEFAULT_PROMPT)
+
+    # ------------------------------------------------------------------ form -> config
+    def collect_translation(self):
+        v = self.v
+        try:
+            temp = float(v["temperature"].get())
+            timeout = float(v["timeout"].get())
+        except (ValueError, tk.TclError):
+            raise ValueError(tr("온도와 시간제한은 숫자여야 합니다.")) from None
+        try:
+            extra = json.loads(v["reasoning_off_body"].get().strip() or translator.DEFAULT_REASONING_OFF)
+            if not isinstance(extra, dict):
+                raise ValueError
+        except ValueError:
+            raise ValueError(tr("'추론 끄기용 JSON'이 올바른 { } 형식의 JSON이 아닙니다.")) from None
+        return {
+            "disable_reasoning": bool(v["disable_reasoning"].get()),
+            "reasoning_off_body": v["reasoning_off_body"].get().strip() or translator.DEFAULT_REASONING_OFF,
+            "translator": self._mode(),
+            "target_lang": v["target_lang"].get().strip() or "한국어",
+            "api_url": v["api_url"].get().strip(),
+            "api_model": v["api_model"].get().strip(),
+            "api_key": v["api_key"].get(),
+            "google_api_key": v["google_api_key"].get().strip(),
+            "temperature": max(0.0, min(2.0, temp)),
+            "timeout": max(2.0, min(300.0, timeout)),
+            "skip_same_lang": bool(v["skip_same_lang"].get()),
+            "glossary_file": v["glossary_file"].get().strip() or glossary.DEFAULT_NAME,
+            "glossary_google": bool(v["glossary_google"].get()),
+            "glossary_style": {tr(label): key for key, label in glossary.GLOSSARY_STYLES.items()}.get(
+                v["glossary_style"].get(), "paren"),
+            "prompt": self.prompt.get("1.0", "end-1c").strip() or translator.DEFAULT_PROMPT,
+        }
+
+    def _run_in_thread(self, fn, done):
+        """Run fn() off the UI thread; done(result, error) is called back on the UI thread."""
+        def work():
+            try:
+                res, err = fn(), None
+            except Exception as e:
+                res, err = None, str(e) or e.__class__.__name__
+            self.app.q.put(("call", lambda: self.alive() and done(res, err)))
+        threading.Thread(target=work, daemon=True).start()
+
+    # ------------------------------------------------------------------ buttons
+    def fetch_models(self):
+        try:
+            tmp = dict(self.app.cfg, **self.collect_translation())
+        except ValueError as e:
+            messagebox.showerror(tr("옵션"), str(e), parent=self.win)
+            return
+        self.v["test_result"].set(tr("모델 목록을 불러오는 중..."))
+
+        def done(models, err):
+            if err:
+                self.v["test_result"].set(tr("모델 목록 실패: {err}", err=err))
+                return
+            self.model_cb.configure(values=models)
+            self.v["test_result"].set(tr("모델 {n}개를 불러왔습니다. 드롭다운에서 고르세요.", n=len(models)))
+            if models and not self.v["api_model"].get().strip():
+                self.v["api_model"].set(models[0])
+
+        self._run_in_thread(lambda: translator.list_models(tmp), done)
+
+    def run_test(self):
+        sample = self.v["test_text"].get().strip()
+        if not sample:
+            return
+        try:
+            tmp = dict(self.app.cfg, **self.collect_translation())
+        except ValueError as e:
+            messagebox.showerror(tr("옵션"), str(e), parent=self.win)
+            return
+        if tmp["translator"] == "none":
+            self.v["test_result"].set(tr("번역 방식을 먼저 선택하세요."))
+            return
+        self.v["test_result"].set(tr("번역 중..."))
+        t0 = time.perf_counter()
+
+        def done(res, err):
+            took = time.perf_counter() - t0
+            self.v["test_result"].set(tr("실패: {err}", err=err) if err else tr("{res}\n({sec:.2f}초)", res=res, sec=took))
+
+        self._run_in_thread(lambda: translator.translate(tmp, sample), done)
+
+    def save(self):
+        app, cfg, v = self.app, self.app.cfg, self.v
+        try:
+            new = self.collect_translation()
+            font_size = max(8, min(32, int(v["font_size"].get())))
+            poll_hz = max(5, min(60, int(v["poll_hz"].get())))
+            max_lines = max(50, min(5000, int(v["max_lines"].get())))
+        except (ValueError, tk.TclError) as e:
+            messagebox.showerror(tr("옵션"), str(e) if isinstance(e, ValueError) else tr("숫자 값이 올바르지 않습니다."),
+                                 parent=self.win)
+            return
+        px, py = v["pos_x"].get().strip(), v["pos_y"].get().strip()
+        manual = None
+        if px and py:
+            try:
+                manual = [int(px), int(py)]
+            except ValueError:
+                messagebox.showerror(tr("옵션"), tr("좌표는 정수여야 합니다."), parent=self.win)
+                return
+        cfg.update(new)
+        cfg.update(font_size=font_size, poll_hz=poll_hz, max_lines=max_lines, manual_pos=manual)
+        app.apply_window_settings()
+        config.save(cfg)
+        app.worker.research()
+        logging.getLogger("cmr.options").info(
+            "설정 저장 | 번역=%s | 목표=%s | url=%s | 모델=%s | 추론끄기=%s | 배경/글자 투명도=%s/%s",
+            cfg["translator"], cfg["target_lang"], cfg["api_url"], cfg["api_model"] or "(기본)",
+            cfg["disable_reasoning"], cfg["bg_opacity"], cfg["text_opacity"])
+        app.add_system(tr("설정 저장됨 - 번역: {tr_name}, 목표 언어: {lang}",
+                         tr_name=tr(TRANSLATOR_LABELS[cfg["translator"]]), lang=cfg["target_lang"]))
+        self.win.destroy()
