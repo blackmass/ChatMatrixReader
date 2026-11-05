@@ -1,4 +1,4 @@
-<img width="1915" height="1084" alt="Image" src="https://github.com/user-attachments/assets/d2255d8a-447f-4a98-aa11-1ac77ba740c8" />
+<img width="491" height="450" alt="Image" src="https://github.com/user-attachments/assets/23c26dcb-d928-4d1c-ab75-25564d7e6431" />
 
 # ChatMatrixReader
 - Retrieve World of Warcraft chat in real time—100% safely.
