@@ -17,3 +17,4 @@ First, you will need an add-on. This add-on condenses in-game chat in World of W
 - 항상 위에 표시 설정을 하면 마우스 클릭이 관통 되어 게임 하는것을 방해하지 않습니다. (단 쉬프트를 누르고 있으면 상호작용이 됩니다.)
 - Python 3.11 or higher may be required.
 - 아마도 파이썬 3.11 이상 버전이 필요할 겁니다.
+- Claude did all of this in just half a day.
