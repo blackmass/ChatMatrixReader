@@ -20,3 +20,4 @@ https://www.curseforge.com/wow/addons/chatmatrix
 - Python 3.11 or higher may be required.
 - 아마도 파이썬 3.11 이상 버전이 필요할 겁니다.
 - Claude did all of this in just half a day.
+- I have only tested this on Windows.
