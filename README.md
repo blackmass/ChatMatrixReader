@@ -8,6 +8,7 @@
 https://www.curseforge.com/wow/addons/chatmatrix
 - First, you will need an add-on. This add-on condenses in-game chat in World of Warcraft into specific color patterns, allowing this program to read it.
 - 먼저 이 프로그램을 쓰려면 이 애드온이 필요합니다.
+- <a href="https://drive.google.com/drive/folders/1vAJJ8w9MMW5qJzxfjg5qSktN5XhH77ow">(link)</a>Since version 1.0.0 hasn't been approved on CurseForge yet, I’ve provided a separate link for it.
 
 <img width="460" height="189" alt="Image" src="https://github.com/user-attachments/assets/c0b4c02d-82a6-4b79-93cb-b56c20527007" />
 
