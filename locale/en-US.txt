@@ -1,0 +1,134 @@
+# ChatMatrix Reader language file.
+# Format:  Korean original = translation      (\n = line break, keep {placeholders} unchanged)
+# To add a language: copy this file to e.g. ja-JP.txt, change @name, and translate the right-hand side.
+# Text without an entry is shown in Korean.
+
+@name = English (US)
+
+# --- app.py
+옵션 열기 = Open options
+종료 = Exit
+ChatMatrix Reader  (클릭: 옵션) = ChatMatrix Reader  (click: options)
+제목줄/스크롤은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | Ctrl+Alt+O: 옵션 | 클릭 통과 중에는 Shift를 누른 채로 조작 = The title bar and scrollbar appear when you hover the window | Right-click or ⚙: options | Ctrl+Alt+O: options | While click-through is on, hold Shift to interact
+연결됨 = Connected
+ChatMatrix Reader가 이미 실행 중입니다. = ChatMatrix Reader is already running.
+시작 중... = Starting...
+번역 대기열이 가득 차서 일부 줄을 번역하지 못했습니다 = The translation queue is full, so some lines were not translated
+오류가 발생해서 종료합니다.\n\n{last}\n\n자세한 내용: {path} = An error occurred and the program will exit.\n\n{last}\n\nDetails: {path}
+복사됨 ✓ ({n}자) = Copied ✓ ({n} chars)
+번역 오류: {err} = Translation error: {err}
+매트릭스를 잃어버림 = Matrix lost
+캡처 오류 = Capture error
+
+# --- options.py
+자동 (시스템 언어) = Auto (system language)
+옵션 = Options
+{n}개 항목을 읽었습니다  ({path}) = Read {n} entries  ({path})
+모델 목록을 불러오는 중... = Loading model list...
+번역 중... = Translating...
+설정 저장됨 - 번역: {tr_name}, 목표 언어: {lang} = Settings saved - translator: {tr_name}, target language: {lang}
+번역 = Translation
+OpenAI 호환 API (LM Studio 등) = OpenAI-compatible API (LM Studio, etc.)
+목록 불러오기 = Load list
+추론(reasoning) 끄기 - 아래 JSON을 요청에 추가 = Turn reasoning off - add the JSON below to the request
+Google 번역 = Google Translate
+단어장 (Google, AI 공통) = Glossary (shared by Google and AI)
+Google 번역에도 단어장 적용 = Apply the glossary to Google Translate too
+프롬프트 (OpenAI 호환 API 전용. {target_lang}: 목표 언어, {{파일명}}: 그 파일 내용) = Prompt (OpenAI-compatible API only. {target_lang}: target language, {{file name}}: contents of that file)
+기본 프롬프트로 되돌리기 = Restore default prompt
+테스트 (저장하지 않아도 지금 입력한 설정으로 시험) = Test (tries the settings as entered now, without saving)
+테스트 = Test
+창 = Window
+캡처 = Capture
+로그 = Log
+기타 = Other
+언어 = Language
+정보 = About
+파일이 없습니다: {path} = File not found: {path}
+모델 {n}개를 불러왔습니다. 드롭다운에서 고르세요. = Loaded {n} models. Pick one from the dropdown.
+번역 방식을 먼저 선택하세요. = Choose a translation method first.
+로그 파일을 열 수 없습니다: {e} = Cannot open the log file: {e}
+단어장 = Glossary
+파일을 열 수 없습니다: {e} = Cannot open the file: {e}
+온도와 시간제한은 숫자여야 합니다. = Temperature and timeout must be numbers.
+'추론 끄기용 JSON'이 올바른 { } 형식의 JSON이 아닙니다. = The reasoning-off JSON is not valid JSON in { } form.
+모델 목록 실패: {err} = Model list failed: {err}
+실패: {err} = Failed: {err}
+{res}\n({sec:.2f}초) = {res}\n({sec:.2f} s)
+저장 = Save
+닫기 = Close
+프로그램 종료 = Quit program
+번역 방식 = Translator
+목표 언어 = Target language
+모델 = Model
+온도 / 시간제한(초) = Temperature / timeout (s)
+모델마다 끄는 방법이 다릅니다. 서버가 거부(400)하면 자동으로 빼고 다시 요청합니다.\nURL은 http://localhost:1234 처럼 써도 /v1 을 자동으로 붙입니다. = Every model turns reasoning off differently. If the server rejects it (400) it is removed automatically and the request is retried.\nA URL like http://localhost:1234 is fine; /v1 is added automatically.
+API Key (선택) = API Key (optional)
+비우면 키 없이 쓰는 비공식 무료 방식입니다 (제한되거나 바뀔 수 있음).\nCloud Translation API 키를 넣으면 공식 방식을 사용합니다. = Leave empty to use the unofficial free method without a key (may be rate limited or change).\nEnter a Cloud Translation API key to use the official method.
+파일 = File
+열기 = Open
+항목 수 확인 = Count entries
+적용 방식 = Style
+AI(OpenAI 호환)에는 프롬프트의 {{Glossary.txt}} 자리에 파일 내용이 들어갑니다. 파일은 저장하면 바로 반영됩니다. = For AI (OpenAI-compatible) the file contents replace {{Glossary.txt}} in the prompt. Saving the file applies it immediately.
+약어 설명은 Glossary 아래에 한 줄씩 추가하세요. = Add abbreviations below Glossary, one per line.
+목표 언어와 같은 문장은 번역 생략 (한국어 등 글자로 판별 가능한 경우) = Skip lines already in the target language (when it can be told from the script, e.g. Korean)
+투명도 = Opacity
+배경 = Background
+글자 = Text
+두 값이 다르면 창 2개로 합성합니다. = If the two values differ, two windows are composited.
+항상 위에 표시 = Always on top
+클릭 통과 = Click-through
+Ctrl+Alt+O 단축키를 등록하지 못해서 켤 수 없습니다.\n(다시 옵션을 열 방법이 없어지기 때문입니다) = Cannot turn this on because the Ctrl+Alt+O hotkey could not be registered.\n(There would be no way to open the options again.)
+켜면 평소에는 이 창이 마우스 입력을 받지 않습니다.\nShift를 누른 채로 창 위에 마우스를 올리면 클릭, 드래그 선택(선택하면 자동 복사), 스크롤, 창 이동이 됩니다.\n옵션은 Ctrl+Alt+O 로도 열 수 있습니다.\n\n계속할까요? = When on, this window normally ignores the mouse.\nHold Shift while hovering over it to click, drag-select (selection is copied automatically), scroll and move the window.\nThe options can also be opened with Ctrl+Alt+O.\n\nContinue?
+클릭 통과 (마우스 입력이 창 뒤로 전달됨. Shift를 누르고 있는 동안만 조작 가능) = Click-through (mouse input goes to the window behind; interactive only while Shift is held)
+글자 크기 = Font size
+최대 보관 줄 수 = Max lines kept
+화면 지우기 = Clear screen
+초당 읽기 횟수 = Reads per second
+수동 좌표 X, Y (비우면 자동 탐색) = Manual position X, Y (empty = auto search)
+매트릭스 다시 찾기 = Search for the matrix again
+새로고침 = Refresh
+모두 복사 = Copy all
+로그 파일 열기 = Open log file
+파일: {path} = File: {path}
+현재: {code}   (언어 파일: {folder}) = Current: {code}   (language files: {folder})
+언어를 바꾸면 옵션창이 다시 열립니다 (저장하지 않은 변경은 사라집니다). locale 폴더에 번역 파일(.txt)을 넣으면 목록에 나타납니다. = Changing the language reopens this window (unsaved changes are lost). Put a translation file (.txt) in the locale folder and it appears in the list.
+{file} 파일을 고치면 이 목록이 바뀝니다. = Edit {file} to change this list.
+숫자 값이 올바르지 않습니다. = A numeric value is not valid.
+좌표는 정수여야 합니다. = Coordinates must be integers.
+(비어 있음) = (empty)
+
+# --- translator.py
+Google 번역에서 알 수 없는 언어: {name} (예: ko, en, ja 처럼 코드로 입력) = Unknown language for Google Translate: {name} (enter a code such as ko, en, ja)
+Google이 요청을 제한했습니다 ({reason}). {secs}초 동안 요청을 멈추고 다시 시도합니다 = Google rate-limited the requests ({reason}). Pausing for {secs} s, then trying again
+API URL이 비어 있습니다 = The API URL is empty
+'추론 끄기용 JSON'은 { } 객체여야 합니다 = The reasoning-off JSON must be a { } object
+빈 응답 (finish={finish}) = Empty response (finish={finish})
+빈 응답 = Empty response
+연결 실패: {reason} = Connection failed: {reason}
+응답 시간 초과 = Response timed out
+네트워크 오류: {e} = Network error: {e}
+'추론 끄기용 JSON'이 올바른 JSON이 아닙니다 = The reasoning-off JSON is not valid JSON
+모델이 추론에 토큰을 다 써서 답이 비었습니다 (finish={finish}). 모델의 추론을 끄거나 '추론 끄기용 JSON'을 모델에 맞게 고치세요 = The model used all its tokens on reasoning, so the answer is empty (finish={finish}). Turn the model's reasoning off or adjust the reasoning-off JSON for your model
+모델 목록 형식이 올바르지 않습니다 = The model list has an unexpected format
+Google 요청 제한 대기 중 ({sec}초 남음) - 그동안 요청을 보내지 않습니다 = Waiting out the Google rate limit ({sec} s left) - no requests are sent meanwhile
+예상하지 못한 Google 응답 = Unexpected Google response
+JSON이 아닌 응답 = Response is not JSON
+번역 방식이 '사용 안 함'입니다 = The translator is set to "off"
+예상하지 못한 응답 형식 = Unexpected response format
+
+# --- capture.py
+캡처 오류: {e} = Capture error: {e}
+매트릭스를 잃어버림 ({reason}) - 다시 찾는 중 = Matrix lost ({reason}) - searching again
+매트릭스 찾는 중... (게임을 창 모드로 띄우고 /cm 위치 확인) = Looking for the matrix... (run the game in windowed mode and check the position with /cm)
+연결됨 @ {x},{y} = Connected @ {x},{y}
+
+# --- credits.py
+{file} 파일이 없습니다. = {file} was not found.
+{file} 을(를) 읽지 못했습니다: {e} = Could not read {file}: {e}
+{file} 의 최상위는 {{ }} 객체여야 합니다. = The top level of {file} must be a {{ }} object.
+
+# --- labels
+사용 안 함 (원문만) = Off (original text only)
+원문(번역)   예: LFM(구인) = original(translation)   e.g. LFM(LFG)
+번역으로 치환   예: 구인 = replace with translation   e.g. LFG
