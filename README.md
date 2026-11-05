@@ -2,7 +2,7 @@
 
 # ChatMatrixReader
 - Retrieve World of Warcraft chat in real time—100% safely.
-- 완전 안전하게 실시간으로 와우 채팅 번역하기. 무겁고 불안정한 OCR도 아니고, DLCC 삽입도 아닙니다.
+- 완전 안전하게 실시간으로 와우 채팅 번역하기. 무겁고 불안정한 OCR도 아니고, DLL 삽입도 아닙니다.
 
 # Addon
 https://www.curseforge.com/wow/addons/chatmatrix
