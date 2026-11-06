@@ -496,6 +496,8 @@ class App:
         self.btn_close.pack(side="right", fill="y")
         self.btn_opt = tk.Label(self.title, text="⚙", bg=TITLE_BG, fg=DIM, font=btn_font, width=3, cursor="hand2")
         self.btn_opt.pack(side="right", fill="y")
+        self.btn_refresh = tk.Label(self.title, text="⟳", bg=TITLE_BG, fg=DIM, font=btn_font, width=3, cursor="hand2")
+        self.btn_refresh.pack(side="right", fill="y")
         self.lbl_title = tk.Label(self.title, text="ChatMatrix", bg=TITLE_BG, fg="#cfd2d8",
                                   font=("Malgun Gothic", 9, "bold"), padx=8)
         self.lbl_title.pack(side="left", fill="y")
@@ -503,11 +505,12 @@ class App:
                                    font=("Malgun Gothic", 8), anchor="w")
         self.lbl_status.pack(side="left", fill="both", expand=True)
 
-        for w, hot in ((self.btn_close, "#e5484d"), (self.btn_opt, "#6b83b3")):
+        for w, hot in ((self.btn_close, "#e5484d"), (self.btn_opt, "#6b83b3"), (self.btn_refresh, "#6bb38a")):
             w.bind("<Enter>", lambda e, w=w, hot=hot: w.configure(fg=hot))
             w.bind("<Leave>", lambda e, w=w: w.configure(fg=DIM))
         self.btn_close.bind("<Button-1>", lambda e: self.on_close())
         self.btn_opt.bind("<Button-1>", lambda e: self.open_options())
+        self.btn_refresh.bind("<Button-1>", lambda e: self._refresh_matrix())
         for w in (self.title, self.lbl_title, self.lbl_status):
             w.configure(cursor="fleur")
             w.bind("<ButtonPress-1>", self._drag_start)
@@ -664,6 +667,10 @@ class App:
     # type in your own language, Enter -> the translation is put on the clipboard -> focus goes back to the game,
     # where the chat box is still open: Ctrl+V, Enter. Nothing is ever sent to the game by this program
     # (except Ctrl+V, and only when the option "auto paste" is on).
+    def _refresh_matrix(self):
+        log.info("매트릭스 다시 찾기 (새로고침 버튼)")
+        self.worker.research()
+
     def _send_combo(self):
         text = self.cfg.get("send_hotkey") or hotkeys.DEFAULT
         if self._send_combo_cache[0] != text:
