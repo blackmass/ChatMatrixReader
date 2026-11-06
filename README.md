@@ -5,10 +5,9 @@
 - 완전 안전하게 실시간으로 와우 채팅 번역하기. 무겁고 불안정한 OCR도 아니고, DLL 삽입도 아닙니다.
 
 # Addon
-https://www.curseforge.com/wow/addons/chatmatrix
+<a href="https://www.curseforge.com/wow/addons/chatmatrix">Addon - Chatmatrix </a>
 - First, you will need an add-on. This add-on condenses in-game chat in World of Warcraft into specific color patterns, allowing this program to read it.
 - 먼저 이 프로그램을 쓰려면 이 애드온이 필요합니다.
-- <a href="https://drive.google.com/drive/folders/1vAJJ8w9MMW5qJzxfjg5qSktN5XhH77ow">(link)</a>Since version 1.0.0 hasn't been approved on CurseForge yet, I’ve provided a separate link for it.
 
 <img width="460" height="189" alt="Image" src="https://github.com/user-attachments/assets/c0b4c02d-82a6-4b79-93cb-b56c20527007" />
 <img width="525" height="463" alt="Image" src="https://github.com/user-attachments/assets/a3dc52ce-0c16-4d4e-a808-a0a00a4e562b" />
