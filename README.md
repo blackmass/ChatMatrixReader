@@ -22,7 +22,7 @@ https://www.curseforge.com/wow/addons/chatmatrix
 - 설정창에 필요한 것들이 있습니다.
 - (v1.1.0) During gameplay, pressing 'Shift+Enter' opens an input box that automatically translates your messages. By default, once you type your message and press Enter, the text is saved to your clipboard; you can then paste it using 'Ctrl+V', or enable the 'auto-paste' option in the settings.
 - 게임 도중 '쉬프트+엔터'를 누르면 내 채팅을 자동으로 번역해주는 입력창이 뜹니다. 기본적으로는 팝업된 입력창에 대화를 입력하고 엔터 누르면 클립보드에 저장되기 때문에, Ctrl+v를 하거나 옵션에서 자동 붙여넣기를 체크하세요.
-- Python 3.11 or higher may be required.
-- 아마도 파이썬 3.11 이상 버전이 필요할 겁니다.
+- Python 3.8 or higher may be required.
+- 아마도 파이썬 3.8 이상 버전이 필요할 겁니다.
 - Claude did all of this in just half a day.
 - I have only tested this on Windows.
