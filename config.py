@@ -7,7 +7,7 @@ PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 DEFAULTS = {
     # translation
-    "translator": "none",                 # none | openai | google
+    "translator": "google",               # none | openai | google
     "target_lang": "한국어",
     "language": "",                       # "" = system language, else a locale/<code>.txt name (ko-KR = built in)
     "api_url": "http://localhost:1234/v1",
@@ -35,7 +35,7 @@ DEFAULTS = {
     # window
     "bg_opacity": 1.0,                    # background (the dark area)
     "text_opacity": 1.0,                  # text, title bar, scrollbar
-    "topmost": False,                     # above every other window
+    "topmost": True,                      # above every other window
     "topmost_wow_only": False,            # only just above the game window, behind all other windows
     "wow_window_title": "World of Warcraft",
     "click_through": False,
