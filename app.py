@@ -44,6 +44,7 @@ import tkinter.font as tkfont
 
 import config
 import chattext
+import fonts
 import glossary
 import hotkeys
 import outgoing
@@ -51,6 +52,8 @@ import winutil
 import i18n
 import logsetup
 import translator
+import updatecheck
+import version
 from i18n import tr
 from capture import CaptureWorker
 from options import OptionsWindow
@@ -410,6 +413,12 @@ class App:
         self._placed_for = None        # game window we last stacked above
         self._follow_top = False       # currently kept topmost because the game has the focus
         self._prev_fg = None           # window that had focus before we became interactive
+        self.latest = None             # newest release tag found by the update check (e.g. "v1.3.0")
+        self.shad = None               # text-shadow window (created when the option is first on)
+        self.stext = None
+        self._shadow_on = False
+        self._shadow_job = None
+        self._shadow_last = None
         self._send_open = False        # the send box (input line) is shown
         self._send_busy = False        # a translation is running
         self._send_armed = False       # Enter was let go once since the box opened
@@ -436,7 +445,8 @@ class App:
         if self.cfg["click_through"] and not self.hotkey.ok:
             self.cfg["click_through"] = False     # never lock the user out of the options
 
-        self.font = tkfont.Font(family="Malgun Gothic", size=int(self.cfg["font_size"]))
+        self.custom_fonts = fonts.load_all()
+        self.font = tkfont.Font(family=self._font_family(), size=int(self.cfg["font_size"]))
         self._build_main()
         self._build_back()
         self.root.update_idletasks()
@@ -455,7 +465,7 @@ class App:
         self.root.after(500, self._follow_game)
         self.root.after(300, self._send_tick)
         self.root.after(400, self._fix_taskbar)
-        log.info("시작 | python %s | 번역=%s | 목표=%s | 로그 파일: %s", sys.version.split()[0],
+        log.info("시작 | v%s | python %s | 번역=%s | 목표=%s | 로그 파일: %s", version.__version__, sys.version.split()[0],
                  self.cfg.get("translator"), self.cfg.get("target_lang"), logsetup.PATH)
 
     # ------------------------------------------------------------------ UI
@@ -469,10 +479,15 @@ class App:
             insertwidth=0, cursor="xterm", spacing1=2, spacing3=2,
         )
         self.text.pack(fill="both", expand=True, padx=(0, SB_W + 2))
+        self.text.bind("<<Modified>>", self._on_text_modified)
         for name, color in TAG_COLORS.items():
             self.text.tag_configure(name, foreground=color)
         for q, color in chattext.QUALITY_COLORS.items():          # created after the channel tags -> they win
             self.text.tag_configure(f"q{q}", foreground=color)
+        self.text.tag_configure("link", foreground="#6ea8fe", underline=True)          # clickable link (release page)
+        self.text.tag_bind("link", "<Button-1>", lambda e: self.open_releases())
+        self.text.tag_bind("link", "<Enter>", lambda e: self.text.configure(cursor="hand2"))
+        self.text.tag_bind("link", "<Leave>", lambda e: self.text.configure(cursor="xterm"))
 
         self.status = tk.StringVar(value=tr("시작 중..."))
 
@@ -519,7 +534,7 @@ class App:
 
         # ---- overlay: scrollbar and resize grip
         self.sb = MiniScrollbar(self.body, self.text.yview)
-        self.text.configure(yscrollcommand=self.sb.set)
+        self.text.configure(yscrollcommand=self._on_yscroll)
         self.sb.bind("<MouseWheel>", self._wheel)
         self.grip = tk.Label(self.body, text="◢", bg=BG, fg="#5a5f69", font=("Segoe UI Symbol", 9),
                              cursor="size_nw_se")
@@ -552,6 +567,12 @@ class App:
         self.root.bind("<Button-3>", lambda e: self.open_options())
 
         self.add_system(tr("제목줄/스크롤은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | Ctrl+Alt+O: 옵션 | 클릭 통과 중에는 Shift를 누른 채로 조작"))
+        if self.cfg.get("check_updates", True):
+            self.check_update(self._on_start_update)
+        if sys.version_info >= (3, 14):
+            log.warning("검증되지 않은 파이썬 버전: %s (3.11 권장)", sys.version.split()[0])
+            self.add_system("⚠ " + tr("파이썬 {ver}은 아직 검증되지 않았습니다. 문제가 있으면 3.11을 설치해 .venv 폴더를 지우고 다시 실행하세요.",
+                                      ver=sys.version.split()[0]), "error")
 
     def _build_back(self):
         """Background-only window used when background and text opacity differ."""
@@ -667,6 +688,34 @@ class App:
     # type in your own language, Enter -> the translation is put on the clipboard -> focus goes back to the game,
     # where the chat box is still open: Ctrl+V, Enter. Nothing is ever sent to the game by this program
     # (except Ctrl+V, and only when the option "auto paste" is on).
+    # ---- update check (a notice only: nothing is downloaded or installed)
+    def open_releases(self):
+        import webbrowser
+        try:
+            webbrowser.open(version.RELEASES_URL)             # fixed address, never one taken from the server
+        except Exception:
+            log.exception("브라우저를 열지 못했습니다")
+
+    def check_update(self, callback):
+        """Ask GitHub for the newest release in a background thread; callback(tag or None, error or None) runs in the UI."""
+        def work():
+            try:
+                tag, err = updatecheck.fetch_latest(), None
+            except Exception as e:                       # offline, rate limit, odd answer ...: never a problem for the program
+                tag, err = None, str(e) or e.__class__.__name__
+                log.info("새 버전 확인 실패: %s", err)
+            self.q.put(("call", lambda: callback(tag, err)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_start_update(self, tag, err):
+        if tag:
+            self.latest = tag
+            log.info("최신 릴리스: %s (현재 v%s)", tag, version.__version__)
+        if tag and updatecheck.is_newer(tag, version.__version__):
+            self._insert([("⬆ " + tr("새 버전 {latest}이 있습니다 (현재 v{cur})", latest=tag, cur=version.__version__) + ": ", None),
+                          (version.RELEASES_URL, "link"), ("\n", None)], "system")
+
     def _refresh_matrix(self):
         log.info("매트릭스 다시 찾기 (새로고침 버튼)")
         self.worker.research()
@@ -875,6 +924,10 @@ class App:
         if self.two_window:
             r = self.root
             self.back.geometry(f"{r.winfo_width()}x{r.winfo_height()}+{r.winfo_x()}+{r.winfo_y()}")
+            if self._shadow_active():
+                dx = max(-5, min(5, int(self.cfg.get("shadow_dx", 1))))
+                dy = max(-5, min(5, int(self.cfg.get("shadow_dy", 1))))
+                self.shad.geometry(f"{r.winfo_width()}x{r.winfo_height()}+{r.winfo_x() + dx}+{r.winfo_y() + dy}")
 
     # ---- taskbar: both windows must stay invisible to the taskbar / Alt+Tab
     def _make_owner(self):
@@ -909,7 +962,9 @@ class App:
     def _fix_taskbar(self):
         if self._owner is None:
             self._owner = self._make_owner()
-        for win in (self.root, self.back):
+        for win in (self.root, self.back, self.shad):
+            if win is None:
+                continue
             try:
                 shown = bool(win.winfo_ismapped())
                 if shown:
@@ -1003,7 +1058,7 @@ class App:
             return None
         self._game_next_search = now + 2.0
         title = (self.cfg.get("wow_window_title") or "").strip().lower()
-        me = (_hwnd(self.root), _hwnd(self.back))
+        me = (_hwnd(self.root), _hwnd(self.back)) + ((_hwnd(self.shad),) if self.shad is not None else ())
         by_exe, by_title = [], []
         buf = ctypes.create_unicode_buffer(256)
         rect = wintypes.RECT()
@@ -1081,16 +1136,14 @@ class App:
         self._follow_top = on
         if on:
             u.SetWindowPos(me, -1, 0, 0, 0, 0, flags)            # HWND_TOPMOST
-            if self.two_window:
-                u.SetWindowPos(back, me, 0, 0, 0, 0, flags)
+            self._stack_back()
             log.info("게임에 포커스: 창을 맨 위로 (게임=%s)", game)
         else:
             if game:
                 self._place_above_game(force=True)               # just above the game, no longer topmost
             else:
                 u.SetWindowPos(me, -2, 0, 0, 0, 0, flags)        # HWND_NOTOPMOST
-                if self.two_window:
-                    u.SetWindowPos(back, me, 0, 0, 0, 0, flags)
+                self._stack_back()
             log.info("다른 프로그램에 포커스: 창을 게임 바로 위로 (게임=%s)", game)
 
     def _place_above_game(self, force=False):
@@ -1104,7 +1157,7 @@ class App:
         if not g or u.IsIconic(g):
             return
         me, back = _hwnd(self.root), _hwnd(self.back)
-        mine = (me, back) if self.two_window else (me,)
+        mine = (me,) + tuple(self._below_hwnds())
         # the windows directly above the game must be: ours (front window topmost of the pair)
         above = u.GetWindow(g, 3)                          # GW_HWNDPREV
         want = list(mine)[::-1]                            # nearest to the game first: back, then root
@@ -1128,19 +1181,21 @@ class App:
             ia = p if (p and not topmost(p)) else -2                  # HWND_NOTOPMOST: top of the normal windows
         flags = 0x1 | 0x2 | 0x10                                      # NOSIZE | NOMOVE | NOACTIVATE
         ok1 = u.SetWindowPos(me, ia, 0, 0, 0, 0, flags)
-        if self.two_window:
-            u.SetWindowPos(back, me, 0, 0, 0, 0, flags)
+        self._stack_back()
         now = time.monotonic()
         if now - self._follow_logged > 10:                 # leave a trace in the log tab without flooding it
             self._follow_logged = now
             log.info("게임 창 위로 재배치 | 게임=%s 바로 위 창=%s 기준=%s 결과=%s", g, above, ia, bool(ok1))
 
     def _stack_back(self):
-        """Put the background window directly below the text window."""
+        """Put the shadow window (if any) and the background window directly below the text window, in that order."""
         if not self.two_window:
             return
         try:
-            _user32().SetWindowPos(_hwnd(self.back), _hwnd(self.root), 0, 0, 0, 0, 0x1 | 0x2 | 0x10)
+            prev = _hwnd(self.root)
+            for h in self._below_hwnds():
+                _user32().SetWindowPos(h, prev, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)
+                prev = h
         except Exception:
             pass
 
@@ -1293,13 +1348,18 @@ class App:
         self.root.after(50, self.poll)
 
     # ------------------------------------------------------------------ window settings
+    def _font_family(self):
+        fam = self.cfg.get("font_family") or ""
+        return fam if fam and fam in self.custom_fonts else fonts.DEFAULT_FAMILY
+
     def apply_window_settings(self):
-        self.font.configure(size=int(self.cfg["font_size"]))
-        gap = max(0, min(40, int(self.cfg.get("line_spacing", 4))))
-        self.text.configure(spacing1=gap // 2, spacing3=gap - gap // 2, spacing2=gap // 2)   # between lines / wrapped rows
+        self.font.configure(family=self._font_family(), size=int(self.cfg["font_size"]))
+        self.text.configure(**self._spacing())
         top = bool(self.cfg["topmost"]) and not self.cfg.get("topmost_wow_only")
         self.root.attributes("-topmost", top)
         self.back.attributes("-topmost", top)
+        if self.shad is not None:
+            self.shad.attributes("-topmost", top)
         self._placed_for = None          # let the "only above the game" loop re-apply its state
         self.apply_opacity()
         self.set_click_through(bool(self.cfg["click_through"]))
@@ -1307,8 +1367,11 @@ class App:
     def apply_opacity(self):
         bg = max(0.03, min(1.0, float(self.cfg.get("bg_opacity", 1.0))))
         tx = max(0.2, min(1.0, float(self.cfg.get("text_opacity", 1.0))))
-        self.two_window = abs(bg - tx) >= 0.005
+        self._shadow_on = bool(self.cfg.get("shadow_on"))
+        self.two_window = abs(bg - tx) >= 0.005 or self._shadow_on          # the shadow needs the see-through text window
         if not self.two_window:
+            if self.shad is not None:
+                self.shad.withdraw()
             self.root.attributes("-transparentcolor", "")
             self.root.attributes("-alpha", tx)
             self.back.withdraw()
@@ -1321,7 +1384,110 @@ class App:
         self._hide_from_taskbar(self.back)
         self.back.deiconify()
         self._hide_from_taskbar(self.back)
+        self._apply_shadow(tx)
         self._stack_back()
+
+    # ---- text shadow: a third, click-through window between the text window and the background window.
+    # It holds the same text in one colour, shifted by (dx, dy); the text window's background is transparent,
+    # so the copy shows through next to every glyph. Only exists while the option is on.
+    def _shadow_active(self):
+        return bool(self._shadow_on and self.shad is not None)
+
+    def _below_hwnds(self):
+        out = []
+        if self.two_window:
+            if self._shadow_active():
+                out.append(_hwnd(self.shad))
+            out.append(_hwnd(self.back))
+        return out
+
+    def _spacing(self):
+        gap = max(0, min(40, int(self.cfg.get("line_spacing", 4))))
+        return dict(spacing1=gap // 2, spacing3=gap - gap // 2, spacing2=gap // 2)   # between lines / wrapped rows
+
+    def _build_shadow(self):
+        self.shad = tk.Toplevel(self.root)
+        self.shad.overrideredirect(True)
+        self.shad.configure(bg=BG)
+        self.shad.withdraw()
+        self.shad.update_idletasks()
+        box = tk.Frame(self.shad, bg=BG, highlightthickness=1, highlightbackground=BG, highlightcolor=BG)
+        box.pack(fill="both", expand=True)             # same frame / padding as the real text -> identical wrapping
+        self.stext = tk.Text(box, wrap="word", bg=BG, fg="#000000", relief="flat", font=self.font, bd=0,
+                             highlightthickness=0, padx=8, pady=6, insertwidth=0, cursor="arrow", takefocus=0,
+                             selectbackground=BG, selectforeground="#000000", inactiveselectbackground=BG,
+                             **self._spacing())
+        self.stext.pack(fill="both", expand=True, padx=(0, SB_W + 2))
+        self.stext.tag_configure("all", foreground="#000000")
+        self._shadow_last = None
+        log.info("그림자 창 생성")
+
+    def _apply_shadow(self, tx):
+        """Called from apply_opacity() in two-window mode."""
+        if not self._shadow_on:
+            if self.shad is not None:
+                self.shad.withdraw()
+            return
+        if self.shad is None:
+            self._build_shadow()
+        color = self.cfg.get("shadow_color") or "#000000"
+        try:
+            self.stext.configure(fg=color, selectforeground=color)
+            self.stext.tag_configure("all", foreground=color)
+        except tk.TclError:
+            self.stext.configure(fg="#000000")
+            self.stext.tag_configure("all", foreground="#000000")
+        self.stext.configure(**self._spacing())
+        self.shad.attributes("-transparentcolor", BG)
+        self.shad.attributes("-alpha", tx)
+        top = bool(self.cfg["topmost"]) and not self.cfg.get("topmost_wow_only")
+        self.shad.attributes("-topmost", top)
+        _set_exstyle(self.shad, add=WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT)  # clicks fall through
+        self._sync_back()
+        self._hide_from_taskbar(self.shad)
+        self.shad.deiconify()
+        self._hide_from_taskbar(self.shad)
+        self._shadow_last = None
+        self._shadow_refresh()
+
+    def _on_text_modified(self, _e=None):
+        if not self.text.edit_modified():
+            return
+        self.text.edit_modified(False)
+        if self._shadow_active() and self._shadow_job is None:
+            self._shadow_job = self.root.after(40, self._shadow_refresh)
+
+    def _shadow_refresh(self):
+        self._shadow_job = None
+        if not self._shadow_active():
+            return
+        try:
+            content = self.text.get("1.0", "end-1c")
+            if content != self._shadow_last:
+                self.stext.delete("1.0", "end")
+                self.stext.insert("1.0", content, "all")
+                self._shadow_last = content
+            self._sync_shadow()
+        except tk.TclError:
+            pass
+
+    def _sync_shadow(self):
+        """Give the shadow text exactly the scroll position of the real text (to the pixel)."""
+        if not self._shadow_active():
+            return
+        try:
+            self.stext.yview_moveto(self.text.yview()[0])
+            idx = self.text.index("@0,0")
+            a, b = self.text.dlineinfo(idx), self.stext.dlineinfo(idx)
+            if a and b and a[1] != b[1]:
+                self.stext.yview_scroll(b[1] - a[1], "pixels")
+        except tk.TclError:
+            pass
+
+    def _on_yscroll(self, first, last):
+        self.sb.set(first, last)
+        if self._shadow_active():
+            self._sync_shadow()
 
     def _set_passthrough(self, on):
         for win in (self.root, self.back):

@@ -1,18 +1,21 @@
 """Options window (right-click on the main window)."""
 import ctypes
 import json
+import re
 import logging
 import os
 import threading
 import time
 import tkinter as tk
 from ctypes import wintypes
-from tkinter import ttk, messagebox
+from tkinter import colorchooser, ttk, messagebox
 
 import config
 import glossary
 import hotkeys
 import logsetup
+import updatecheck
+import version
 import translator
 import credits
 import i18n
@@ -55,6 +58,13 @@ class OptionsWindow:
             "topmost_wow_only": tk.BooleanVar(value=bool(cfg.get("topmost_wow_only"))),
             "click_through": tk.BooleanVar(value=bool(cfg["click_through"])),
             "font_size": tk.IntVar(value=int(cfg["font_size"])),
+            "check_updates": tk.BooleanVar(value=bool(cfg.get("check_updates", True))),
+            "latest_text": tk.StringVar(value=""),
+            "shadow_on": tk.BooleanVar(value=bool(cfg.get("shadow_on"))),
+            "shadow_color": tk.StringVar(value=cfg.get("shadow_color") or "#000000"),
+            "shadow_dx": tk.IntVar(value=int(cfg.get("shadow_dx", 1))),
+            "shadow_dy": tk.IntVar(value=int(cfg.get("shadow_dy", 1))),
+            "font_family": tk.StringVar(value=cfg.get("font_family") if cfg.get("font_family") in app.custom_fonts else tr("기본 글꼴 (맑은 고딕)")),
             "line_spacing": tk.IntVar(value=int(cfg.get("line_spacing", 4))),
             "show_time": tk.BooleanVar(value=bool(cfg.get("show_time", True))),
             "max_lines": tk.IntVar(value=int(cfg["max_lines"])),
@@ -290,6 +300,27 @@ class OptionsWindow:
         ttk.Spinbox(tab, from_=0, to=40, textvariable=v["line_spacing"], width=6).grid(row=7, column=1, sticky="w", **PAD)
         ttk.Checkbutton(tab, text=tr("채팅 시간 표시"), variable=v["show_time"]).grid(
             row=8, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("글꼴")).grid(row=9, column=0, sticky="w", **PAD)
+        fam = ttk.Frame(tab)
+        fam.grid(row=9, column=1, sticky="w", **PAD)
+        ttk.Combobox(fam, textvariable=v["font_family"], values=[tr("기본 글꼴 (맑은 고딕)")] + app.custom_fonts,
+                     width=26, state="readonly").pack(side="left")
+        if not app.custom_fonts:
+            ttk.Label(fam, text=tr("fonts 폴더에 ttf/otf 파일을 넣으면 선택할 수 있습니다"), foreground="#666").pack(
+                side="left", padx=6)
+        sh = ttk.LabelFrame(tab, text=tr("글자 그림자"))
+        sh.grid(row=10, column=0, columnspan=2, sticky="we", padx=6, pady=(8, 3))
+        ttk.Checkbutton(sh, text=tr("글자 그림자 사용 (배경이 투명할 때 글자가 잘 보이게)"), variable=v["shadow_on"]).grid(
+            row=0, column=0, columnspan=6, sticky="w", **PAD)
+        ttk.Label(sh, text=tr("색")).grid(row=1, column=0, sticky="w", **PAD)
+        ttk.Entry(sh, textvariable=v["shadow_color"], width=9).grid(row=1, column=1, sticky="w", **PAD)
+        ttk.Button(sh, text=tr("색 선택"), command=self.pick_shadow_color).grid(row=1, column=2, sticky="w", **PAD)
+        ttk.Label(sh, text="X").grid(row=1, column=3, sticky="e", padx=(14, 2))
+        ttk.Spinbox(sh, from_=-5, to=5, textvariable=v["shadow_dx"], width=4).grid(row=1, column=4, **PAD)
+        ttk.Label(sh, text="Y").grid(row=1, column=5, sticky="e", padx=(8, 2))
+        ttk.Spinbox(sh, from_=-5, to=5, textvariable=v["shadow_dy"], width=4).grid(row=1, column=6, **PAD)
+        ttk.Label(sh, text=tr("켜면 창이 하나 더 쓰입니다. 문제가 있으면 끄세요."), foreground="#666").grid(
+            row=2, column=0, columnspan=7, sticky="w", padx=6)
 
     def _tab_capture(self, nb):
         v = self.v
@@ -304,6 +335,13 @@ class OptionsWindow:
         ttk.Entry(pos, textvariable=v["pos_y"], width=7).pack(side="left", padx=(4, 0))
         ttk.Button(tab, text=tr("매트릭스 다시 찾기"), command=self.app.worker.research).grid(
             row=2, column=0, sticky="w", **PAD)
+
+    def pick_shadow_color(self):
+        cur = self.v["shadow_color"].get()
+        rgb, hexv = colorchooser.askcolor(color=cur if re.fullmatch(r"#[0-9a-fA-F]{6}", cur) else "#000000",
+                                          parent=self.win)
+        if hexv:
+            self.v["shadow_color"].set(hexv)
 
     def _tab_send(self, nb):
         tab = ttk.Frame(nb)
@@ -422,12 +460,56 @@ class OptionsWindow:
                               "locale 폴더에 번역 파일(.txt)을 넣으면 목록에 나타납니다."),
                   foreground="#666", wraplength=520, justify="left").grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
 
+        gv = ttk.LabelFrame(tab, text=tr("버전"))
+        gv.pack(fill="x", padx=8, pady=4)
+        ttk.Label(gv, text=tr("현재 버전")).grid(row=0, column=0, sticky="w", **PAD)
+        ttk.Label(gv, text="v" + version.__version__).grid(row=0, column=1, sticky="w", **PAD)
+        ttk.Label(gv, text=tr("최신 버전")).grid(row=1, column=0, sticky="w", **PAD)
+        self.latest_link = tk.Label(gv, textvariable=self.v["latest_text"], fg="#1a5fd0", cursor="hand2",
+                                    font=("Malgun Gothic", 9, "underline"))
+        self.latest_link.grid(row=1, column=1, sticky="w", **PAD)
+        self.latest_link.bind("<Button-1>", lambda e: self.app.open_releases())
+        self.btn_check = ttk.Button(gv, text=tr("업데이트 확인"), command=self.check_update_now)
+        self.btn_check.grid(row=1, column=2, padx=10, pady=3)
+        ttk.Checkbutton(gv, text=tr("시작할 때 새 버전 확인 (알려 주기만 하고 아무것도 설치하지 않습니다)"),
+                        variable=self.v["check_updates"]).grid(row=2, column=0, columnspan=3, sticky="w", **PAD)
+        self._show_latest(self.app.latest)
+
         gc = ttk.LabelFrame(tab, text=tr("정보"))
         gc.pack(fill="both", expand=True, padx=8, pady=4)
         self.credit_box = gc
         self.fill_credits()
         ttk.Label(tab, text=tr("{file} 파일을 고치면 이 목록이 바뀝니다.", file=credits.FILE_NAME),
                   foreground="#666").pack(anchor="w", padx=10, pady=(0, 6))
+
+    def _show_latest(self, tag, err=None):
+        cur = version.__version__
+        if err:
+            text, color = tr("확인하지 못했습니다 ({err})", err=err[:60]), "#b00020"
+        elif not tag:
+            text, color = tr("아직 확인하지 않았습니다"), "#666666"
+        elif updatecheck.is_newer(tag, cur):
+            text, color = tr("{tag} - 새 버전이 있습니다 ↗ (눌러서 릴리스 페이지 열기)", tag=tag), "#1a5fd0"
+        else:
+            text, color = tr("{tag} - 최신입니다 ↗", tag=tag), "#1a5fd0"
+        self.v["latest_text"].set(text)
+        self.latest_link.configure(fg=color, cursor="hand2" if (tag and not err) else "arrow")
+        self.latest_link.unbind("<Button-1>")
+        if tag and not err:
+            self.latest_link.bind("<Button-1>", lambda e: self.app.open_releases())
+
+    def check_update_now(self):
+        self.btn_check.configure(state="disabled")
+        self.v["latest_text"].set(tr("확인 중..."))
+
+        def done(tag, err):
+            if tag:
+                self.app.latest = tag
+            if self.alive():
+                self.btn_check.configure(state="normal")
+                self._show_latest(tag, err)
+
+        self.app.check_update(done)
 
     def fill_credits(self):
         for w in self.credit_box.winfo_children():
@@ -556,20 +638,44 @@ class OptionsWindow:
                     l, t, rt, b = mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom
             except Exception:
                 pass
+            margin = 48                                            # title bar + taskbar slack
+            if oh > b - t - margin:                                # taller than the screen: shrink the log view
+                try:
+                    lines = int(self.log_text.cget("height"))
+                    line_h = max(1, self.log_text.winfo_reqheight() // max(1, lines))
+                    cut = -(-(oh - (b - t - margin)) // line_h)
+                    self.log_text.configure(height=max(8, lines - cut))
+                    w.update_idletasks()
+                    ow, oh = w.winfo_reqwidth(), w.winfo_reqheight()
+                except (tk.TclError, AttributeError):
+                    pass
             rx, ry, rw, rh = r.winfo_x(), r.winfo_y(), r.winfo_width(), r.winfo_height()
             gap = 8
-            y = max(t, min(ry, b - oh))
+            y = max(t, min(ry, b - oh - margin // 2))
             for x in (rx + rw + gap, rx - ow - gap):               # right of the chat window, else left of it
                 if x >= l and x + ow <= rt:
-                    w.geometry(f"+{x}+{y}")
+                    self._put(x, y, (l, t, rt, b))
                     return
-            x = max(l, min(rx, rt - ow))
-            for y2 in (ry + rh + gap, ry - oh - gap):              # else below, else above
-                if y2 >= t and y2 + oh <= b:
-                    w.geometry(f"+{x}+{y2}")
-                    return
+            # no room beside the chat window: centre on the monitor's work area (always fully visible)
+            self._put(max(l, l + (rt - l - ow) // 2), t + (b - t - oh - margin) // 2, (l, t, rt, b))
         except tk.TclError:
             pass
+
+    def _put(self, x, y, area):
+        """Move the window to (x, y), then use its real outer size (title bar, borders) to keep all of it inside `area`."""
+        w = self.win
+        l, t, rt, b = area
+        w.geometry(f"{x:+d}{y:+d}")                       # "+-1920+0" style also works, but this is the clean form
+        w.update_idletasks()
+        top = w.winfo_rooty() - w.winfo_y()               # title bar height (+ border)
+        bottom = w.winfo_rooty() + w.winfo_height() + 10  # + bottom border / shadow
+        dy = 0
+        if bottom > b:
+            dy = b - bottom
+        if w.winfo_y() + dy < t:
+            dy = t - w.winfo_y()
+        if dy:
+            w.geometry(f"{w.winfo_x():+d}{w.winfo_y() + dy:+d}")
 
     def reset_prompt(self):
         self.prompt.delete("1.0", "end")
@@ -676,6 +782,16 @@ class OptionsWindow:
         except ValueError:
             messagebox.showerror(tr("옵션"), tr("보내기 단축키가 올바르지 않습니다."), parent=self.win)
             return
+        shadow_color = v["shadow_color"].get().strip()
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", shadow_color):
+            messagebox.showerror(tr("옵션"), tr("그림자 색은 #RRGGBB 형식이어야 합니다 (예: #000000)"), parent=self.win)
+            return
+        try:
+            sdx = max(-5, min(5, int(v["shadow_dx"].get())))
+            sdy = max(-5, min(5, int(v["shadow_dy"].get())))
+        except (ValueError, tk.TclError):
+            messagebox.showerror(tr("옵션"), tr("숫자 값이 올바르지 않습니다."), parent=self.win)
+            return
         sprompt = self.send_prompt_text.get("1.0", "end").strip()
         px, py = v["pos_x"].get().strip(), v["pos_y"].get().strip()
         manual = None
@@ -690,7 +806,9 @@ class OptionsWindow:
                    send_lang=v["send_lang"].get().strip() or "English", send_hotkey=hotkey,
                    send_autopaste=bool(v["send_autopaste"].get()),
                    send_prompt="" if sprompt == translator.DEFAULT_SEND_PROMPT.strip() else sprompt)
-        cfg.update(font_size=font_size, poll_hz=poll_hz, max_lines=max_lines, manual_pos=manual,
+        cfg.update(check_updates=bool(v["check_updates"].get()))
+        cfg.update(shadow_on=bool(v["shadow_on"].get()), shadow_color=shadow_color, shadow_dx=sdx, shadow_dy=sdy)
+        cfg.update(font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, max_lines=max_lines, manual_pos=manual,
                    line_spacing=line_spacing, show_time=bool(v["show_time"].get()))
         app.apply_window_settings()
         config.save(cfg)

@@ -40,6 +40,12 @@ DEFAULTS = {
     "wow_window_title": "World of Warcraft",
     "click_through": False,
     "font_size": 11,
+    "shadow_on": False,                   # draw a copy of the text in shadow_color, shifted by (shadow_dx, shadow_dy)
+    "shadow_color": "#000000",
+    "shadow_dx": 1,
+    "shadow_dy": 1,
+    "check_updates": True,                # look for a newer GitHub release at start (a notice only, nothing is installed)
+    "font_family": "",                    # "" = default (Malgun Gothic); else a font loaded from the fonts/ folder
     "line_spacing": 4,                    # pixels between chat lines
     "show_time": True,                    # prefix every line with the time it was read
     "max_lines": 500,
