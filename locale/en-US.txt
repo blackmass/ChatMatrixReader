@@ -163,3 +163,32 @@ JSON이 아닌 응답 = Response is not JSON
 번역 결과가 비어 있습니다 = The translation is empty
 번역문이 너무 깁니다 ({n}/{max}바이트). 줄여서 다시 입력하세요: {preview} = Translation is too long ({n}/{max} bytes). Shorten it and try again: {preview}
 보낼 내용이 비어 있습니다 = Nothing to send
+
+# --- font
+글꼴 = Font
+기본 글꼴 (맑은 고딕) = Default font (Malgun Gothic)
+fonts 폴더에 ttf/otf 파일을 넣으면 선택할 수 있습니다 = Put ttf/otf files into the fonts folder to choose one here
+
+# --- text shadow
+글자 그림자 = Text shadow
+글자 그림자 사용 (배경이 투명할 때 글자가 잘 보이게) = Use text shadow (keeps text readable on a transparent background)
+색 = Color
+색 선택 = Pick color
+켜면 창이 하나 더 쓰입니다. 문제가 있으면 끄세요. = Uses one extra window when on. Turn it off if you see problems.
+그림자 색은 #RRGGBB 형식이어야 합니다 (예: #000000) = The shadow color must be in #RRGGBB format (e.g. #000000)
+
+# --- python version note
+파이썬 {ver}은 아직 검증되지 않았습니다. 문제가 있으면 3.11을 설치해 .venv 폴더를 지우고 다시 실행하세요. = Python {ver} has not been verified yet. If you run into problems, install Python 3.11, delete the .venv folder and run again.
+
+# --- version / update check
+버전 = Version
+현재 버전 = Current version
+최신 버전 = Latest version
+업데이트 확인 = Check for updates
+확인 중... = Checking...
+아직 확인하지 않았습니다 = Not checked yet
+확인하지 못했습니다 ({err}) = Could not check ({err})
+{tag} - 새 버전이 있습니다 ↗ (눌러서 릴리스 페이지 열기) = {tag} - a new version is available ↗ (click to open the release page)
+{tag} - 최신입니다 ↗ = {tag} - up to date ↗
+시작할 때 새 버전 확인 (알려 주기만 하고 아무것도 설치하지 않습니다) = Check for a new version at start (it only tells you; nothing is installed)
+새 버전 {latest}이 있습니다 (현재 v{cur}) = A new version {latest} is available (you have v{cur})
