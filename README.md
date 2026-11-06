@@ -14,6 +14,8 @@
 <a href="https://www.curseforge.com/wow/addons/chatmatrix">Addon - Chatmatrix </a>
 - First, you will need an add-on. This add-on condenses in-game chat in World of Warcraft into specific color patterns, allowing this program to read it.
 - 먼저 이 프로그램을 쓰려면 이 애드온이 필요합니다.
+- Initially, the matrix is ​​highlighted with a green rectangle. Drag it to your desired position and enter '/cm lock'.
+- 처음에는 매트릭스가 초록색 사각형으로 강조되어 있습니다. 드래그 해서 원하는 위치에 두고 '/cm lock' 을 입력하세요.
 
 <img width="460" height="189" alt="Image" src="https://github.com/user-attachments/assets/c0b4c02d-82a6-4b79-93cb-b56c20527007" />
 <img width="525" height="463" alt="Image" src="https://github.com/user-attachments/assets/a3dc52ce-0c16-4d4e-a808-a0a00a4e562b" />
