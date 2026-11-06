@@ -27,7 +27,7 @@
 - 항상 위에 표시 설정을 하면 마우스 클릭이 관통 되어 게임 하는것을 방해하지 않습니다. (단 쉬프트를 누르고 있으면 상호작용이 됩니다.)
 - There are some necessary items in the settings window.
 - 설정창에 필요한 것들이 있습니다.
-- (v1.1.0) During gameplay, pressing 'Shift+Enter' opens an input box that automatically translates your messages. By default, once you type your message and press Enter, the text is saved to your clipboard; you can then paste it using 'Ctrl+V', or enable the 'auto-paste' option in the settings.
+- (v1.1.0 ~) During gameplay, pressing 'Shift+Enter' opens an input box that automatically translates your messages. By default, once you type your message and press Enter, the text is saved to your clipboard; you can then paste it using 'Ctrl+V', or enable the 'auto-paste' option in the settings.
 - 게임 도중 '쉬프트+엔터'를 누르면 내 채팅을 자동으로 번역해주는 입력창이 뜹니다. 기본적으로는 팝업된 입력창에 대화를 입력하고 엔터 누르면 클립보드에 저장되기 때문에, Ctrl+v를 하거나 옵션에서 자동 붙여넣기를 체크하세요.
 - I worked on 3.11. <a href="https://www.python.org/downloads/release/python-3110/">(link)</a>
 - 파이썬 3.11 버전이 필요할 겁니다. 저는 3.11 에서 작업했습니다.
@@ -41,3 +41,6 @@
   
 <img width="676" height="955" alt="image" src="https://github.com/user-attachments/assets/048bee64-077d-4e3a-a77a-f776b8a98bef" />
 <img width="676" height="505" alt="image" src="https://github.com/user-attachments/assets/8ffddbb3-8917-4d62-bffd-1890a6af1042" />
+
+# update
+(v1.3.0 ~) The program now performs a basic version check. When a new version is released on GitHub, you will be notified via a dialog box upon startup, and you can also check for it under the "Other" tab in the options menu. The program does not perform automatic or manual updates; you must download the new version yourself. Since the `config.json` file is not included in the release ZIP archive, you can safely overwrite all existing files when updating.
