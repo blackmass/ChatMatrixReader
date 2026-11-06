@@ -43,7 +43,11 @@ import tkinter as tk
 import tkinter.font as tkfont
 
 import config
+import chattext
 import glossary
+import hotkeys
+import outgoing
+import winutil
 import i18n
 import logsetup
 import translator
@@ -56,6 +60,7 @@ log = logging.getLogger("cmr.app")
 
 BG = "#1e1f22"            # also the colour key of the front window in two-window mode: nothing else may use it
 TITLE_BG = "#2b2d31"
+INPUT_BG = "#262a31"
 EDGE = "#3a3d44"
 DIM = "#8a8d93"
 SB_TRACK = "#26282c"
@@ -402,7 +407,18 @@ class App:
         self._game_next_search = 0.0
         self._game_warned = 0.0
         self._follow_logged = 0.0
+        self._placed_for = None        # game window we last stacked above
+        self._follow_top = False       # currently kept topmost because the game has the focus
         self._prev_fg = None           # window that had focus before we became interactive
+        self._send_open = False        # the send box (input line) is shown
+        self._send_busy = False        # a translation is running
+        self._send_armed = False       # Enter was let go once since the box opened
+        self._send_pending = False     # box closed, focus is being handed back to the game
+        self._send_prev = True         # hotkey was down in the previous tick (needs a release before it can fire)
+        self._send_lost = None
+        self._send_opened = 0.0
+        self._send_game = None
+        self._send_combo_cache = (None, None)
         self._owner = None             # invisible owner window: owned windows never get a taskbar button
         self.root.report_callback_exception = lambda exc, val, tb: log.error("UI 오류", exc_info=(exc, val, tb))
         threading.excepthook = lambda a: log.error("스레드 오류 (%s)", a.thread, exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
@@ -437,6 +453,7 @@ class App:
         self.root.after(50, self.poll)
         self.root.after(80, self._hover_tick)
         self.root.after(500, self._follow_game)
+        self.root.after(300, self._send_tick)
         self.root.after(400, self._fix_taskbar)
         log.info("시작 | python %s | 번역=%s | 목표=%s | 로그 파일: %s", sys.version.split()[0],
                  self.cfg.get("translator"), self.cfg.get("target_lang"), logsetup.PATH)
@@ -454,8 +471,22 @@ class App:
         self.text.pack(fill="both", expand=True, padx=(0, SB_W + 2))
         for name, color in TAG_COLORS.items():
             self.text.tag_configure(name, foreground=color)
+        for q, color in chattext.QUALITY_COLORS.items():          # created after the channel tags -> they win
+            self.text.tag_configure(f"q{q}", foreground=color)
 
         self.status = tk.StringVar(value=tr("시작 중..."))
+
+        # ---- send box: an input line at the bottom of the window (hidden until the hotkey)
+        self.sendbar = tk.Frame(self.body, bg=INPUT_BG)
+        self.send_lang_lbl = tk.Label(self.sendbar, text="", bg=INPUT_BG, fg=DIM, font=("Malgun Gothic", 9))
+        self.send_lang_lbl.pack(side="right", padx=(8, SB_W + 8))
+        self.send_entry = tk.Entry(self.sendbar, bg=INPUT_BG, fg="#f0f0f0", insertbackground="#f0f0f0", relief="flat",
+                                   font=self.font, bd=0, highlightthickness=0, disabledbackground=INPUT_BG,
+                                   readonlybackground=INPUT_BG, disabledforeground="#a0a0a0")
+        self.send_entry.pack(side="left", fill="x", expand=True, padx=(10, 0), pady=6)
+        for seq in ("<Return>", "<KP_Enter>"):
+            self.send_entry.bind(seq, self._send_submit)
+        self.send_entry.bind("<Escape>", self._send_cancel)
 
         # ---- overlay: title bar (only while hovering)
         self.title = tk.Frame(self.body, bg=TITLE_BG, height=TITLE_H)
@@ -602,6 +633,9 @@ class App:
         return fg, pid.value
 
     def _enter_interactive(self):
+        if self._send_open or self._send_pending:        # the send box has the focus: never hand it back
+            self._prev_fg = None
+            return
         try:
             fg, pid = self._fg_info()
             self._prev_fg = fg if (fg and pid != os.getpid()) else None
@@ -611,7 +645,7 @@ class App:
     def _leave_interactive(self):
         """Shift released: if clicking made us the active window, give the focus back to the game."""
         prev, self._prev_fg = self._prev_fg, None
-        if not prev or (self.opt is not None and self.opt.alive()):
+        if not prev or self._send_open or self._send_pending or (self.opt is not None and self.opt.alive()):
             return
         try:
             fg, pid = self._fg_info()
@@ -623,6 +657,187 @@ class App:
                     u.SetForegroundWindow(prev)
         except Exception:
             pass
+
+
+    # ------------------------------------------------------------------ send box
+    # Shift+Enter (the game opens its chat box as usual) -> an input line appears at the bottom of this window ->
+    # type in your own language, Enter -> the translation is put on the clipboard -> focus goes back to the game,
+    # where the chat box is still open: Ctrl+V, Enter. Nothing is ever sent to the game by this program
+    # (except Ctrl+V, and only when the option "auto paste" is on).
+    def _send_combo(self):
+        text = self.cfg.get("send_hotkey") or hotkeys.DEFAULT
+        if self._send_combo_cache[0] != text:
+            try:
+                parsed = hotkeys.parse(text)
+            except ValueError:
+                log.warning("보내기 단축키가 올바르지 않아 기본값을 씁니다: %r", text)
+                parsed = hotkeys.parse(hotkeys.DEFAULT)
+            self._send_combo_cache = (text, parsed)
+        return self._send_combo_cache[1]
+
+    def _send_tick(self):
+        try:
+            self._send_step()
+        except Exception:
+            log.exception("보내기 번역 오류 - 이번 실행 동안 이 기능을 끕니다")
+            self.cfg["send_enabled"] = False
+            try:
+                self._send_close(refocus=False)
+                self.add_system("⚠ " + tr("보내기 번역에서 오류가 나서 이번 실행 동안 껐습니다 (로그 확인)"), "error")
+            except Exception:
+                pass
+            return
+        self.root.after(25, self._send_tick)
+
+    def _send_step(self):
+        if not self.cfg.get("send_enabled", True):
+            self._send_prev = True
+            if self._send_open:
+                self._send_close(refocus=False)
+            return
+        if self._send_open:
+            self._send_open_step()
+            return
+        if self._send_pending:
+            return
+        g = self._find_game()
+        if not g or winutil.foreground() != g:
+            self._send_prev = True               # the key must be released once before it can trigger
+            return
+        down = winutil.combo_down(self._send_combo())
+        if down and not self._send_prev:
+            self._send_prev = True
+            self._send_open_box(g)
+        elif not down:
+            self._send_prev = False
+
+    def _send_open_box(self, game):
+        if self.cfg.get("translator", "none") == "none":
+            self.add_system("⚠ " + tr("번역 방식이 '사용 안 함'이라 보내기 번역을 쓸 수 없습니다 (옵션 → 번역)"), "error")
+            return
+        self._send_game = game
+        self.send_lang_lbl.configure(text=tr("→ {lang}", lang=self.cfg.get("send_lang") or "English"))
+        self.send_entry.configure(state="normal")
+        self.send_entry.delete(0, "end")
+        self.sendbar.pack(side="bottom", fill="x", before=self.text)
+        self.text.see("end")
+        self.root.update_idletasks()
+        if not winutil.grab_focus(_hwnd(self.root)):
+            self.sendbar.pack_forget()
+            log.warning("보내기 입력줄: 포커스를 가져오지 못했습니다")
+            self.add_system("⚠ " + tr("입력줄로 포커스를 가져오지 못했습니다"), "error")
+            return
+        self.send_entry.focus_force()
+        self._send_open = True
+        self._send_busy = False
+        self._send_armed = False
+        self._send_lost = None
+        self._send_opened = time.monotonic()
+        log.info("보내기 입력줄 열림")
+
+    def _send_open_step(self):
+        now = time.monotonic()
+        # Enter only counts after it was let go once (so a long Shift+Enter cannot submit anything)
+        if not self._send_armed and now - self._send_opened >= 0.1 and not winutil.key_down(winutil.VK_RETURN):
+            self._send_armed = True
+        if self._send_busy:
+            return
+        if self._pid_of(winutil.foreground()) != os.getpid():
+            if self._send_lost is None:
+                self._send_lost = now
+            elif now - self._send_lost > 0.7:            # the user switched to another program: forget the box
+                log.info("보내기 입력줄: 포커스를 잃어 닫음")
+                self._send_close(refocus=False)
+        else:
+            self._send_lost = None
+
+    def _send_submit(self, _e=None):
+        if self._send_busy or not self._send_armed:
+            return "break"
+        raw = self.send_entry.get().strip()
+        if not raw:
+            return "break"
+        self._send_busy = True
+        self.send_entry.configure(state="readonly")
+        self.send_lang_lbl.configure(text=tr("번역 중..."))
+        cfg = dict(self.cfg)
+
+        def work():
+            try:
+                res, err = outgoing.prepare(cfg, raw), None
+            except outgoing.OutgoingError as e:
+                res, err = None, str(e)
+            except Exception as e:
+                log.exception("보내기 번역 실패")
+                res, err = None, tr("번역 실패: {err}", err=str(e) or e.__class__.__name__)
+            self.q.put(("call", lambda: self._send_done(res, err, cfg)))
+
+        threading.Thread(target=work, daemon=True).start()
+        return "break"
+
+    def _send_done(self, res, err, cfg):
+        self._send_busy = False
+        if not self._send_open:                          # cancelled while translating
+            return
+        self.send_entry.configure(state="normal")
+        self.send_lang_lbl.configure(text=tr("→ {lang}", lang=cfg.get("send_lang") or "English"))
+        if err:                                          # problems go to the chat log; the box stays open for another try
+            self.add_system("⚠ " + err, "error")
+            return
+        if not winutil.set_clipboard(res.text):
+            self.add_system("⚠ " + tr("클립보드에 복사하지 못했습니다"), "error")
+            return
+        log.info("보내기: 클립보드에 복사 (%d바이트)", len(res.text.encode("utf-8")))
+        self._insert("↗ " + res.text + "\n", "trans")
+        if res.note:
+            self.add_system(res.note)
+        self._send_close(refocus=True, paste=bool(cfg.get("send_autopaste")))
+
+    def _send_cancel(self, _e=None):
+        self._send_close(refocus=True)
+        return "break"
+
+    def _send_close(self, refocus, paste=False):
+        was = self._send_open
+        self._send_open = False
+        self._send_busy = False
+        try:
+            self.sendbar.pack_forget()
+        except tk.TclError:
+            pass
+        if was and refocus:
+            self._send_refocus(paste)
+
+    def _send_refocus(self, paste):
+        self._send_pending = True
+        t0 = time.monotonic()
+
+        def step():
+            if winutil.key_down(winutil.VK_RETURN) and time.monotonic() - t0 < 1.5:
+                self.root.after(25, step)                # let go of Enter first
+                return
+            game = self._send_game
+            ok = winutil.focus_window(game)
+            if not ok:
+                log.warning("와우로 포커스를 돌리지 못했습니다")
+            if paste and ok:
+                self.root.after(160, lambda: self._send_paste(game))
+            else:
+                self._send_pending = False
+
+        step()
+
+    def _send_paste(self, game, tries=0):
+        try:
+            if winutil.foreground() != game:
+                self.add_system("⚠ " + tr("자동 붙여넣기를 하지 않았습니다: 와우가 활성 창이 아닙니다"), "error")
+            elif any(winutil.key_down(k) for k in (winutil.VK_SHIFT, winutil.VK_CONTROL, winutil.VK_MENU)) and tries < 40:
+                self.root.after(25, lambda: self._send_paste(game, tries + 1))      # wait until modifier keys are up
+                return
+            else:
+                winutil.send_ctrl_v()
+        finally:
+            self._send_pending = False
 
     # ---- moving / resizing
     def _drag_start(self, e):
@@ -814,17 +1029,64 @@ class App:
         return None
 
     def _follow_game(self):
-        """Keep this window directly above the game window in the z-order (and below every other window)."""
+        """While the game has the focus this window is topmost; as soon as another program gets the focus it is
+        dropped to just above the game window (so that program can cover it). Changing only on focus changes
+        keeps the window from flickering when the game re-raises itself (the topmost window cannot be covered)."""
         try:
             if self.cfg.get("topmost_wow_only"):
-                self._place_above_game()
+                u = _user32()
+                u.GetForegroundWindow.restype = wintypes.HWND
+                u.IsIconic.argtypes = [wintypes.HWND]
+                g = self._find_game()
+                fg = u.GetForegroundWindow()
+                if not g or u.IsIconic(g):
+                    if self._follow_top:
+                        self._set_follow_topmost(False, g)
+                elif fg and self._pid_of(fg) == os.getpid():
+                    pass                                         # our own window has the focus: leave everything as it is
+                elif fg:
+                    want = (fg == g)
+                    if want != self._follow_top or g != self._placed_for:
+                        self._placed_for = g
+                        self._set_follow_topmost(want, g)
+            else:
+                if self._follow_top:
+                    self._set_follow_topmost(False, None)
+                self._placed_for = None
         except Exception:
             if not self._follow_failed:
                 self._follow_failed = True
                 log.exception("게임 창 위 배치 실패")
-        self.root.after(250, self._follow_game)
+        self.root.after(120, self._follow_game)
 
-    def _place_above_game(self):
+    @staticmethod
+    def _pid_of(hwnd):
+        u = _user32()
+        u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        pid = wintypes.DWORD(0)
+        u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value
+
+    def _set_follow_topmost(self, on, game):
+        u = _user32()
+        me, back = _hwnd(self.root), _hwnd(self.back)
+        flags = 0x1 | 0x2 | 0x10                                 # NOSIZE | NOMOVE | NOACTIVATE
+        self._follow_top = on
+        if on:
+            u.SetWindowPos(me, -1, 0, 0, 0, 0, flags)            # HWND_TOPMOST
+            if self.two_window:
+                u.SetWindowPos(back, me, 0, 0, 0, 0, flags)
+            log.info("게임에 포커스: 창을 맨 위로 (게임=%s)", game)
+        else:
+            if game:
+                self._place_above_game(force=True)               # just above the game, no longer topmost
+            else:
+                u.SetWindowPos(me, -2, 0, 0, 0, 0, flags)        # HWND_NOTOPMOST
+                if self.two_window:
+                    u.SetWindowPos(back, me, 0, 0, 0, 0, flags)
+            log.info("다른 프로그램에 포커스: 창을 게임 바로 위로 (게임=%s)", game)
+
+    def _place_above_game(self, force=False):
         u = _user32()
         u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
         u.GetWindow.restype = wintypes.HWND
@@ -846,7 +1108,7 @@ class App:
                 ok = False
                 break
             cur = u.GetWindow(cur, 3)
-        if ok:
+        if ok and not force:
             return
         # the nearest window above the game that is not one of ours
         p = above
@@ -925,8 +1187,15 @@ class App:
         self.marks.clear()
 
     def _insert(self, s, tag, index="end"):
+        """`s` is a string, or a list of (text, extra_tag_or_None) pieces drawn in `tag` (+ the extra tag)."""
         at_bottom = self.text.yview()[1] >= 0.999
-        self.text.insert(index, s, tag)
+        if isinstance(s, str):
+            self.text.insert(index, s, tag)
+        else:
+            args = []
+            for piece, extra in s:
+                args += [piece, (tag, extra) if extra else tag]
+            self.text.insert(index, *args)                      # one call: the pieces stay in order at a mark too
         n = int(self.text.index("end-1c").split(".")[0])
         keep = int(self.cfg["max_lines"])
         if n > keep:
@@ -937,19 +1206,24 @@ class App:
     # ------------------------------------------------------------------ data flow
     def on_new_line(self, line):
         """A chat line that has not been seen before: show it, and ask for a translation."""
-        ts = time.strftime("%H:%M:%S")
+        ts = (time.strftime("%H:%M:%S") + " ") if self.cfg.get("show_time", True) else ""
         restricted = line.text == "[restricted]"
         tag = "restricted" if restricted else channel_tag(line.channel)
-        self._insert(f"{ts} [{line.channel}] {line.sender}: {line.text}\n", tag)
+        who = f"[{line.sender}]: " if line.sender else ""          # [name]: message
+        parts = [(f"{ts}({line.channel}) {who}", None)]
+        parts += [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(line.text)]
+        parts.append(("\n", None))
+        self._insert(parts, tag)
 
-        if restricted or not translator.should_translate(line.text, self.cfg):
+        text = chattext.plain(line.text)                          # item-link markers removed
+        if restricted or not translator.should_translate(text, self.cfg):
             return
         token = next(self.tokens)
         mark = f"tr{token}"
         self.text.mark_set(mark, "end-1c")
         self.text.mark_gravity(mark, "left")          # later lines are inserted after the mark
         self.marks[token] = mark
-        if not self.translations.submit(token, line.text):
+        if not self.translations.submit(token, text):
             self._drop_mark(token)
             self.status.set(tr("번역 대기열이 가득 차서 일부 줄을 번역하지 못했습니다"))
 
@@ -1014,9 +1288,12 @@ class App:
     # ------------------------------------------------------------------ window settings
     def apply_window_settings(self):
         self.font.configure(size=int(self.cfg["font_size"]))
+        gap = max(0, min(40, int(self.cfg.get("line_spacing", 4))))
+        self.text.configure(spacing1=gap // 2, spacing3=gap - gap // 2, spacing2=gap // 2)   # between lines / wrapped rows
         top = bool(self.cfg["topmost"]) and not self.cfg.get("topmost_wow_only")
         self.root.attributes("-topmost", top)
         self.back.attributes("-topmost", top)
+        self._placed_for = None          # let the "only above the game" loop re-apply its state
         self.apply_opacity()
         self.set_click_through(bool(self.cfg["click_through"]))
 

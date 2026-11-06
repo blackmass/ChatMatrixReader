@@ -29,7 +29,7 @@ _table = {}
 _current = DEFAULT_LANG
 
 
-def tr(text, **kw):
+def tr(text, /, **kw):
     """Translate `text` (Korean source text); `kw` fills {placeholders}."""
     s = _table.get(text, text)
     if kw:

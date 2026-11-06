@@ -3,6 +3,7 @@
 Screen grabbing uses mss (classic GDI BitBlt), NOT the Windows Graphics Capture API,
 so no yellow capture border is drawn around anything.
 """
+import logging
 import threading
 import time
 from collections import deque
@@ -13,6 +14,9 @@ import numpy as np
 import mss
 
 import decoder
+
+
+log = logging.getLogger("cmr.capture")
 
 
 class CaptureWorker(threading.Thread):
@@ -52,12 +56,23 @@ class CaptureWorker(threading.Thread):
         shot = sct.grab(area)
         return np.frombuffer(shot.bgra, dtype=np.uint8).reshape(shot.height, shot.width, 4)
 
-    def _search(self, sct):
+    # Screen grabs of a running game are not free (every full-screen BitBlt has to be read back from the GPU), so the
+    # search first looks only at the bottom-left corner of each monitor - where the addon puts the matrix by default -
+    # and scans whole monitors only rarely.
+    CORNER_W, CORNER_H = 900, 260
+
+    def _search(self, sct, full):
         for mon in sct.monitors[1:]:
-            arr = self._grab_array(sct, mon)
+            if full:
+                area, dx, dy = mon, 0, 0
+            else:
+                w, h = min(mon["width"], self.CORNER_W), min(mon["height"], self.CORNER_H)
+                area = {"left": mon["left"], "top": mon["top"] + mon["height"] - h, "width": w, "height": h}
+                dx, dy = 0, mon["height"] - h
+            arr = self._grab_array(sct, area)
             pos = decoder.find_matrix(arr)
             if pos:
-                return mon["left"] + pos[0], mon["top"] + pos[1]
+                return mon["left"] + dx + pos[0], mon["top"] + dy + pos[1]
         return None
 
     # ------------------------------------------------------------------
@@ -72,6 +87,8 @@ class CaptureWorker(threading.Thread):
         pos = None
         fails = 0
         last_search = 0.0
+        last_full = 0.0                   # last whole-monitor scan
+        perf_n, perf_t, perf_log = 0, 0.0, time.time()
         while not self._stop_evt.is_set():
             cfg = self.get_cfg()
             period = 1.0 / max(1, int(cfg.get("poll_hz", 30)))
@@ -81,6 +98,8 @@ class CaptureWorker(threading.Thread):
                 self._research.clear()
                 pos = None
                 self._last_seq = None
+                last_full = 0.0           # the user asked: scan everything right away
+                last_search = 0.0
 
             if pos is None:
                 manual = cfg.get("manual_pos")
@@ -88,8 +107,11 @@ class CaptureWorker(threading.Thread):
                     pos = (int(manual[0]), int(manual[1]))
                 elif time.time() - last_search >= 1.0:
                     last_search = time.time()
+                    full = time.time() - last_full >= 30.0
+                    if full:
+                        last_full = time.time()
                     self._status(tr("매트릭스 찾는 중... (게임을 창 모드로 띄우고 /cm 위치 확인)"))
-                    pos = self._search(sct)
+                    pos = self._search(sct, full)
                     if pos:
                         fails = 0
                         self._status(tr("연결됨 @ {x},{y}", x=pos[0], y=pos[1]))
@@ -99,7 +121,10 @@ class CaptureWorker(threading.Thread):
 
             area = {"left": pos[0], "top": pos[1], "width": decoder.WIDTH, "height": decoder.HEIGHT}
             try:
+                tg = time.perf_counter()
                 arr = self._grab_array(sct, area)
+                perf_n += 1
+                perf_t += time.perf_counter() - tg
                 frame, reason = decoder.decode_region(arr)
             except Exception as e:
                 frame, reason = None, f"grab error {e!r}"
@@ -128,6 +153,9 @@ class CaptureWorker(threading.Thread):
                         self.out.put(("lines", new))
                     self._status(tr("연결됨 @ {x},{y}", x=pos[0], y=pos[1]) + f" | seq {frame.seq}")
 
+            if perf_n and time.time() - perf_log >= 60:        # one line a minute: how expensive is the grabbing?
+                log.info("캡처 | 최근 %d회 평균 %.2f ms (최대 초당 %d회)", perf_n, perf_t / perf_n * 1000, int(1 / period))
+                perf_n, perf_t, perf_log = 0, 0.0, time.time()
             self._sleep_rest(t0, period)
 
     def _sleep_rest(self, t0, period):

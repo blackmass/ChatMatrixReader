@@ -11,6 +11,7 @@ from tkinter import ttk, messagebox
 
 import config
 import glossary
+import hotkeys
 import logsetup
 import translator
 import credits
@@ -51,10 +52,17 @@ class OptionsWindow:
             "bg_opacity": tk.DoubleVar(value=float(cfg["bg_opacity"])),
             "text_opacity": tk.DoubleVar(value=float(cfg["text_opacity"])),
             "topmost": tk.BooleanVar(value=bool(cfg["topmost"])),
+            "topmost_wow_only": tk.BooleanVar(value=bool(cfg.get("topmost_wow_only"))),
             "click_through": tk.BooleanVar(value=bool(cfg["click_through"])),
             "font_size": tk.IntVar(value=int(cfg["font_size"])),
+            "line_spacing": tk.IntVar(value=int(cfg.get("line_spacing", 4))),
+            "show_time": tk.BooleanVar(value=bool(cfg.get("show_time", True))),
             "max_lines": tk.IntVar(value=int(cfg["max_lines"])),
             "poll_hz": tk.IntVar(value=int(cfg["poll_hz"])),
+            "send_enabled": tk.BooleanVar(value=bool(cfg.get("send_enabled", True))),
+            "send_lang": tk.StringVar(value=cfg.get("send_lang") or "English"),
+            "send_hotkey": tk.StringVar(value=cfg.get("send_hotkey") or hotkeys.DEFAULT),
+            "send_autopaste": tk.BooleanVar(value=bool(cfg.get("send_autopaste", False))),
             "pos_x": tk.StringVar(value=str(mp[0]) if mp else ""),
             "pos_y": tk.StringVar(value=str(mp[1]) if mp else ""),
         }
@@ -67,6 +75,7 @@ class OptionsWindow:
         self._tab_translate(nb)
         self._tab_window(nb)
         self._tab_capture(nb)
+        self._tab_send(nb)
         self._tab_log(nb)
         self._tab_other(nb)
         self.nb = nb
@@ -226,13 +235,30 @@ class OptionsWindow:
             row=2, column=0, columnspan=2, sticky="w")
 
         def on_topmost():
+            if v["topmost"].get():
+                v["topmost_wow_only"].set(False)                  # the two modes exclude each other
+                cfg["topmost_wow_only"] = False
             cfg["topmost"] = bool(v["topmost"].get())
             app.root.attributes("-topmost", cfg["topmost"])
             app.back.attributes("-topmost", cfg["topmost"])      # the background window must follow
             app._stack_back()
 
+        def on_wow_only():
+            on = bool(v["topmost_wow_only"].get())
+            cfg["topmost_wow_only"] = on
+            if on:
+                v["topmost"].set(False)
+                cfg["topmost"] = False
+                app.root.attributes("-topmost", False)           # the follow loop places it above the game
+                app.back.attributes("-topmost", False)
+                app._game_hwnd = None
+                app._placed_for = None
+            config.save(cfg)
+
         ttk.Checkbutton(tab, text=tr("항상 위에 표시"), variable=v["topmost"],
                         command=on_topmost).grid(row=1, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Checkbutton(tab, text=tr("와우 창 위에만 표시 (다른 프로그램 창에는 가려짐)"), variable=v["topmost_wow_only"],
+                        command=on_wow_only).grid(row=6, column=0, columnspan=2, sticky="w", **PAD)
 
         def on_click_through():
             if v["click_through"].get():
@@ -260,6 +286,10 @@ class OptionsWindow:
         ttk.Spinbox(tab, from_=50, to=5000, increment=50, textvariable=v["max_lines"],
                     width=6).grid(row=4, column=1, sticky="w", **PAD)
         ttk.Button(tab, text=tr("화면 지우기"), command=app.clear_text).grid(row=5, column=0, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("줄 간격 (픽셀)")).grid(row=7, column=0, sticky="w", **PAD)
+        ttk.Spinbox(tab, from_=0, to=40, textvariable=v["line_spacing"], width=6).grid(row=7, column=1, sticky="w", **PAD)
+        ttk.Checkbutton(tab, text=tr("채팅 시간 표시"), variable=v["show_time"]).grid(
+            row=8, column=0, columnspan=2, sticky="w", **PAD)
 
     def _tab_capture(self, nb):
         v = self.v
@@ -274,6 +304,78 @@ class OptionsWindow:
         ttk.Entry(pos, textvariable=v["pos_y"], width=7).pack(side="left", padx=(4, 0))
         ttk.Button(tab, text=tr("매트릭스 다시 찾기"), command=self.app.worker.research).grid(
             row=2, column=0, sticky="w", **PAD)
+
+    def _tab_send(self, nb):
+        tab = ttk.Frame(nb)
+        nb.add(tab, text=tr("보내기"))
+        v = self.v
+        ttk.Checkbutton(tab, text=tr("보내기 번역 사용 (단축키 → 입력줄 → 번역을 클립보드로)"),
+                        variable=v["send_enabled"]).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("보내는 언어")).grid(row=1, column=0, sticky="w", **PAD)
+        ttk.Combobox(tab, textvariable=v["send_lang"], values=LANGS, width=24).grid(row=1, column=1, sticky="w", **PAD)
+
+        ttk.Label(tab, text=tr("단축키")).grid(row=2, column=0, sticky="w", **PAD)
+        hk = ttk.Frame(tab)
+        hk.grid(row=2, column=1, columnspan=2, sticky="w", **PAD)
+        ttk.Entry(hk, textvariable=v["send_hotkey"], width=18, state="readonly").pack(side="left")
+        ttk.Button(hk, text=tr("지정"), command=self.capture_hotkey).pack(side="left", padx=(6, 0))
+        ttk.Button(hk, text=tr("기본값"), command=lambda: v["send_hotkey"].set(hotkeys.DEFAULT)).pack(side="left", padx=(4, 0))
+
+        ttk.Checkbutton(tab, text=tr("번역 후 자동으로 붙여넣기 (Ctrl+V를 대신 눌러 줍니다)"),
+                        variable=v["send_autopaste"]).grid(row=3, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("꺼 두면 번역 후 와우로 돌아가 Ctrl+V, Enter를 직접 누릅니다. 이 프로그램은 게임에 어떤 입력도 보내지 않습니다."),
+                  foreground="#666", wraplength=430, justify="left").grid(row=4, column=0, columnspan=3, sticky="w", padx=22, pady=(0, 6))
+
+        ttk.Label(tab, text=tr("보내기 번역 프롬프트")).grid(row=5, column=0, columnspan=2, sticky="w", **PAD)
+        self.send_prompt_text = tk.Text(tab, width=62, height=9, wrap="word", font=("Malgun Gothic", 9))
+        self.send_prompt_text.grid(row=6, column=0, columnspan=3, sticky="we", padx=6)
+        self.send_prompt_text.insert("1.0", self.app.cfg.get("send_prompt") or translator.DEFAULT_SEND_PROMPT)
+        ttk.Button(tab, text=tr("기본 프롬프트로"), command=self._reset_send_prompt).grid(row=7, column=0, sticky="w", **PAD)
+
+    def _reset_send_prompt(self):
+        self.send_prompt_text.delete("1.0", "end")
+        self.send_prompt_text.insert("1.0", translator.DEFAULT_SEND_PROMPT)
+
+    def capture_hotkey(self):
+        dlg = tk.Toplevel(self.win)
+        dlg.title(tr("단축키 지정"))
+        dlg.transient(self.win)
+        dlg.resizable(False, False)
+        msg = tk.StringVar(value=tr("지정할 키 조합을 누르세요 (Esc: 취소)"))
+        ttk.Label(dlg, textvariable=msg, padding=16).pack()
+        mods = set()
+
+        def down(e):
+            if e.keysym == "Escape":
+                dlg.destroy()
+                return
+            m = hotkeys.mod_of_keysym(e.keysym)
+            if m:
+                mods.add(m)
+                msg.set("+".join(sorted(mods, key=("Ctrl", "Alt", "Shift").index)) + "+")
+                return
+            key = hotkeys.key_of_keysym(e.keysym)
+            if not key:
+                msg.set(tr("이 키는 쓸 수 없습니다"))
+                return
+            combo = "+".join(sorted(mods, key=("Ctrl", "Alt", "Shift").index) + [key])
+            try:
+                combo = hotkeys.normalize(combo)
+            except ValueError:
+                msg.set(tr("이 키는 쓸 수 없습니다"))
+                return
+            self.v["send_hotkey"].set(combo)
+            dlg.destroy()
+
+        def up(e):
+            m = hotkeys.mod_of_keysym(e.keysym)
+            if m:
+                mods.discard(m)
+
+        dlg.bind("<KeyPress>", down)
+        dlg.bind("<KeyRelease>", up)
+        dlg.grab_set()
+        dlg.focus_force()
 
     def _tab_log(self, nb):
         tab = ttk.Frame(nb)
@@ -564,10 +666,17 @@ class OptionsWindow:
             font_size = max(8, min(32, int(v["font_size"].get())))
             poll_hz = max(5, min(60, int(v["poll_hz"].get())))
             max_lines = max(50, min(5000, int(v["max_lines"].get())))
+            line_spacing = max(0, min(40, int(v["line_spacing"].get())))
         except (ValueError, tk.TclError) as e:
             messagebox.showerror(tr("옵션"), str(e) if isinstance(e, ValueError) else tr("숫자 값이 올바르지 않습니다."),
                                  parent=self.win)
             return
+        try:
+            hotkey = hotkeys.normalize(v["send_hotkey"].get())
+        except ValueError:
+            messagebox.showerror(tr("옵션"), tr("보내기 단축키가 올바르지 않습니다."), parent=self.win)
+            return
+        sprompt = self.send_prompt_text.get("1.0", "end").strip()
         px, py = v["pos_x"].get().strip(), v["pos_y"].get().strip()
         manual = None
         if px and py:
@@ -577,7 +686,12 @@ class OptionsWindow:
                 messagebox.showerror(tr("옵션"), tr("좌표는 정수여야 합니다."), parent=self.win)
                 return
         cfg.update(new)
-        cfg.update(font_size=font_size, poll_hz=poll_hz, max_lines=max_lines, manual_pos=manual)
+        cfg.update(send_enabled=bool(v["send_enabled"].get()),
+                   send_lang=v["send_lang"].get().strip() or "English", send_hotkey=hotkey,
+                   send_autopaste=bool(v["send_autopaste"].get()),
+                   send_prompt="" if sprompt == translator.DEFAULT_SEND_PROMPT.strip() else sprompt)
+        cfg.update(font_size=font_size, poll_hz=poll_hz, max_lines=max_lines, manual_pos=manual,
+                   line_spacing=line_spacing, show_time=bool(v["show_time"].get()))
         app.apply_window_settings()
         config.save(cfg)
         app.worker.research()

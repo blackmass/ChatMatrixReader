@@ -1,7 +1,7 @@
 import json
 import os
 
-from translator import DEFAULT_PROMPT, DEFAULT_REASONING_OFF, LEGACY_DEFAULT_PROMPTS
+from translator import DEFAULT_PROMPT, DEFAULT_REASONING_OFF, DEFAULT_SEND_PROMPT, LEGACY_DEFAULT_PROMPTS
 
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
@@ -26,12 +26,22 @@ DEFAULTS = {
     "skip_same_lang": True,
     "max_pending": 20,
     "max_parallel": 2,
+    # send box: type in your own language, get the translation on the clipboard
+    "send_enabled": True,
+    "send_lang": "English",
+    "send_hotkey": "Shift+Enter",
+    "send_autopaste": False,              # press Ctrl+V in the game for you (off: you press it)
+    "send_prompt": DEFAULT_SEND_PROMPT,
     # window
     "bg_opacity": 1.0,                    # background (the dark area)
     "text_opacity": 1.0,                  # text, title bar, scrollbar
-    "topmost": False,
+    "topmost": False,                     # above every other window
+    "topmost_wow_only": False,            # only just above the game window, behind all other windows
+    "wow_window_title": "World of Warcraft",
     "click_through": False,
     "font_size": 11,
+    "line_spacing": 4,                    # pixels between chat lines
+    "show_time": True,                    # prefix every line with the time it was read
     "max_lines": 500,
     "geometry": "560x420",
     # capture

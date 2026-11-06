@@ -9,7 +9,7 @@ import i18n
 from i18n import tr
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SOURCES = ["app.py", "options.py", "translator.py", "capture.py", "credits.py"]
+SOURCES = ["app.py", "options.py", "translator.py", "capture.py", "credits.py", "outgoing.py"]
 EXTRA_KEYS = {"사용 안 함 (원문만)", "원문(번역)   예: LFM(구인)", "번역으로 치환   예: 구인"}   # shown through tr(variable)
 
 
