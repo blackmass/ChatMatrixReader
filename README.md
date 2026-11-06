@@ -31,6 +31,7 @@
 - 파이썬 3.11 버전이 필요할 겁니다. 저는 3.11 에서 작업했습니다.
 - Claude did all of this in just half a day.
 - I have only tested this on Windows.
+- <b>It may not function correctly if you use features such as DLSS 5, HDR, or Windows display scaling, which alter the colors on the screen.</b>
 
 - 추천하는 세팅 (배경 투명, 와우 창 위에만 표시, 클릭 통과 후 쉬프트로만 상호작용.)
 - Recommended settings (transparent background, display only over the WoW window, ignore mouse clicks—interact only while holding Shift.)
