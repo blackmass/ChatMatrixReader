@@ -1,7 +1,7 @@
 <img width="491" height="450" alt="Image" src="https://github.com/user-attachments/assets/23c26dcb-d928-4d1c-ab75-25564d7e6431" />
 
 # ChatMatrixReader
-- Retrieve World of Warcraft chat in real time—100% safely.
+- It does not involve DLL injection, nor does it rely on heavy, low-accuracy OCR. This is a 100% safe method for real-time translation.
 - 완전 안전하게 실시간으로 와우 채팅 번역하기. 무겁고 불안정한 OCR도 아니고, DLL 삽입도 아닙니다.
 
 # Addon
