@@ -32,6 +32,7 @@
 - Claude did all of this in just half a day.
 - I have only tested this on Windows.
 - <b>It may not function correctly if you use features such as DLSS 5, HDR, or Windows display scaling, which alter the colors on the screen.</b>
+- <b>화면의 색상을 변경하는 dlss5, hdr, 윈도우 화면 배율 등을 사용할 경우 작동하지 않을 가능성이 있습니다.</b>
 
 - 추천하는 세팅 (배경 투명, 와우 창 위에만 표시, 클릭 통과 후 쉬프트로만 상호작용.)
 - Recommended settings (transparent background, display only over the WoW window, ignore mouse clicks—interact only while holding Shift.)
