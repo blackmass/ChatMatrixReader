@@ -26,3 +26,6 @@ https://www.curseforge.com/wow/addons/chatmatrix
 - 아마도 파이썬 3.8 이상 버전이 필요할 겁니다. 저는 3.11 에서 작업했습니다.
 - Claude did all of this in just half a day.
 - I have only tested this on Windows.
+  
+<img width="676" height="955" alt="image" src="https://github.com/user-attachments/assets/048bee64-077d-4e3a-a77a-f776b8a98bef" />
+<img width="676" height="505" alt="image" src="https://github.com/user-attachments/assets/8ffddbb3-8917-4d62-bffd-1890a6af1042" />
