@@ -1,63 +1,59 @@
+[한국어](./README.md) | [English](./README.en.md)
+
 <img width="491" height="450" alt="Image" src="https://github.com/user-attachments/assets/23c26dcb-d928-4d1c-ab75-25564d7e6431" />
 
 # ChatMatrixReader
-- It does not involve DLL injection, nor does it rely on heavy, low-accuracy OCR. This is a 100% safe method for real-time translation.
-- 완전 안전하게 실시간으로 와우 채팅 번역하기. 무겁고 불안정한 OCR도 아니고, DLL 삽입도 아닙니다.
+월드 오브 워크래프트 실시간 자동 번역기 입니다.
 
-- Three requirements. 필요한 3가지. (<a href="https://www.curseforge.com/wow/addons/chatmatrix">ChatMatrix</a>, <a href="https://github.com/blackmass/ChatMatrixReader/releases">ChatMatrixReader</a>, <a href="https://www.python.org/downloads/release/python-3110/">python-3.11</a> or <a href="https://www.python.org/downloads/release/python-3152/">python-3.15</a>)
-- Do not click the yellow button labeled [Download Python install manager]. You need to download the 'Windows installer (64-bit)' version found further down the page.
-- 위 링크로 파이썬 다운로드 시, 제발 노란버튼 누르지 말고 정상적인 하단의 설치파일을 설치하세요.
-- I have now resolved all issues regarding Python version compatibility. However, should any problems arise, please try running 'run 3.11.bat' or 'run 3.15.bat'.
-- 파이썬 버전 문제를 완전히 해결했기에 'run.bat'를 실행하면 되지만, , 혹시나 번역 문제가 생긴다면 run 3.11.bat 혹은 run 3.15.bat 를 실행해보시기 바랍니다.
+# 기능 설명
+- 채팅만 자동 감지 하여 실시간 번역
+- 기본 구글 번역으로 설정되어 있으며, 혹시나 아직 그런 경우를 못봤는데 제한에 걸린다면(보통 다른 문제임) 구글 api key를 직접 생성 받아 활용 가능(월 50만자 무료, 100만자당 20달러), 기본 구글 번역은 맥락을 이해하는 수준에 지나지 않습니다만, 플레이 하는것은 거의 문제가 없습니다.
+-  LM Studio 등으로 직접 AI 모델을 붙여도 됩니다. (와우가 vram을 보통 8기가 정도 먹는데, vram에 추가로 4기가 정도 ai에게 부여하면 아주 짱짱한 번역이 됩니다.)
+- 단어장 기능이 있어 실시간으로 단어를 추가할 수 있습니다. 구글 기본 번역과 AI에게 지시하는 프롬프트까지 기본 세팅되어 있습니다.
+- 게임 중 '쉬프트+엔터'를 누르면 번역창 아래에 입력창이 뜨고, 한글을 입력후 엔터를 누르면 번역된 영어가 클립보드에(Ctrl+C)가 자동으로 됩니다. (옵션에서 자동으로 Ctrl+V 가능. 그래도 마지막 확인후 직접 엔터 눌러야함)
+- 항상 위 표시 기능과, 항상 와우 위 표시 2가지 기능이 있습니다. 항상 와우 위 표시로 하면, 와우 도중 창전환 하여 다른 작업을 해도 번역창이 가리지 않습니다.
+- 옵션의 클릭 관통을 사용하시면 제목과 테두리가 사라지고 번역창만 깔끔하게 보입니다. 이 상태로는 쉬프트를 누른상태로 번역창에 마우스를 가져가면 상호작용 됩니다.
+- 배경을 투명하게 하거나, 글자 크기, 행간 높이, 폰트, 그림자, 폰트 교체 등이 가능하기 때문에, 제대로 설정하면 와우 화면 안에 넣어도 전혀 위화감 없이 세팅 됩니다.
+- 다국어 지원 기본적으로 이미지 인식이 아니기 때문에 순수하게 텍스트 번역만을 다루기 때문에, 구글 언어감지의 모든 다국어 번역이 기본적으로 됩니다.
+- 인터페이스가 기본적으로 한국어로 제작되었습니다. 추가적으로 영어 로컬라이징을 해놨으며, 다른 언어를 추가하는 것(locale 폴더에 텍스트 파일만 넣으면된다.) 이 쉽게 제작되어 있습니다.
 
-# Addon
-<a href="https://www.curseforge.com/wow/addons/chatmatrix">Addon - Chatmatrix </a>
-- First, you will need an add-on. This add-on condenses in-game chat in World of Warcraft into specific color patterns, allowing this program to read it.
-- 먼저 이 프로그램을 쓰려면 이 애드온이 필요합니다.
-- Initially, the matrix is ​​highlighted with a green rectangle. Drag it to your desired position and enter '/cm lock'.
-- 처음에는 매트릭스가 초록색 사각형으로 강조되어 있습니다. 드래그 해서 원하는 위치에 두고 '/cm lock' 을 입력하세요.
+# 주의 사항
+- 와우 리테일 본섭, 포에버 두 서버는 당장 제가 하고 있는 서버라 모두 테스트 되었습니다만, 클래식이나 다른 것들은 아직 미지수입니다. toc에서 버전 호환성만 추가하면 될 가능성이 있습니다.
+- 윈도우 및, 맥 두 환경 모두 테스트가 완료 되었습니다. 다만 맥은 이제 막 개발되어 제 맥북에서만 테스트 되었기에, 조금 더 시행착오가 있을 것으로 보입니다.
+- DLSS, HDR, 같은 이미지 색상을 변하게 만드는 후처리가 있을 경우 작동에 지장이 생길 수 있습니다. 다만 색상 변화를 감지하는 기능이 있기 때문에, 애드온 쪽에서 level 단계를 256에서 16으로 낮춘다면 대부분 감지에 성공합니다.(와우 밝기 100% 까지 최대로 늘려도 감지가 됨.)
+- 맥북에서는 마찬가지 이유로 맥 레티나 디스플레이 문제 때문에 기본값(x2)에서는 애드온 설정 256 레벨로는 인지가 불가능하며 16레벨로 낮추면 감지가 됩니다.
+- 맥북에서 실행시 app 파일을 실행하면 되지만, 사전에 권한 설정들이 꽤 번거롭게 처음에 수행해야합니다. (애플 개발자 등록을 하고 서명을 하면 해결되는 일이지만, 저는 절대로 애플 개발자 비용을 매년 낼 생각이 없습니다. 맥 설치법도 하단에 따로 설명.)
 
-<img width="460" height="189" alt="Image" src="https://github.com/user-attachments/assets/c0b4c02d-82a6-4b79-93cb-b56c20527007" />
-<img width="525" height="463" alt="Image" src="https://github.com/user-attachments/assets/a3dc52ce-0c16-4d4e-a808-a0a00a4e562b" />
-
-# Function
-- If you set the translation method to Google Translate, it will work properly without requiring any additional configuration.
-- 기본적으로 구글 번역을 설정하면 별 문제 없이 작동합니다.
-- When the "always on top" setting is enabled, mouse clicks will pass through the window, ensuring it does not interfere with your gameplay. (Note: You can still interact with it by holding down the Shift key.)
-- 항상 위에 표시 설정을 하면 마우스 클릭이 관통 되어 게임 하는것을 방해하지 않습니다. (단 쉬프트를 누르고 있으면 상호작용이 됩니다.)
-- There are some necessary items in the settings window.
-- 설정창에 필요한 것들이 있습니다.
-- (v1.1.0 ~) During gameplay, pressing 'Shift+Enter' opens an input box that automatically translates your messages. By default, once you type your message and press Enter, the text is saved to your clipboard; you can then paste it using 'Ctrl+V', or enable the 'auto-paste' option in the settings.
-- 게임 도중 '쉬프트+엔터'를 누르면 내 채팅을 자동으로 번역해주는 입력창이 뜹니다. 기본적으로는 팝업된 입력창에 대화를 입력하고 엔터 누르면 클립보드에 저장되기 때문에, Ctrl+v를 하거나 옵션에서 자동 붙여넣기를 체크하세요.
-- Claude did all of this in just half a day.
-- I have only tested this on Windows.
-- <b>It may not function correctly if you use features such as DLSS 5, HDR, or Windows display scaling, which alter the colors on the screen.</b>
-- <b>화면의 색상을 변경하는 dlss5, hdr, 윈도우 화면 배율 등을 사용할 경우 작동하지 않을 가능성이 있습니다.</b>
-- Starting with version 1.3.1, an automatic detection feature for color changes has been included. Additionally, the add-on now allows for the adjustment of matrix levels. If the colors differ from the original or if the brightness has changed, lowering the level while increasing the matrix size will improve the detection rate.
-- 다만 1.3.1 버전부터 색상 변화에 대한 자동감지 기능을 넣었습니다. 애드온에서 매트릭스 레벨 단계를 조절할 수 있는 기능을 넣었습니다. 원본 색상이 아니거나 밝기가 변경되는 경우, 레벨 단계를 낮추고 매트릭스를 키우면 인지율이 올라가니다.
-- If the matrix remains hidden for an extended period, it may not be immediately recognized when you shift focus to WoW; in such cases, please click the window refresh icon.
-- 매트릭스가 장기간 가려지면, 와우로 초점을 옮겨도 바로 인식되지 않기, 창 새로고침 아이콘을 누르세요.
-
-- Recommended settings (transparent background, display only over the WoW window, ignore mouse clicks—interact only while holding Shift.)
-- 추천하는 세팅 (배경 투명, 와우 창 위에만 표시, 클릭 통과 후 쉬프트로만 상호작용.)
-  
-<img width="676" height="955" alt="image" src="https://github.com/user-attachments/assets/048bee64-077d-4e3a-a77a-f776b8a98bef" />
-<img width="676" height="505" alt="image" src="https://github.com/user-attachments/assets/8ffddbb3-8917-4d62-bffd-1890a6af1042" />
-
-# Update
-- As for the update process, since the configuration file (Config.json) is generally not included in the release archive, you can simply overwrite the existing files—whether it’s an add-on or anything else.
-- 업데이트 방법은, 기본적으로 설정파일(Config.json)은 릴리즈 압축파일에 포함되지 않기 때문에, 애드온이든 이것이든 항상 덮어쓰시면 됩니다.
-- If the matrix remains hidden for an extended period, it may not be immediately recognized when you shift focus to WoW; in such cases, please click the window refresh icon.
-- 1.3.1 버전부터 색상 변화에 대한 자동감지 기능을 넣었습니다. 애드온에서 매트릭스 레벨 단계를 조절할 수 있는 기능을 넣었습니다. 원본 색상이 아니거나 밝기가 변경되는 경우, 레벨 단계를 낮추고 매트릭스를 키우면 인지율이 올라가니다.
-
-# Development Philosophy (개발 방향성)
-- Lightweight: Designed to be as lightweight as possible, with a minimal footprint and no unnecessary resource consumption.
-- Text-Only: Does not rely on image recognition (such as OCR or AI-based vision); instead, it extracts text directly from the game’s chat data, ensuring 100% accuracy.
-- Unobtrusive: Keeps the interface minimal, displaying only the translated text whenever possible.
-- Educational: I have no intention of completely removing or replacing the original English text; that is not the direction I wish to take.
-- Safe: Does not involve DLL injection or memory manipulation—ensuring a 100% ban-proof approach according to Blizzard’s policies.
+# 개발 방향성
 - 가벼움 : 다른 부가적인 자원 소모 없이 최대한 가볍고 용량 적게.
 - 텍스트만 : 이미지 인식 금지(OCR, AI Vision)을 쓰지 않고 애드온에서 직접 채팅 데이터를 가져와 100% 정확하게 텍스트만 추출합니다.
 - 간결하게 : 가능하면 인터페이스를 최대한 노출하지 않고 번역 텍스트만 노출되게.
 - 학습성 : 저는 절대로 영어를 완전히 지우고 대체하려 하지 않을 겁니다. 그것은 제가 바라는 방향이 아닙니다.
-- 안전하게 : DLL 삽입이나 메모리에 간섭하지 않고 100% 블리자드가 밴 하지 않을 방향.
+- 안전하게 : DLL 삽입이나 메모리에 간섭하지 않고 100% 블리자드에게 밴 당하지 하지 않을 방향.
+
+# 설치에 필요한 것.
+- 파이썬 (<a href="https://www.python.org/downloads/release/python-3110/">python-3.11</a> or <a href="https://www.python.org/downloads/release/python-3152/">python-3.15</a>) ※ 노란 버튼의 파이썬 매니저(Python install manager)가 아니라, 하단의 'macOS 64-bit universal2 installer', 'Windows installer (64-bit)' 둘 중 OS에 맞게 설치하세요.
+- 애드온 (<a href="https://www.curseforge.com/wow/addons/chatmatrix">curseforge</a>) ChatMatrix
+- 프로그램 (<a href="https://github.com/blackmass/ChatMatrixReader/releases">github</a>) ChatMatrixReader  ※ 소스코드가 아니라, ChatMatrixReader.xxx.zip 를 받으셔야합니다.
+
+# 애드온 기능
+...작성중
+
+# 업데이트 방법
+- 기본적으로 config.json을 릴리즈 압축파일에 포함하지 않기 때문에 애드온이건 프로그램이건 매번 덮어쓰시면 됩니다.
+
+# LM Studio로 로컬 AI 모델에게 무료로 번역 맞기기.
+...작성중
+
+
+# 맥에서 설치
+- 일반적인 방법으로 다운 받고 압축을 푼다.
+- 해당 경로에서 터미널로 'xattr -dr com.apple.quarantine ~/Documents/ChatMatrixReader' 과 같이 격리 설정을 한다. (업데이트 할때마다 해줘야할겁니다.)
+- 폴더 내의 ChatMatrix Reader.app 를 실행하면 됩니다. 다만 처음에는 가상 환경 설치 때문에 터미널이 뜰 것이고. 권한 설정이 뜰겁니다. 수락 하고 다시 앱을 다 닫고, 다시 키면 또 권한 요청 다른것이 뜰꺼고 다시 껏다 키면 다시 권한 설정 뜨는것이 총 3번정도 반복되고. 이제 아무것도 안뜨면 제대로 구동환경이 됩니다.
+- 저의 모든 소스는 오픈 소스이지만, 불안하시면 구동을 하지 않으시는게 좋습니다. 저는 맥에 그다지 애정이 없습니다.
+- 아직 테스트 안된 기능이 많습니다. 주요 기능들은 대부분 테스트는 했습니다. (해결 안되거나 테스트 안해본것들:상단 메뉴막대에 표시가 안된다던지, 폰트 관련 문제라든지 등등.)
+
+
+# 자주하는 질문.
+- 어느 서버 하시나요?  : 북미 리테일 티콘드리우스, 북미 포에버 PVP
+
