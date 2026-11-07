@@ -45,4 +45,5 @@
 <img width="676" height="505" alt="image" src="https://github.com/user-attachments/assets/8ffddbb3-8917-4d62-bffd-1890a6af1042" />
 
 # update
-(v1.3.0 ~) The program now performs a basic version check. When a new version is released on GitHub, you will be notified via a dialog box upon startup, and you can also check for it under the "Other" tab in the options menu. The program does not perform automatic or manual updates; you must download the new version yourself. Since the `config.json` file is not included in the release ZIP archive, you can safely overwrite all existing files when updating.
+- 1.3.1 버전부터 색상 변화에 대한 자동감지 기능을 넣었습니다. 애드온에서 매트릭스 레벨 단계를 조절할 수 있는 기능을 넣었습니다. 원본 색상이 아니거나 밝기가 변경되는 경우, 레벨 단계를 낮추고 매트릭스를 키우면 인지율이 올라가니다.
+- If the matrix remains hidden for an extended period, it may not be immediately recognized when you shift focus to WoW; in such cases, please click the window refresh icon.
