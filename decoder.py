@@ -25,6 +25,7 @@ class Line:
     id: int
     sender: str
     text: str
+    cls: str = ""          # speaker's class letter A-M (optional 5th field, see PROTOCOL.md); "" = unknown
 
 
 @dataclass
@@ -47,15 +48,16 @@ def parse_payload(payload: bytes) -> list:
     if not text:
         return lines
     for raw in text.split("\n"):
-        parts = raw.split(FS, 3)
+        parts = raw.split(FS, 4)
         if len(parts) < 4:
             continue            # truncated / damaged line
-        ch, id_str, sender, msg = parts
+        ch, id_str, sender, msg = parts[:4]
+        cls = parts[4][:1] if len(parts) == 5 else ""
         try:
             line_id = int(id_str)
         except ValueError:
             continue
-        lines.append(Line(ch, line_id, sender, msg))
+        lines.append(Line(ch, line_id, sender, msg, cls))
     return lines
 
 
@@ -102,3 +104,4 @@ def find_matrix(arr: np.ndarray, max_candidates: int = 4000):
         if frame is not None:
             return x, y
     return None
+

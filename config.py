@@ -47,6 +47,7 @@ DEFAULTS = {
     "check_updates": True,                # look for a newer GitHub release at start (a notice only, nothing is installed)
     "font_family": "",                    # "" = default (Malgun Gothic); else a font loaded from the fonts/ folder
     "line_spacing": 4,                    # pixels between chat lines
+    "class_colors": True,                 # colour the speaker's name by class (needs the addon to send the class)
     "show_time": True,                    # prefix every line with the time it was read
     "max_lines": 500,
     "geometry": "560x420",

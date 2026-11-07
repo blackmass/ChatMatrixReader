@@ -576,10 +576,6 @@ class App:
         self.add_system(tr("제목줄/스크롤은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | Ctrl+Alt+O: 옵션 | 클릭 통과 중에는 Shift를 누른 채로 조작"))
         if self.cfg.get("check_updates", True):
             self.check_update(self._on_start_update)
-        if sys.version_info >= (3, 14):
-            log.warning("검증되지 않은 파이썬 버전: %s (3.11 권장)", sys.version.split()[0])
-            self.add_system("⚠ " + tr("파이썬 {ver}은 아직 검증되지 않았습니다. 문제가 있으면 3.11을 설치해 .venv 폴더를 지우고 다시 실행하세요.",
-                                      ver=sys.version.split()[0]), "error")
 
     def _build_back(self):
         """Background-only window used when background and text opacity differ."""

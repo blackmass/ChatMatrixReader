@@ -9,6 +9,10 @@ import re
 _MARK = re.compile("\x02(\\d)(.*?)(?:\x03|$)", re.S)
 _STRAY = re.compile("[\x02\x03]")
 
+CLASS_COLORS = {          # speaker class letter (PROTOCOL.md) -> the game's class colour
+    "A": "#C69B6D", "B": "#F48CBA", "C": "#AAD372", "D": "#FFF468", "E": "#FFFFFF", "F": "#C41E3A", "G": "#0070DD",
+    "H": "#3FC7EB", "I": "#8788EE", "J": "#00FF98", "K": "#FF7C0A", "L": "#A330C9", "M": "#33937F",
+}
 QUALITY_COLORS = {
     0: "#9d9d9d", 1: "#ffffff", 2: "#1eff00", 3: "#4a9eff", 4: "#c06bff",
     5: "#ff8000", 6: "#e6cc80", 7: "#00ccff", 8: "#00ccff",

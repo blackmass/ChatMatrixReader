@@ -67,6 +67,7 @@ class OptionsWindow:
             "font_family": tk.StringVar(value=cfg.get("font_family") if cfg.get("font_family") in app.custom_fonts else tr("기본 글꼴 (맑은 고딕)")),
             "line_spacing": tk.IntVar(value=int(cfg.get("line_spacing", 4))),
             "show_time": tk.BooleanVar(value=bool(cfg.get("show_time", True))),
+            "class_colors": tk.BooleanVar(value=bool(cfg.get("class_colors", True))),
             "max_lines": tk.IntVar(value=int(cfg["max_lines"])),
             "poll_hz": tk.IntVar(value=int(cfg["poll_hz"])),
             "send_enabled": tk.BooleanVar(value=bool(cfg.get("send_enabled", True))),
@@ -300,6 +301,8 @@ class OptionsWindow:
         ttk.Spinbox(tab, from_=0, to=40, textvariable=v["line_spacing"], width=6).grid(row=7, column=1, sticky="w", **PAD)
         ttk.Checkbutton(tab, text=tr("채팅 시간 표시"), variable=v["show_time"]).grid(
             row=8, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Checkbutton(tab, text=tr("직업 색상으로 이름 표시"), variable=v["class_colors"]).grid(
+            row=11, column=0, columnspan=2, sticky="w", **PAD)
         ttk.Label(tab, text=tr("글꼴")).grid(row=9, column=0, sticky="w", **PAD)
         fam = ttk.Frame(tab)
         fam.grid(row=9, column=1, sticky="w", **PAD)
@@ -809,7 +812,8 @@ class OptionsWindow:
         cfg.update(check_updates=bool(v["check_updates"].get()))
         cfg.update(shadow_on=bool(v["shadow_on"].get()), shadow_color=shadow_color, shadow_dx=sdx, shadow_dy=sdy)
         cfg.update(font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, max_lines=max_lines, manual_pos=manual,
-                   line_spacing=line_spacing, show_time=bool(v["show_time"].get()))
+                   line_spacing=line_spacing, show_time=bool(v["show_time"].get()),
+                   class_colors=bool(v["class_colors"].get()))
         app.apply_window_settings()
         config.save(cfg)
         app.worker.research()
