@@ -5,10 +5,8 @@
 - 완전 안전하게 실시간으로 와우 채팅 번역하기. 무겁고 불안정한 OCR도 아니고, DLL 삽입도 아닙니다.
 
 - Three requirements. 필요한 3가지. (<a href="https://www.curseforge.com/wow/addons/chatmatrix">ChatMatrix</a>, <a href="https://github.com/blackmass/ChatMatrixReader/releases">ChatMatrixReader</a>, <a href="https://www.python.org/downloads/release/python-3110/">python-3.11</a> or <a href="https://www.python.org/downloads/release/python-3152/">python-3.15</a>)
-- You must use Python version 3.11. Search for "Python" on your Windows system to check which version is currently installed. If you have version 3.15, please install version 3.11 as well.
-- 파이썬은 꼭 3.11 버전을 받아야합니다. 윈도우 python을 검색해서 몇버전이 설치되었는지 확인하세요. 3.15가 설치되어 있다면. 3.11도 같이 설치해두세요.
-- If you encounter translation issues with Python 3.11, please install Python 3.15 and then run 'run 3.15.bat'.
-- 현재 파이썬 버전에 의해 번역 문제가 발생합니다. 일단 최신 릴리즈를 받고 파이썬 3.11에서 문제가 발생한다면 파이썬 3.15를 설치후 'run 3.15.bat'를 실행하세요.
+- I have now resolved all issues regarding Python version compatibility. However, should any problems arise, please try running 'run 3.11.bat' or 'run 3.15.bat'.
+- 파이썬 버전 문제를 완전히 해결했기에 'run.bat'를 실행하면 되지만, , 혹시나 번역 문제가 생긴다면 run 3.11.bat 혹은 run 3.15.bat 를 실행해보시기 바랍니다.
 
 # Addon
 <a href="https://www.curseforge.com/wow/addons/chatmatrix">Addon - Chatmatrix </a>
