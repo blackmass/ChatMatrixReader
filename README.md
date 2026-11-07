@@ -44,9 +44,11 @@
 <img width="676" height="955" alt="image" src="https://github.com/user-attachments/assets/048bee64-077d-4e3a-a77a-f776b8a98bef" />
 <img width="676" height="505" alt="image" src="https://github.com/user-attachments/assets/8ffddbb3-8917-4d62-bffd-1890a6af1042" />
 
-# update
-- 1.3.1 버전부터 색상 변화에 대한 자동감지 기능을 넣었습니다. 애드온에서 매트릭스 레벨 단계를 조절할 수 있는 기능을 넣었습니다. 원본 색상이 아니거나 밝기가 변경되는 경우, 레벨 단계를 낮추고 매트릭스를 키우면 인지율이 올라가니다.
+# Update
+- As for the update process, since the configuration file (Config.json) is generally not included in the release archive, you can simply overwrite the existing files—whether it’s an add-on or anything else.
+- 업데이트 방법은, 기본적으로 설정파일(Config.json)은 릴리즈 압축파일에 포함되지 않기 때문에, 애드온이든 이것이든 항상 덮어쓰시면 됩니다.
 - If the matrix remains hidden for an extended period, it may not be immediately recognized when you shift focus to WoW; in such cases, please click the window refresh icon.
+- 1.3.1 버전부터 색상 변화에 대한 자동감지 기능을 넣었습니다. 애드온에서 매트릭스 레벨 단계를 조절할 수 있는 기능을 넣었습니다. 원본 색상이 아니거나 밝기가 변경되는 경우, 레벨 단계를 낮추고 매트릭스를 키우면 인지율이 올라가니다.
 
 # Development Philosophy (개발 방향성)
 - Lightweight: Designed to be as lightweight as possible, with a minimal footprint and no unnecessary resource consumption.
