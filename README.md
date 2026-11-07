@@ -29,12 +29,12 @@
 - 설정창에 필요한 것들이 있습니다.
 - (v1.1.0 ~) During gameplay, pressing 'Shift+Enter' opens an input box that automatically translates your messages. By default, once you type your message and press Enter, the text is saved to your clipboard; you can then paste it using 'Ctrl+V', or enable the 'auto-paste' option in the settings.
 - 게임 도중 '쉬프트+엔터'를 누르면 내 채팅을 자동으로 번역해주는 입력창이 뜹니다. 기본적으로는 팝업된 입력창에 대화를 입력하고 엔터 누르면 클립보드에 저장되기 때문에, Ctrl+v를 하거나 옵션에서 자동 붙여넣기를 체크하세요.
-- I worked on 3.11. <a href="https://www.python.org/downloads/release/python-3110/">(link)</a>
-- 파이썬 3.11 버전이 필요할 겁니다. 저는 3.11 에서 작업했습니다.
 - Claude did all of this in just half a day.
 - I have only tested this on Windows.
 - <b>It may not function correctly if you use features such as DLSS 5, HDR, or Windows display scaling, which alter the colors on the screen.</b>
 - <b>화면의 색상을 변경하는 dlss5, hdr, 윈도우 화면 배율 등을 사용할 경우 작동하지 않을 가능성이 있습니다.</b>
+- Starting with version 1.3.1, an automatic detection feature for color changes has been included. Additionally, the add-on now allows for the adjustment of matrix levels. If the colors differ from the original or if the brightness has changed, lowering the level while increasing the matrix size will improve the detection rate.
+- 다만 1.3.1 버전부터 색상 변화에 대한 자동감지 기능을 넣었습니다. 애드온에서 매트릭스 레벨 단계를 조절할 수 있는 기능을 넣었습니다. 원본 색상이 아니거나 밝기가 변경되는 경우, 레벨 단계를 낮추고 매트릭스를 키우면 인지율이 올라가니다.
 
 - 추천하는 세팅 (배경 투명, 와우 창 위에만 표시, 클릭 통과 후 쉬프트로만 상호작용.)
 - Recommended settings (transparent background, display only over the WoW window, ignore mouse clicks—interact only while holding Shift.)
