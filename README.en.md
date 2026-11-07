@@ -36,11 +36,16 @@ A real-time, automated translator for World of Warcraft.
 - Program: ChatMatrixReader (available on <a href="https://github.com/blackmass/ChatMatrixReader/releases">GitHub</a>) ※ Please download the 'ChatMatrixReader.xxx.zip' file, not the source code. # Add-on Features
 ...Under construction
 
+# Addon Features
+- Upon the first launch, a green "matrix box" will appear. Drag it to a clearly visible area and use the command `/cm lock` to secure it in place. Ensure it is not obstructed by other interface elements.
+- You can access various settings via the menu: Esc > Settings > Add-ons. Here, you can lock or unlock the box, as well as apply precise filters to select which chat channels should be translated.
+- If changes to brightness, contrast, or scaling result in lower recognition accuracy, you can typically resolve this by lowering the "color level" and increasing the size of the matrix box within the add-on settings.
+
 # How to Update
 - Since `config.json` is generally not included in the release archive, you can simply overwrite the existing files whenever you update the add-on or the program.
 
 # Using LM Studio for Free Local AI-Powered Translation
-...Under construction
+- The functionality is already in place, but I will organize or revise it later to make it easier to understand.
 
 # Installation on macOS
 - Download and extract the files as you would normally.
