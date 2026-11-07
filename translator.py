@@ -5,6 +5,7 @@ Only the standard library is used (urllib), so nothing extra has to be installed
 import glossary
 import json
 import logging
+import random
 import re
 import socket
 import threading
@@ -73,6 +74,14 @@ LEGACY_DEFAULT_PROMPTS = ['You are a real-time chat translator for World of Warc
 
 class TranslateError(Exception):
     pass
+
+
+class RateLimited(TranslateError):
+    """The server asked us to slow down; `delay` = seconds to wait before it is worth trying again."""
+
+    def __init__(self, message, delay):
+        super().__init__(message)
+        self.delay = delay
 
 
 # ----------------------------------------------------------------------
@@ -153,7 +162,10 @@ def _http_json(url, payload=None, headers=None, timeout=30.0):
             body = r.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         try:
-            snippet = e.read().decode("utf-8", errors="replace")[:200]
+            raw = e.read().decode("utf-8", errors="replace")
+            snippet = raw[:200]
+            if e.code in (403, 429):              # keep the readable text of a block page for the log
+                log.info("HTTP %s 응답 본문: %s", e.code, " ".join(re.sub(r"<[^>]+>", " ", raw).split())[:400])
         except Exception:
             snippet = ""
         raise TranslateError(f"HTTP {e.code} {snippet}".strip()) from None
@@ -274,7 +286,7 @@ def list_models(cfg: dict) -> list:
 # ----------------------------------------------------------------------
 # Google
 # ----------------------------------------------------------------------
-GOOGLE_MIN_INTERVAL = 0.15           # seconds between two requests to the key-less endpoint
+GOOGLE_MIN_INTERVAL = 0.4            # seconds between two requests to the key-less endpoint
 _g_lock = threading.Lock()
 _g_next_slot = 0.0
 _g_block_until = 0.0
@@ -287,8 +299,8 @@ def _google_gate():
     now = time.monotonic()
     with _g_lock:
         if now < _g_block_until:
-            raise TranslateError(tr("Google 요청 제한 대기 중 ({sec}초 남음) - 그동안 요청을 보내지 않습니다",
-                                    sec=int(_g_block_until - now) + 1))
+            raise RateLimited(tr("Google 요청 제한 대기 중 ({sec}초 남음) - 그동안 요청을 보내지 않습니다",
+                                 sec=int(_g_block_until - now) + 1), _g_block_until - now)
         slot = max(now, _g_next_slot)
         _g_next_slot = slot + GOOGLE_MIN_INTERVAL
     if slot > now:
@@ -301,8 +313,10 @@ def _google_limited(reason):
         _g_block_n = min(_g_block_n + 1, 6)
         secs = min(900, 30 * 2 ** (_g_block_n - 1))            # 30, 60, 120, 240, 480, 900 seconds
         _g_block_until = time.monotonic() + secs
-    log.warning("Google이 요청을 제한한 것으로 보임 (%s) -> %d초 동안 요청 중지", reason, secs)
-    raise TranslateError(tr("Google이 요청을 제한했습니다 ({reason}). {secs}초 동안 요청을 멈추고 다시 시도합니다", reason=reason, secs=secs))
+    import ssl, sys
+    log.warning("Google이 요청을 제한한 것으로 보임 (%s) -> %d초 동안 요청 중지 | python %s | %s",
+                reason, secs, sys.version.split()[0], ssl.OPENSSL_VERSION)
+    raise RateLimited(tr("Google이 요청을 제한했습니다 ({reason}). {secs}초 동안 요청을 멈추고 다시 시도합니다", reason=reason, secs=secs), secs)
 
 
 def translate_google(cfg: dict, text: str) -> str:
@@ -329,7 +343,7 @@ def translate_google(cfg: dict, text: str) -> str:
     except TranslateError as e:
         msg = str(e)
         if msg.startswith(("HTTP 429", "HTTP 403", tr("JSON이 아닌 응답"))):       # blocked / captcha page
-            _google_limited(msg[:60])
+            _google_limited(" ".join(msg.split(" ", 2)[:2]))          # "HTTP 429" without the html page
         raise
     try:
         out = "".join(seg[0] for seg in data[0] if seg and seg[0])
@@ -386,6 +400,9 @@ class TranslationService:
     """submit() never blocks. Results arrive on out_queue as ("trans", (token, result|None, error|None)).
     result None with no error means 'nothing to add' (translation identical to the original)."""
 
+    MAX_RETRIES = 3          # after a rate limit: how often one line is retried
+    MAX_WAIT = 150           # ... and the longest pause worth waiting for (seconds); longer -> show the error
+
     def __init__(self, out_queue, get_cfg, workers=2):
         self.out = out_queue
         self.get_cfg = get_cfg
@@ -409,7 +426,8 @@ class TranslationService:
         self.pool.submit(self._run, token, text, cfg, key)
         return True
 
-    def _run(self, token, text, cfg, key):
+    def _run(self, token, text, cfg, key, attempt=0):
+        retry = False
         try:
             result = translate(cfg, text)
             if result.strip().lower() == text.strip().lower():
@@ -419,11 +437,22 @@ class TranslationService:
                 while len(self.cache) > 500:
                     self.cache.popitem(last=False)
             self.out.put(("trans", (token, result, None)))
+        except RateLimited as e:                         # keep the line waiting instead of failing it
+            if attempt < self.MAX_RETRIES and e.delay <= self.MAX_WAIT:
+                retry = True
+                delay = e.delay + random.uniform(0.5, 3.0 + 0.3 * self.pending)     # spread the retries out
+                log.info("제한 해제 대기 후 다시 시도 (%d/%d, %.0f초 뒤): %s", attempt + 1, self.MAX_RETRIES, delay, _short(text, 40))
+                timer = threading.Timer(delay, self._run, (token, text, cfg, key, attempt + 1))
+                timer.daemon = True
+                timer.start()
+            else:
+                self.out.put(("trans", (token, None, str(e))))
         except Exception as e:                           # TranslateError or anything unexpected
             self.out.put(("trans", (token, None, str(e) or e.__class__.__name__)))
         finally:
-            with self.lock:
-                self.pending -= 1
+            if not retry:
+                with self.lock:
+                    self.pending -= 1
 
     def shutdown(self):
         self.pool.shutdown(wait=False, cancel_futures=True)

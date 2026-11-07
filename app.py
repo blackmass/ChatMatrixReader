@@ -465,8 +465,13 @@ class App:
         self.root.after(500, self._follow_game)
         self.root.after(300, self._send_tick)
         self.root.after(400, self._fix_taskbar)
-        log.info("시작 | v%s | python %s | 번역=%s | 목표=%s | 로그 파일: %s", version.__version__, sys.version.split()[0],
-                 self.cfg.get("translator"), self.cfg.get("target_lang"), logsetup.PATH)
+        try:
+            import ssl
+            ssl_ver = ssl.OPENSSL_VERSION
+        except Exception:
+            ssl_ver = "?"
+        log.info("시작 | v%s | python %s | %s | 번역=%s | 목표=%s | 로그 파일: %s", version.__version__,
+                 sys.version.split()[0], ssl_ver, self.cfg.get("translator"), self.cfg.get("target_lang"), logsetup.PATH)
 
     # ------------------------------------------------------------------ UI
     def _build_main(self):
@@ -484,6 +489,8 @@ class App:
             self.text.tag_configure(name, foreground=color)
         for q, color in chattext.QUALITY_COLORS.items():          # created after the channel tags -> they win
             self.text.tag_configure(f"q{q}", foreground=color)
+        for letter, color in chattext.CLASS_COLORS.items():
+            self.text.tag_configure(f"cls_{letter}", foreground=color)
         self.text.tag_configure("link", foreground="#6ea8fe", underline=True)          # clickable link (release page)
         self.text.tag_bind("link", "<Button-1>", lambda e: self.open_releases())
         self.text.tag_bind("link", "<Enter>", lambda e: self.text.configure(cursor="hand2"))
@@ -1271,8 +1278,11 @@ class App:
         ts = (time.strftime("%H:%M:%S") + " ") if self.cfg.get("show_time", True) else ""
         restricted = line.text == "[restricted]"
         tag = "restricted" if restricted else channel_tag(line.channel)
-        who = f"[{line.sender}]: " if line.sender else ""          # [name]: message
-        parts = [(f"{ts}({line.channel}) {who}", None)]
+        if line.sender:                                           # [name]: message  (the name in the class colour)
+            ctag = f"cls_{line.cls}" if (self.cfg.get("class_colors", True) and line.cls in chattext.CLASS_COLORS) else None
+            parts = [(f"{ts}({line.channel}) [", None), (line.sender, ctag), ("]: ", None)]
+        else:
+            parts = [(f"{ts}({line.channel}) ", None)]
         parts += [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(line.text)]
         parts.append(("\n", None))
         self._insert(parts, tag)
