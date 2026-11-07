@@ -4,6 +4,7 @@ They are loaded for this program only (not installed in Windows) and can then be
 No folder / no files -> nothing happens and the default font is used.
 """
 import ctypes
+import sys
 import logging
 import os
 import struct
@@ -12,7 +13,7 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_DIR = os.path.join(APP_DIR, "fonts")
 EXTS = (".ttf", ".otf", ".ttc")
 FR_PRIVATE = 0x10
-DEFAULT_FAMILY = "Malgun Gothic"
+DEFAULT_FAMILY = "Apple SD Gothic Neo" if sys.platform == "darwin" else "Malgun Gothic"
 
 log = logging.getLogger("cmr.fonts")
 log.addHandler(logging.NullHandler())
@@ -62,6 +63,16 @@ def family_name(path):
     return None
 
 
+def _register_mac(path):
+    """Make a font file usable by this process only (CoreText, process scope)."""
+    import CoreText
+    import Foundation
+    url = Foundation.NSURL.fileURLWithPath_(path)
+    res = CoreText.CTFontManagerRegisterFontsForURL(url, CoreText.kCTFontManagerScopeProcess, None)
+    ok = res[0] if isinstance(res, tuple) else res
+    return bool(ok)
+
+
 def load_all():
     """Load every font in fonts/ privately. -> sorted list of family names ([] if none / not Windows)."""
     try:
@@ -72,7 +83,10 @@ def load_all():
     for fn in files:
         path = os.path.join(FONT_DIR, fn)
         try:
-            ok = ctypes.windll.gdi32.AddFontResourceExW(path, FR_PRIVATE, 0)
+            if sys.platform == "darwin":
+                ok = _register_mac(path)
+            else:
+                ok = ctypes.windll.gdi32.AddFontResourceExW(path, FR_PRIVATE, 0)
         except Exception as e:                                    # not Windows
             log.warning("글꼴 불러오기 실패: %s", e)
             return []

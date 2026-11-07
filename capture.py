@@ -1,9 +1,11 @@
 """Background thread that finds the ChatMatrix on screen and reports newly seen chat lines.
 
 Screen grabbing uses mss (classic GDI BitBlt), NOT the Windows Graphics Capture API,
-so no yellow capture border is drawn around anything.
+so no yellow capture border is drawn around anything. On macOS capture_mac.MacGrabber grabs at the real pixel resolution.
 """
 import logging
+import math
+import sys
 import threading
 import time
 from collections import deque
@@ -11,13 +13,26 @@ from collections import deque
 from i18n import tr
 
 import numpy as np
-import mss
+
+try:
+    import mss
+except ImportError:                      # macOS installs do not need it
+    mss = None
 
 import decoder
 import proto2
+import scaled
 
 
 log = logging.getLogger("cmr.capture")
+
+
+def open_grabber():
+    """The screen grabber for this system (used as a context manager inside the capture thread)."""
+    if sys.platform == "darwin":
+        import capture_mac
+        return capture_mac.MacGrabber()
+    return (getattr(mss, "MSS", None) or mss.mss)()
 
 
 class CaptureWorker(threading.Thread):
@@ -73,11 +88,19 @@ class CaptureWorker(threading.Thread):
             arr = self._grab_array(sct, area)
             pos = decoder.find_matrix(arr)                      # protocol v1 first: exact colours, cheap
             if pos:
-                return mon["left"] + dx + pos[0], mon["top"] + dy + pos[1], "v1", 0
+                return mon["left"] + dx + pos[0], mon["top"] + dy + pos[1], "v1", 0, None
             hit = proto2.find_and_decode(arr)                   # then v2 (colour-change tolerant)
             if hit:
                 x, y, frame = hit
-                return mon["left"] + dx + x, mon["top"] + dy + y, "v2", frame.rows
+                return mon["left"] + dx + x, mon["top"] + dy + y, "v2", frame.rows, None
+            hit = scaled.find(arr)                              # v2 with cells of another size / mixed colours (macOS)
+            if hit:
+                x, y, pitch, frame = hit
+                gx, gy = mon["left"] + dx + x, mon["top"] + dy + y
+                left, top = int(math.floor(gx)) - 3, int(math.floor(gy)) - 3
+                geom = {"pitch": pitch, "ox": gx - left, "oy": gy - top, "rows": frame.rows,
+                        "w": int(math.ceil(32 * pitch + gx - left + 4)), "h": int(math.ceil(frame.rows * pitch + gy - top + 4))}
+                return left, top, "v2s", frame.rows, geom
         return None
 
     def _probe(self, sct, pos):
@@ -97,14 +120,18 @@ class CaptureWorker(threading.Thread):
     # ------------------------------------------------------------------
     def run(self):
         try:
-            with mss.mss() as sct:      # must be created inside this thread
+            with open_grabber() as sct:      # must be created inside this thread
                 self._loop(sct)
+        except PermissionError:
+            log.error("화면 기록 권한이 없습니다")
+            self._status(tr("화면 기록 권한이 필요합니다. 시스템 설정 > 개인정보 보호 및 보안 > 화면 및 시스템 오디오 녹음에서 허용한 뒤 프로그램을 다시 실행하세요."))
         except Exception as e:           # report instead of dying silently
             self._status(tr("캡처 오류: {e}", e=repr(e)))
 
     def _loop(self, sct):
         pos = None
         mode, rows = "v1", 0               # protocol of the matrix at `pos` (v2 matrices are `rows` cell rows tall)
+        geom = None                        # mode "v2s": cell size and sub-pixel position of a scaled matrix
         fails = 0
         last_warn = 0.0
         last_search = 0.0
@@ -127,6 +154,7 @@ class CaptureWorker(threading.Thread):
                 if manual:
                     pos = (int(manual[0]), int(manual[1]))
                     mode, rows = self._probe(sct, pos)
+                    geom = None
                 elif time.time() - last_search >= 1.0:
                     last_search = time.time()
                     full = time.time() - last_full >= 30.0
@@ -135,17 +163,21 @@ class CaptureWorker(threading.Thread):
                     self._status(tr("매트릭스 찾는 중... (게임을 창 모드로 띄우고 /cm 위치 확인)"))
                     hit = self._search(sct, full)
                     if hit:
-                        pos, mode, rows = (hit[0], hit[1]), hit[2], hit[3]
+                        pos, mode, rows, geom = (hit[0], hit[1]), hit[2], hit[3], hit[4]
                         fails = 0
                         log.info("매트릭스 발견 @ %d,%d | 프로토콜 %s%s", pos[0], pos[1], mode,
-                                 (" (%d줄)" % rows) if mode == "v2" else "")
+                                 ((" (%d줄)" % rows) if mode != "v1" else "")
+                                 + ((" 셀 %.2fpx" % geom["pitch"]) if geom else ""))
                         self._status(tr("연결됨 @ {x},{y}", x=pos[0], y=pos[1]))
                 if pos is None:
                     self._sleep_rest(t0, 0.2)
                     continue
 
-            area = {"left": pos[0], "top": pos[1], "width": decoder.WIDTH,
-                    "height": decoder.HEIGHT if mode == "v1" else rows * proto2.CELL}
+            if mode == "v2s":
+                area = {"left": pos[0], "top": pos[1], "width": geom["w"], "height": geom["h"]}
+            else:
+                area = {"left": pos[0], "top": pos[1], "width": decoder.WIDTH,
+                        "height": decoder.HEIGHT if mode == "v1" else rows * proto2.CELL}
             try:
                 tg = time.perf_counter()
                 arr = self._grab_array(sct, area)
@@ -153,6 +185,8 @@ class CaptureWorker(threading.Thread):
                 perf_t += time.perf_counter() - tg
                 if mode == "v1":
                     frame, reason = decoder.decode_region(arr)
+                elif mode == "v2s":
+                    frame, reason = scaled.decode(arr, geom["ox"], geom["oy"], geom["pitch"], geom["rows"])
                 else:
                     frame, reason = proto2.decode(arr, 0, 0)
                 if frame is None and reason == "ramp merged" and time.time() - last_warn >= 30:
@@ -184,7 +218,7 @@ class CaptureWorker(threading.Thread):
                     if new:
                         self.out.put(("lines", new))
                     self._status(tr("연결됨 @ {x},{y}", x=pos[0], y=pos[1]) + f" | seq {frame.seq}"
-                                 + (f" | v2·{frame.levels}" if mode == "v2" else ""))
+                                 + (f" | v2·{frame.levels}" if mode != "v1" else ""))
 
             if perf_n and time.time() - perf_log >= 60:        # one line a minute: how expensive is the grabbing?
                 log.info("캡처 | 최근 %d회 평균 %.2f ms (최대 초당 %d회)", perf_n, perf_t / perf_n * 1000, int(1 / period))

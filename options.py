@@ -1,5 +1,7 @@
 """Options window (right-click on the main window)."""
 import ctypes
+import sys
+import subprocess
 import json
 import re
 import logging
@@ -11,6 +13,7 @@ from ctypes import wintypes
 from tkinter import colorchooser, ttk, messagebox
 
 import config
+import plat
 import glossary
 import hotkeys
 import logsetup
@@ -24,6 +27,14 @@ from i18n import tr
 from translator import TRANSLATOR_LABELS, LANGS
 
 PAD = {"padx": 6, "pady": 3}
+
+
+def _open_file(path):
+    """Open a file with its default program (Windows: startfile; macOS: open)."""
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        os.startfile(path)
 
 
 class OptionsWindow:
@@ -83,8 +94,10 @@ class OptionsWindow:
         self.google_widgets = []
         self.test_widgets = []
 
+        row = ttk.Frame(win)
+        row.pack(side="bottom", anchor="e", padx=8, pady=(2, 8))     # packed first: always visible, whatever the size
         nb = ttk.Notebook(win)
-        nb.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+        nb.pack(side="top", fill="both", expand=True, padx=8, pady=(8, 4))
         self._tab_translate(nb)
         self._tab_window(nb)
         self._tab_capture(nb)
@@ -92,14 +105,45 @@ class OptionsWindow:
         self._tab_log(nb)
         self._tab_other(nb)
         self.nb = nb
-
-        row = ttk.Frame(win)
-        row.pack(anchor="e", padx=8, pady=(2, 8))
         ttk.Button(row, text=tr("저장"), command=self.save).pack(side="left")
         ttk.Button(row, text=tr("닫기"), command=win.destroy).pack(side="left", padx=6)
         ttk.Button(row, text=tr("프로그램 종료"), command=app.on_close).pack(side="left", padx=(18, 0))
         self.refresh_states()
+        self._fit_tabs()
         self._place_beside_main()
+
+    # macOS: a tab taller than the screen scrolls instead of making the window huge
+    _scroll_tabs = ()
+
+    def _tab_frame(self, nb, text):
+        if sys.platform != "darwin":
+            tab = ttk.Frame(nb)
+            nb.add(tab, text=text)
+            return tab
+        outer = ttk.Frame(nb)
+        nb.add(outer, text=text)
+        canvas = tk.Canvas(outer, highlightthickness=0, borderwidth=0)
+        bar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e, c=canvas: c.configure(scrollregion=c.bbox("all")))
+        canvas.bind("<Enter>", lambda e, c=canvas: c.bind_all("<MouseWheel>", lambda ev: c.yview_scroll(-1 if ev.delta > 0 else 1, "units")))
+        canvas.bind("<Leave>", lambda e, c=canvas: c.unbind_all("<MouseWheel>"))
+        self._scroll_tabs = self._scroll_tabs + ((canvas, inner),)
+        return inner
+
+    def _fit_tabs(self):
+        if not self._scroll_tabs:
+            return
+        self.win.update_idletasks()
+        maxh = max(300, self.win.winfo_screenheight() - 260)
+        w = max(i.winfo_reqwidth() for _, i in self._scroll_tabs)
+        h = min(max(i.winfo_reqheight() for _, i in self._scroll_tabs), maxh)
+        for c, i in self._scroll_tabs:
+            c.configure(width=w, height=h)
 
     # ------------------------------------------------------------------
     def alive(self):
@@ -117,8 +161,7 @@ class OptionsWindow:
     # ------------------------------------------------------------------ tabs
     def _tab_translate(self, nb):
         v = self.v
-        tab = ttk.Frame(nb)
-        nb.add(tab, text=tr("번역"))
+        tab = self._tab_frame(nb, tr("번역"))
 
         top = ttk.Frame(tab)
         top.pack(fill="x", padx=6, pady=(8, 2))
@@ -231,8 +274,7 @@ class OptionsWindow:
 
     def _tab_window(self, nb):
         v, cfg, app = self.v, self.app.cfg, self.app
-        tab = ttk.Frame(nb)
-        nb.add(tab, text=tr("창"))
+        tab = self._tab_frame(nb, tr("창"))
 
         ttk.Label(tab, text=tr("투명도")).grid(row=0, column=0, sticky="nw", **PAD)
         sl = ttk.Frame(tab)
@@ -289,7 +331,7 @@ class OptionsWindow:
                         tr("클릭 통과"),
                         tr("켜면 평소에는 이 창이 마우스 입력을 받지 않습니다.\n"
                            "Shift를 누른 채로 창 위에 마우스를 올리면 클릭, 드래그 선택(선택하면 자동 복사), 스크롤, 창 이동이 됩니다.\n"
-                           "옵션은 Ctrl+Alt+O 로도 열 수 있습니다.\n\n계속할까요?"), parent=self.win):
+                           "옵션은 Ctrl+Alt+O 로도 열 수 있습니다.\n\n계속할까요?").replace("Ctrl+Alt+O", plat.OPTIONS_KEY), parent=self.win):
                     v["click_through"].set(False)
                     return
             cfg["click_through"] = bool(v["click_through"].get())
@@ -334,8 +376,7 @@ class OptionsWindow:
 
     def _tab_capture(self, nb):
         v = self.v
-        tab = ttk.Frame(nb)
-        nb.add(tab, text=tr("캡처"))
+        tab = self._tab_frame(nb, tr("캡처"))
         ttk.Label(tab, text=tr("초당 읽기 횟수")).grid(row=0, column=0, sticky="w", **PAD)
         ttk.Spinbox(tab, from_=5, to=60, textvariable=v["poll_hz"], width=6).grid(row=0, column=1, sticky="w", **PAD)
         ttk.Label(tab, text=tr("수동 좌표 X, Y (비우면 자동 탐색)")).grid(row=1, column=0, sticky="w", **PAD)
@@ -354,8 +395,7 @@ class OptionsWindow:
             self.v["shadow_color"].set(hexv)
 
     def _tab_send(self, nb):
-        tab = ttk.Frame(nb)
-        nb.add(tab, text=tr("보내기"))
+        tab = self._tab_frame(nb, tr("보내기"))
         v = self.v
         ttk.Checkbutton(tab, text=tr("보내기 번역 사용 (단축키 → 입력줄 → 번역을 클립보드로)"),
                         variable=v["send_enabled"]).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
@@ -426,8 +466,7 @@ class OptionsWindow:
         dlg.focus_force()
 
     def _tab_log(self, nb):
-        tab = ttk.Frame(nb)
-        nb.add(tab, text=tr("로그"))
+        tab = self._tab_frame(nb, tr("로그"))
         holder = ttk.Frame(tab)
         holder.pack(fill="both", expand=True, padx=6, pady=(8, 2))
         self.log_text = tk.Text(holder, width=86, height=26, wrap="none", font=("Consolas", 9), state="disabled")
@@ -447,8 +486,7 @@ class OptionsWindow:
         self.win.after(1000, self._log_tick)
 
     def _tab_other(self, nb):
-        tab = ttk.Frame(nb)
-        nb.add(tab, text=tr("기타"))
+        tab = self._tab_frame(nb, tr("기타"))
         self.other_tab = tab
 
         gl = ttk.LabelFrame(tab, text=tr("언어"))
@@ -584,7 +622,7 @@ class OptionsWindow:
 
     def open_log_file(self):
         try:
-            os.startfile(logsetup.PATH)
+            _open_file(logsetup.PATH)
         except OSError as e:
             messagebox.showinfo(tr("로그"), tr("로그 파일을 열 수 없습니다: {e}", e=e), parent=self.win)
 
@@ -611,7 +649,7 @@ class OptionsWindow:
             if not os.path.exists(path):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write("# 단어 = 뜻   (# 로 시작하는 줄은 주석)\n")   # file content, stays as is
-            os.startfile(path)
+            _open_file(path)
         except OSError as e:
             messagebox.showerror(tr("단어장"), tr("파일을 열 수 없습니다: {e}", e=e), parent=self.win)
 

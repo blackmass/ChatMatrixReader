@@ -8,28 +8,13 @@ Window layout
       front = the text, with the background colour keyed out (transparent) and its own alpha
     When they are equal, a single ordinary window is used.
 """
-import ctypes
-from ctypes import wintypes
+import plat
+from plat import (Hotkey, Tray, WindowMixin, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+                  _hwnd, _msgbox, _set_exstyle, _single_instance)    # importing plat also switches on DPI awareness
 
 
-def _enable_dpi_awareness():
-    # Must happen before any window is created / any screen is captured,
-    # otherwise Windows display scaling shifts the capture coordinates.
-    try:
-        if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):  # per-monitor v2
-            return
-    except Exception:
-        pass
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
 
 
-_enable_dpi_awareness()
 
 import itertools
 import logging
@@ -48,7 +33,7 @@ import fonts
 import glossary
 import hotkeys
 import outgoing
-import winutil
+from plat import winutil
 import i18n
 import logsetup
 import translator
@@ -62,7 +47,8 @@ from options import OptionsWindow
 logsetup.setup()
 log = logging.getLogger("cmr.app")
 
-BG = "#1e1f22"            # also the colour key of the front window in two-window mode: nothing else may use it
+BG_SOLID = "#1e1f22"      # the colour key of the front window in two-window mode (Windows): nothing else may use it
+BG = plat.KEY_BG or BG_SOLID   # macOS: really transparent instead
 TITLE_BG = "#2b2d31"
 INPUT_BG = "#262a31"
 EDGE = "#3a3d44"
@@ -105,236 +91,24 @@ def channel_tag(ch: str) -> str:
 # ----------------------------------------------------------------------
 # small Win32 helpers
 # ----------------------------------------------------------------------
-def _user32():
-    u = ctypes.windll.user32
-    u.GetParent.argtypes = [wintypes.HWND]
-    u.GetParent.restype = wintypes.HWND
-    u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
-    u.GetWindowLongW.restype = ctypes.c_long
-    u.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
-    u.SetWindowLongW.restype = ctypes.c_long
-    u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
-                               ctypes.c_int, ctypes.c_int, ctypes.c_uint]
-    u.SetWindowPos.restype = wintypes.BOOL
-    return u
 
 
-def _hwnd(win):
-    wid = win.winfo_id()
-    return _user32().GetParent(wid) or wid
 
 
-def _set_exstyle(win, add=0, remove=0):
-    try:
-        u = _user32()
-        h = _hwnd(win)
-        style = u.GetWindowLongW(h, -20)                       # GWL_EXSTYLE
-        u.SetWindowLongW(h, -20, (style | add) & ~remove)
-    except Exception:
-        pass
 
 
-WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE = 0x80000, 0x20, 0x80, 0x08000000
-WS_EX_APPWINDOW = 0x40000
 
 
-class Hotkey(threading.Thread):
-    """Global hotkey Ctrl+Alt+O -> reopen the options window (needed when click-through is on)."""
-
-    def __init__(self, out_queue):
-        super().__init__(daemon=True)
-        self.out = out_queue
-        self.ready = threading.Event()
-        self.ok = False
-
-    def run(self):
-        user32 = ctypes.windll.user32
-        MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x1, 0x2, 0x4000
-        WM_HOTKEY = 0x0312
-        self.ok = bool(user32.RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4F))  # 'O'
-        self.ready.set()
-        if not self.ok:
-            return
-        msg = wintypes.MSG()
-        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-            if msg.message == WM_HOTKEY:
-                self.out.put(("options", None))
 
 
-class NOTIFYICONDATAW(ctypes.Structure):
-    _fields_ = [("cbSize", wintypes.DWORD), ("hWnd", wintypes.HWND), ("uID", wintypes.UINT),
-                ("uFlags", wintypes.UINT), ("uCallbackMessage", wintypes.UINT), ("hIcon", wintypes.HANDLE),
-                ("szTip", ctypes.c_wchar * 128), ("dwState", wintypes.DWORD), ("dwStateMask", wintypes.DWORD),
-                ("szInfo", ctypes.c_wchar * 256), ("uTimeout", wintypes.UINT), ("szInfoTitle", ctypes.c_wchar * 64),
-                ("dwInfoFlags", wintypes.DWORD), ("guidItem", ctypes.c_ubyte * 16), ("hBalloonIcon", wintypes.HANDLE)]
 
 
-class WNDCLASSW(ctypes.Structure):
-    _fields_ = [("style", wintypes.UINT), ("lpfnWndProc", ctypes.c_void_p), ("cbClsExtra", ctypes.c_int),
-                ("cbWndExtra", ctypes.c_int), ("hInstance", wintypes.HANDLE), ("hIcon", wintypes.HANDLE),
-                ("hCursor", wintypes.HANDLE), ("hbrBackground", wintypes.HANDLE),
-                ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR)]
 
 
-_ICON_COLORS = [(0x4d, 0x7c, 0xff), (0x2e, 0xcc, 0x71), (0xf3, 0x9c, 0x12), (0x9b, 0x59, 0xb6),
-                (0x2e, 0xcc, 0x71), (0xe7, 0x4c, 0x3c), (0x4d, 0x7c, 0xff), (0xf3, 0x9c, 0x12),
-                (0xf3, 0x9c, 0x12), (0x4d, 0x7c, 0xff), (0x9b, 0x59, 0xb6), (0x2e, 0xcc, 0x71),
-                (0x9b, 0x59, 0xb6), (0xf3, 0x9c, 0x12), (0x2e, 0xcc, 0x71), (0xe7, 0x4c, 0x3c)]
 
 
-def _make_icon(user32, kernel32):
-    """16x16 icon drawn in code: a 4x4 grid of coloured cells (like the matrix). Falls back to the stock icon."""
-    try:
-        bits = bytearray()
-        for y in range(16):
-            for x in range(16):
-                if x % 4 == 3 or y % 4 == 3:
-                    r, g, b = 0x1e, 0x1f, 0x22                      # gap between cells
-                else:
-                    r, g, b = _ICON_COLORS[(y // 4) * 4 + (x // 4)]
-                bits += bytes((b, g, r, 255))                       # BGRA
-        user32.CreateIcon.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_int, ctypes.c_ubyte,
-                                      ctypes.c_ubyte, ctypes.c_char_p, ctypes.c_char_p]
-        user32.CreateIcon.restype = wintypes.HANDLE
-        icon = user32.CreateIcon(kernel32.GetModuleHandleW(None), 16, 16, 1, 32, bytes(32), bytes(bits))
-        if icon:
-            return icon
-    except Exception:
-        log.exception("아이콘 생성 실패")
-    user32.LoadIconW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
-    user32.LoadIconW.restype = wintypes.HANDLE
-    return user32.LoadIconW(None, 32512)                            # IDI_APPLICATION
 
 
-class Tray(threading.Thread):
-    """Notification-area icon. Left click -> options, right click -> small menu (options / quit).
-    Runs its own message loop; talks to the UI only through the queue."""
-    WM_TRAY = 0x0400 + 20
-
-    def __init__(self, out_queue, tip):
-        super().__init__(daemon=True)
-        self.out = out_queue
-        self.tip = tip
-        self.ready = threading.Event()
-        self.ok = False
-        self.hwnd = None
-        self.nid = None
-        self.hicon = None
-        self._proc = None
-        self._taskbar_msg = 0
-
-    def run(self):
-        u = k = None
-        try:
-            self.u = u = ctypes.WinDLL("user32", use_last_error=True)
-            self.k = k = ctypes.WinDLL("kernel32", use_last_error=True)
-            self.sh = ctypes.WinDLL("shell32", use_last_error=True)
-            self._prototypes()
-            wndproc_t = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
-            self._proc = wndproc_t(self._wndproc)                    # keep a reference or it gets garbage collected
-            hinst = k.GetModuleHandleW(None)
-            wc = WNDCLASSW()
-            wc.lpfnWndProc = ctypes.cast(self._proc, ctypes.c_void_p)
-            wc.hInstance = hinst
-            wc.lpszClassName = "ChatMatrixTrayWnd"
-            u.RegisterClassW(ctypes.byref(wc))
-            self.hwnd = u.CreateWindowExW(0, "ChatMatrixTrayWnd", "ChatMatrixTray", 0x80000000, 0, 0, 0, 0,
-                                          None, None, hinst, None)
-            self._taskbar_msg = u.RegisterWindowMessageW("TaskbarCreated")
-            self.hicon = _make_icon(u, k)
-            self.ok = self._add()
-        except Exception:
-            log.exception("트레이 아이콘 시작 실패")
-        finally:
-            self.ready.set()
-        if not self.ok:
-            return
-        msg = wintypes.MSG()
-        while u.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-            u.TranslateMessage(ctypes.byref(msg))
-            u.DispatchMessageW(ctypes.byref(msg))
-
-    def _prototypes(self):
-        u, k, sh = self.u, self.k, self.sh
-        u.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-        u.DefWindowProcW.restype = ctypes.c_ssize_t
-        u.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
-        u.RegisterClassW.restype = wintypes.ATOM
-        u.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
-                                      ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                      wintypes.HWND, wintypes.HANDLE, wintypes.HANDLE, wintypes.LPVOID]
-        u.CreateWindowExW.restype = wintypes.HWND
-        u.RegisterWindowMessageW.argtypes = [wintypes.LPCWSTR]
-        u.RegisterWindowMessageW.restype = wintypes.UINT
-        u.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
-        u.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
-        u.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
-        u.DispatchMessageW.restype = ctypes.c_ssize_t
-        u.CreatePopupMenu.restype = wintypes.HANDLE
-        u.AppendMenuW.argtypes = [wintypes.HANDLE, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]
-        u.TrackPopupMenu.argtypes = [wintypes.HANDLE, wintypes.UINT, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                     wintypes.HWND, ctypes.c_void_p]
-        u.TrackPopupMenu.restype = ctypes.c_int
-        u.DestroyMenu.argtypes = [wintypes.HANDLE]
-        u.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
-        u.SetForegroundWindow.argtypes = [wintypes.HWND]
-        u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-        k.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
-        k.GetModuleHandleW.restype = wintypes.HANDLE
-        sh.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
-        sh.Shell_NotifyIconW.restype = wintypes.BOOL
-
-    def _add(self):
-        nid = NOTIFYICONDATAW()
-        nid.cbSize = ctypes.sizeof(nid)
-        nid.hWnd = self.hwnd
-        nid.uID = 1
-        nid.uFlags = 0x1 | 0x2 | 0x4                                # NIF_MESSAGE | NIF_ICON | NIF_TIP
-        nid.uCallbackMessage = self.WM_TRAY
-        nid.hIcon = self.hicon
-        nid.szTip = self.tip[:127]
-        self.nid = nid
-        return bool(self.sh.Shell_NotifyIconW(0, ctypes.byref(nid)))  # NIM_ADD
-
-    def remove(self):
-        """Delete the icon (must be done before the process is killed, otherwise a ghost icon stays until hovered)."""
-        if self.ok and self.nid is not None:
-            self.sh.Shell_NotifyIconW(2, ctypes.byref(self.nid))      # NIM_DELETE
-
-    def _wndproc(self, hwnd, msg, wparam, lparam):
-        try:
-            u = self.u
-            if msg == self.WM_TRAY:
-                event = lparam & 0xFFFF
-                if event in (0x202, 0x203):                          # left button up / double click
-                    self.out.put(("options", None))
-                elif event == 0x205:                                 # right button up
-                    self._menu(hwnd)
-                return 0
-            if self._taskbar_msg and msg == self._taskbar_msg:       # Explorer restarted: the icon must be added again
-                self._add()
-                return 0
-        except Exception:
-            log.exception("트레이 처리 오류")
-            return 0
-        return self.u.DefWindowProcW(hwnd, msg, wparam, lparam)
-
-    def _menu(self, hwnd):
-        u = self.u
-        pt = wintypes.POINT()
-        u.GetCursorPos(ctypes.byref(pt))
-        menu = u.CreatePopupMenu()
-        u.AppendMenuW(menu, 0, 1, tr("옵션 열기"))
-        u.AppendMenuW(menu, 0x800, 0, None)                          # separator
-        u.AppendMenuW(menu, 0, 2, tr("종료"))
-        u.SetForegroundWindow(hwnd)                                  # needed so the menu closes when clicking elsewhere
-        cmd = u.TrackPopupMenu(menu, 0x2 | 0x20 | 0x100, pt.x, pt.y, 0, hwnd, None)   # right button | bottom | return id
-        u.PostMessageW(hwnd, 0, 0, 0)
-        u.DestroyMenu(menu)
-        if cmd == 1:
-            self.out.put(("options", None))
-        elif cmd == 2:
-            self.out.put(("quit", None))
 
 
 class MiniScrollbar(tk.Canvas):
@@ -387,7 +161,7 @@ class MiniScrollbar(tk.Canvas):
         self.redraw()
 
 
-class App:
+class App(WindowMixin):
     def __init__(self):
         self.cfg = config.load()
         i18n.init(self.cfg.get("language", i18n.AUTO))      # before any text is created
@@ -404,8 +178,10 @@ class App:
         self.tick_n = 0
 
         self.root = tk.Tk()
-        self.root.overrideredirect(True)
+        self.root.title("ChatMatrix Reader")           # macOS finds its window by this title
+        plat.borderless(self.root, keyboard=True)
         self._connected = False
+        self._shift_grace = 0
         self._interactive = False      # click-through temporarily lifted by holding Shift
         self._game_hwnd = None         # cached game window (for "only above the game window")
         self._follow_failed = False
@@ -414,6 +190,7 @@ class App:
         self._follow_logged = 0.0
         self._placed_for = None        # game window we last stacked above
         self._follow_top = False       # currently kept topmost because the game has the focus
+        self._fg_last = None           # window that had the focus at the previous check
         self._prev_fg = None           # window that had focus before we became interactive
         self.latest = None             # newest release tag found by the update check (e.g. "v1.3.0")
         self.shad = None               # text-shadow window (created when the option is first on)
@@ -436,6 +213,7 @@ class App:
         self.root.title("ChatMatrix Reader")
         self.root.geometry(self.cfg["geometry"])
         self.root.configure(bg=BG)
+        plat.setup_front(self.root)
 
         self.hotkey = Hotkey(self.q)
         self.hotkey.start()
@@ -459,6 +237,8 @@ class App:
         self.translations = translator.TranslationService(
             self.q, lambda: self.cfg, workers=max(1, min(8, int(self.cfg.get("max_parallel", 2)))))
 
+        plat.setup_app(self)
+        plat.request_permissions(self)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.bind("<Configure>", self._on_configure)
         self.root.bind("<FocusIn>", lambda e: self._stack_back())
@@ -546,10 +326,10 @@ class App:
         self.text.configure(yscrollcommand=self._on_yscroll)
         self.sb.bind("<MouseWheel>", self._wheel)
         self.grip = tk.Label(self.body, text="◢", bg=BG, fg="#5a5f69", font=("Segoe UI Symbol", 9),
-                             cursor="size_nw_se")
-        self.grip.bind("<ButtonPress-1>", lambda e: setattr(self, "dragging", True))
+                             cursor=plat.RESIZE_CURSOR)
+        self.grip.bind("<ButtonPress-1>", self._resize_start)
         self.grip.bind("<B1-Motion>", self._resize_move)
-        self.grip.bind("<ButtonRelease-1>", lambda e: setattr(self, "dragging", False))
+        self.grip.bind("<ButtonRelease-1>", self._resize_end)
 
         # ---- read-only but selectable / copyable
         nav = {"Up", "Down", "Left", "Right", "Prior", "Next", "Home", "End"}
@@ -573,9 +353,10 @@ class App:
         self.text.bind("<ButtonRelease-1>", self._auto_copy, add="+")
         self.text.bind("<Control-Shift-C>", self._copy_selection)
         self.text.bind("<Control-Shift-c>", self._copy_selection)
-        self.root.bind("<Button-3>", lambda e: self.open_options())
+        for seq in plat.RIGHT_CLICKS:
+            self.root.bind(seq, lambda e: self.open_options())
 
-        self.add_system(tr("제목줄/스크롤은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | Ctrl+Alt+O: 옵션 | 클릭 통과 중에는 Shift를 누른 채로 조작"))
+        self.add_system(tr("제목줄/스크롤은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | Ctrl+Alt+O: 옵션 | 클릭 통과 중에는 Shift를 누른 채로 조작").replace("Ctrl+Alt+O", plat.OPTIONS_KEY))
         if self.cfg.get("check_updates", True):
             self.check_update(self._on_start_update)
         if self.cfg.get("translate_test_start", True) and self.cfg.get("translator", "none") != "none":
@@ -584,8 +365,9 @@ class App:
     def _build_back(self):
         """Background-only window used when background and text opacity differ."""
         self.back = tk.Toplevel(self.root)
-        self.back.overrideredirect(True)
-        self.back.configure(bg=BG)
+        self.back.title("ChatMatrix Reader (background)")
+        plat.borderless(self.back, keyboard=True)
+        self.back.configure(bg=BG_SOLID)
         self.back.withdraw()
         self.back.update_idletasks()
         _set_exstyle(self.back, add=WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
@@ -594,7 +376,8 @@ class App:
         self.back.bind("<B1-Motion>", self._back_motion)
         self.back.bind("<ButtonRelease-1>", self._auto_copy)
         self.back.bind("<MouseWheel>", self._wheel)
-        self.back.bind("<Button-3>", lambda e: self.open_options())
+        for seq in plat.RIGHT_CLICKS:
+            self.back.bind(seq, lambda e: self.open_options())
 
     # ---- overlay chrome (shown only while the mouse is over the window)
     def set_chrome(self, on):
@@ -612,20 +395,7 @@ class App:
                 w.place_forget()
             self.body.configure(highlightbackground=BG)
 
-    def _cursor_inside(self):
-        pt = wintypes.POINT()
-        ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-        x0, y0 = self.root.winfo_rootx(), self.root.winfo_rooty()
-        return x0 <= pt.x < x0 + self.root.winfo_width() and y0 <= pt.y < y0 + self.root.winfo_height()
 
-    @staticmethod
-    def _key_down(vk):
-        try:
-            u = ctypes.windll.user32
-            u.GetAsyncKeyState.restype = ctypes.c_short
-            return bool(u.GetAsyncKeyState(vk) & 0x8000)
-        except Exception:
-            return False
 
     def _hover_tick(self):
         try:
@@ -635,12 +405,18 @@ class App:
                 # Shift + mouse over the window = behave like a normal window; a started drag/selection is finished first
                 keep = self._interactive and (self.dragging or self._key_down(0x01))      # 0x01 = left button
                 interactive = (self._key_down(0x10) and inside) or keep                   # 0x10 = Shift
+                if self._interactive and not interactive and self._shift_grace > 0:      # macOS: key state may flicker
+                    self._shift_grace -= 1
+                    interactive = True
+                elif interactive:
+                    self._shift_grace = plat.SHIFT_GRACE
                 if interactive != self._interactive:
                     self._interactive = interactive
                     self._set_passthrough(not interactive)
                     if interactive:
                         self._enter_interactive()
                     else:
+                        self.text.tag_remove("sel", "1.0", "end")       # a half-made selection is not kept
                         self._leave_interactive()
                 want = self.dragging or interactive
             else:
@@ -652,16 +428,6 @@ class App:
         finally:
             self.root.after(50, self._hover_tick)
 
-    def _fg_info(self):
-        u = ctypes.windll.user32
-        u.GetForegroundWindow.restype = wintypes.HWND
-        u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-        u.GetWindowThreadProcessId.restype = wintypes.DWORD
-        fg = u.GetForegroundWindow()
-        pid = wintypes.DWORD(0)
-        if fg:
-            u.GetWindowThreadProcessId(fg, ctypes.byref(pid))
-        return fg, pid.value
 
     def _enter_interactive(self):
         if self._send_open or self._send_pending:        # the send box has the focus: never hand it back
@@ -681,11 +447,7 @@ class App:
         try:
             fg, pid = self._fg_info()
             if pid == os.getpid():
-                u = ctypes.windll.user32
-                u.IsWindow.argtypes = [wintypes.HWND]
-                u.SetForegroundWindow.argtypes = [wintypes.HWND]
-                if u.IsWindow(prev):
-                    u.SetForegroundWindow(prev)
+                self._restore_foreground(prev)
         except Exception:
             pass
 
@@ -930,7 +692,8 @@ class App:
                 self.root.after(25, lambda: self._send_paste(game, tries + 1))      # wait until modifier keys are up
                 return
             else:
-                winutil.send_ctrl_v()
+                if winutil.send_ctrl_v() is False:
+                    self.add_system("⚠ " + tr("자동 붙여넣기를 하지 않았습니다: 키 입력 권한이 없습니다 (시스템 설정 → 손쉬운 사용에서 Python 허용 후 다시 시작)"), "error")
         finally:
             self._send_pending = False
 
@@ -946,10 +709,38 @@ class App:
     def _drag_end(self, _e):
         self.dragging = False
 
+    def _resize_start(self, e):
+        self.dragging = True
+        self._rs = (e.x_root, e.y_root, self.root.winfo_width(), self.root.winfo_height())
+        if plat.POLL_RESIZE:
+            self._resize_poll()
+
+    def _resize_end(self, e):
+        if plat.POLL_RESIZE:
+            return                                         # the timer decides (macOS sends this when the pointer leaves)
+        self.dragging = False
+
+    def _resize_poll(self):
+        """macOS: once the pointer is outside the window, motion events stop coming. Read the pointer by timer instead."""
+        if not self.dragging:
+            return
+        if not self._key_down(0x01):                       # left button released (possibly outside the window)
+            self._rs_up = getattr(self, "_rs_up", 0) + 1
+            if self._rs_up >= 3:
+                self._rs_up = 0
+                self.dragging = False
+                return
+        else:
+            self._rs_up = 0
+        x, y = self.root.winfo_pointerxy()
+        x0, y0, w0, h0 = self._rs
+        self.root.geometry(f"{max(260, w0 + x - x0)}x{max(120, h0 + y - y0)}")
+        self.root.after(15, self._resize_poll)
+
     def _resize_move(self, e):
-        w = max(260, e.x_root - self.root.winfo_rootx())
-        h = max(120, e.y_root - self.root.winfo_rooty())
-        self.root.geometry(f"{w}x{h}")
+        # by how far the pointer moved since the press (an absolute position would jump by the window frame's offset)
+        x0, y0, w0, h0 = self._rs
+        self.root.geometry(f"{max(260, w0 + e.x_root - x0)}x{max(120, h0 + e.y_root - y0)}")
 
     def _wheel(self, e):
         self.text.yview_scroll(-3 if e.delta > 0 else 3, "units")
@@ -969,34 +760,7 @@ class App:
                 self.shad.geometry(f"{r.winfo_width()}x{r.winfo_height()}+{r.winfo_x() + dx}+{r.winfo_y() + dy}")
 
     # ---- taskbar: both windows must stay invisible to the taskbar / Alt+Tab
-    def _make_owner(self):
-        """Tiny invisible window that will own our windows (an owned window never has a taskbar button)."""
-        try:
-            u = ctypes.windll.user32
-            u.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
-                                          ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                          wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID]
-            u.CreateWindowExW.restype = wintypes.HWND
-            return u.CreateWindowExW(0, "STATIC", "ChatMatrixOwner", 0x80000000, 0, 0, 0, 0, None, None, None, None)
-        except Exception:
-            log.exception("소유자 창 생성 실패")
-            return None
 
-    def _hide_from_taskbar(self, win):
-        try:
-            h = _hwnd(win)
-            if self._owner:
-                u = ctypes.windll.user32
-                setter = getattr(u, "SetWindowLongPtrW", None)
-                if setter is not None:
-                    setter.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
-                    setter.restype = ctypes.c_void_p
-                    setter(h, -8, self._owner)                           # GWLP_HWNDPARENT = set the owner
-                else:
-                    _user32().SetWindowLongW(h, -8, self._owner)
-            _set_exstyle(win, add=WS_EX_TOOLWINDOW, remove=WS_EX_APPWINDOW)
-        except Exception:
-            log.exception("작업 표시줄 숨기기 실패")
 
     def _fix_taskbar(self):
         if self._owner is None:
@@ -1005,7 +769,7 @@ class App:
             if win is None:
                 continue
             try:
-                shown = bool(win.winfo_ismapped())
+                shown = bool(win.winfo_ismapped()) and plat.RESHOW_FOR_TASKBAR
                 if shown:
                     win.withdraw()                  # the taskbar only re-reads the style when a window is shown again
                 self._hide_from_taskbar(win)
@@ -1017,226 +781,16 @@ class App:
         self._stack_back()
         self.root.after(1000, self._log_windows)
 
-    def _log_windows(self):
-        """Write our top-level windows to the log, so a leftover taskbar button can be traced."""
-        try:
-            u = _user32()
-            u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-            u.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-            u.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-            u.IsWindowVisible.argtypes = [wintypes.HWND]
-            u.GetWindow.argtypes = [wintypes.HWND, ctypes.c_uint]
-            u.GetWindow.restype = wintypes.HWND
-            found = []
-            proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-
-            def cb(h, _):
-                pid = wintypes.DWORD(0)
-                u.GetWindowThreadProcessId(h, ctypes.byref(pid))
-                if pid.value == os.getpid() and u.IsWindowVisible(h):
-                    title = ctypes.create_unicode_buffer(128)
-                    cls = ctypes.create_unicode_buffer(64)
-                    u.GetWindowTextW(h, title, 128)
-                    u.GetClassNameW(h, cls, 64)
-                    ex = u.GetWindowLongW(h, -20) & 0xFFFFFFFF
-                    found.append(f"[{cls.value} '{title.value}' ex=0x{ex:08x} owner={'yes' if u.GetWindow(h, 4) else 'no'}]")
-                return True
-
-            u.EnumWindows.argtypes = [proc, wintypes.LPARAM]
-            u.EnumWindows(proc(cb), 0)
-            log.info("보이는 최상위 창 %d개: %s", len(found), " ".join(found))
-        except Exception:
-            log.exception("창 목록 조회 실패")
 
     # ------------------------------------------------------------------ "only above the game window"
-    @staticmethod
-    def _exe_of(hwnd):
-        """File name of the program that owns the window (lower case), '' if unknown."""
-        try:
-            u, k = _user32(), ctypes.windll.kernel32
-            k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-            k.OpenProcess.restype = wintypes.HANDLE
-            k.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
-                                                     ctypes.POINTER(wintypes.DWORD)]
-            k.CloseHandle.argtypes = [wintypes.HANDLE]
-            pid = wintypes.DWORD(0)
-            u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-            u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            h = k.OpenProcess(0x1000, False, pid.value)          # PROCESS_QUERY_LIMITED_INFORMATION
-            if not h:
-                return ""
-            try:
-                buf = ctypes.create_unicode_buffer(520)
-                n = wintypes.DWORD(520)
-                if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
-                    return os.path.basename(buf.value).lower()
-            finally:
-                k.CloseHandle(h)
-        except Exception:
-            pass
-        return ""
 
-    def _find_game(self):
-        """The game window: a visible top-level window of Wow*.exe (any language), else one with the configured title."""
-        u = _user32()
-        u.IsWindow.argtypes = [wintypes.HWND]
-        u.IsWindowVisible.argtypes = [wintypes.HWND]
-        u.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-        u.EnumWindows.argtypes = [ctypes.c_void_p, wintypes.LPARAM]
-        u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
-        u.GetWindow.restype = wintypes.HWND
-        u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-        g = self._game_hwnd
-        if g and u.IsWindow(g) and u.IsWindowVisible(g):
-            return g
-        if g:
-            log.info("게임 창이 사라졌습니다")
-        self._game_hwnd = None
-        now = time.monotonic()
-        if now < self._game_next_search:                       # searching = enumerating every window: not too often
-            return None
-        self._game_next_search = now + 2.0
-        title = (self.cfg.get("wow_window_title") or "").strip().lower()
-        me = (_hwnd(self.root), _hwnd(self.back)) + ((_hwnd(self.shad),) if self.shad is not None else ())
-        by_exe, by_title = [], []
-        buf = ctypes.create_unicode_buffer(256)
-        rect = wintypes.RECT()
 
-        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-        def cb(h, _lp):
-            if h in me or not u.IsWindowVisible(h) or u.GetWindow(h, 4):      # GW_OWNER: top-level windows only
-                return True
-            u.GetWindowTextW(h, buf, 256)
-            text = buf.value
-            u.GetWindowRect(h, ctypes.byref(rect))
-            area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
-            exe = self._exe_of(h)
-            if exe.startswith("wow") and exe.endswith(".exe"):
-                by_exe.append((area, h, text, exe))
-            elif title and text.strip().lower() == title:
-                by_title.append((area, h, text, exe))
-            return True
 
-        u.EnumWindows(cb, 0)
-        pool = by_exe or by_title
-        if pool:
-            area, h, text, exe = max(pool)
-            self._game_hwnd = h
-            log.info("게임 창 찾음: hwnd=%s 제목=%r 프로그램=%s 크기(면적)=%d", h, text, exe or "?", area)
-            return h
-        if now - self._game_warned > 60:
-            self._game_warned = now
-            log.warning("게임 창을 찾지 못했습니다 (Wow*.exe 창 없음, 제목 %r 일치 없음). 와우가 실행 중인지 확인하세요", title)
-        return None
 
-    def _follow_game(self):
-        """While the game has the focus this window is topmost; as soon as another program gets the focus it is
-        dropped to just above the game window (so that program can cover it). Changing only on focus changes
-        keeps the window from flickering when the game re-raises itself (the topmost window cannot be covered)."""
-        try:
-            if self.cfg.get("topmost_wow_only"):
-                u = _user32()
-                u.GetForegroundWindow.restype = wintypes.HWND
-                u.IsIconic.argtypes = [wintypes.HWND]
-                g = self._find_game()
-                fg = u.GetForegroundWindow()
-                if not g or u.IsIconic(g):
-                    if self._follow_top:
-                        self._set_follow_topmost(False, g)
-                elif fg and self._pid_of(fg) == os.getpid():
-                    pass                                         # our own window has the focus: leave everything as it is
-                elif fg:
-                    want = (fg == g)
-                    if want != self._follow_top or g != self._placed_for:
-                        self._placed_for = g
-                        self._set_follow_topmost(want, g)
-            else:
-                if self._follow_top:
-                    self._set_follow_topmost(False, None)
-                self._placed_for = None
-        except Exception:
-            if not self._follow_failed:
-                self._follow_failed = True
-                log.exception("게임 창 위 배치 실패")
-        self.root.after(120, self._follow_game)
 
-    @staticmethod
-    def _pid_of(hwnd):
-        u = _user32()
-        u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-        pid = wintypes.DWORD(0)
-        u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        return pid.value
 
-    def _set_follow_topmost(self, on, game):
-        u = _user32()
-        me, back = _hwnd(self.root), _hwnd(self.back)
-        flags = 0x1 | 0x2 | 0x10                                 # NOSIZE | NOMOVE | NOACTIVATE
-        self._follow_top = on
-        if on:
-            u.SetWindowPos(me, -1, 0, 0, 0, 0, flags)            # HWND_TOPMOST
-            self._stack_back()
-            log.info("게임에 포커스: 창을 맨 위로 (게임=%s)", game)
-        else:
-            if game:
-                self._place_above_game(force=True)               # just above the game, no longer topmost
-            else:
-                u.SetWindowPos(me, -2, 0, 0, 0, 0, flags)        # HWND_NOTOPMOST
-                self._stack_back()
-            log.info("다른 프로그램에 포커스: 창을 게임 바로 위로 (게임=%s)", game)
 
-    def _place_above_game(self, force=False):
-        u = _user32()
-        u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
-        u.GetWindow.restype = wintypes.HWND
-        u.IsIconic.argtypes = [wintypes.HWND]
-        u.IsWindow.argtypes = [wintypes.HWND]
-        u.IsWindowVisible.argtypes = [wintypes.HWND]
-        g = self._find_game()
-        if not g or u.IsIconic(g):
-            return
-        me, back = _hwnd(self.root), _hwnd(self.back)
-        mine = (me,) + tuple(self._below_hwnds())
-        # the windows directly above the game must be: ours (front window topmost of the pair)
-        above = u.GetWindow(g, 3)                          # GW_HWNDPREV
-        want = list(mine)[::-1]                            # nearest to the game first: back, then root
-        ok = True
-        cur = above
-        for h in want:
-            if cur != h:
-                ok = False
-                break
-            cur = u.GetWindow(cur, 3)
-        if ok and not force:
-            return
-        # the nearest window above the game that is not one of ours
-        p = above
-        while p and p in mine:
-            p = u.GetWindow(p, 3)
-        topmost = lambda h: bool(u.GetWindowLongW(h, -20) & 0x8)       # WS_EX_TOPMOST
-        if topmost(g):
-            ia = p if p else -1                                       # HWND_TOPMOST
-        else:
-            ia = p if (p and not topmost(p)) else -2                  # HWND_NOTOPMOST: top of the normal windows
-        flags = 0x1 | 0x2 | 0x10                                      # NOSIZE | NOMOVE | NOACTIVATE
-        ok1 = u.SetWindowPos(me, ia, 0, 0, 0, 0, flags)
-        self._stack_back()
-        now = time.monotonic()
-        if now - self._follow_logged > 10:                 # leave a trace in the log tab without flooding it
-            self._follow_logged = now
-            log.info("게임 창 위로 재배치 | 게임=%s 바로 위 창=%s 기준=%s 결과=%s", g, above, ia, bool(ok1))
 
-    def _stack_back(self):
-        """Put the shadow window (if any) and the background window directly below the text window, in that order."""
-        if not self.two_window:
-            return
-        try:
-            prev = _hwnd(self.root)
-            for h in self._below_hwnds():
-                _user32().SetWindowPos(h, prev, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)
-                prev = h
-        except Exception:
-            pass
 
     def _copy_selection(self, _e=None):
         try:
@@ -1287,9 +841,20 @@ class App:
         self.text.delete("1.0", "end")
         self.marks.clear()
 
+    def _at_bottom(self):
+        """Is the last line on screen? (The fraction from yview() can be off while Tk is still measuring lines, which
+        made the window stop following new lines.)"""
+        try:
+            self.text.update_idletasks()                          # finish pending line measuring first
+            if self.text.bbox("end-1c") is not None:
+                return True
+        except Exception:
+            pass
+        return self.text.yview()[1] >= 0.999
+
     def _insert(self, s, tag, index="end"):
         """`s` is a string, or a list of (text, extra_tag_or_None) pieces drawn in `tag` (+ the extra tag)."""
-        at_bottom = self.text.yview()[1] >= 0.999
+        at_bottom = self._at_bottom()
         if isinstance(s, str):
             self.text.insert(index, s, tag)
         else:
@@ -1410,16 +975,16 @@ class App:
         bg = max(0.03, min(1.0, float(self.cfg.get("bg_opacity", 1.0))))
         tx = max(0.2, min(1.0, float(self.cfg.get("text_opacity", 1.0))))
         self._shadow_on = bool(self.cfg.get("shadow_on"))
-        self.two_window = abs(bg - tx) >= 0.005 or self._shadow_on          # the shadow needs the see-through text window
+        self.two_window = plat.FORCE_TWO_WINDOW or abs(bg - tx) >= 0.005 or self._shadow_on          # the shadow needs the see-through text window
         if not self.two_window:
             if self.shad is not None:
                 self.shad.withdraw()
-            self.root.attributes("-transparentcolor", "")
+            plat.set_keycolor(self.root, "")
             self.root.attributes("-alpha", tx)
             self.back.withdraw()
             return
         self.back.attributes("-alpha", bg)
-        self.root.attributes("-transparentcolor", BG)       # background pixels of the text window disappear
+        plat.set_keycolor(self.root, BG)                    # background pixels of the text window disappear
         self.root.attributes("-alpha", tx)
         self.root.update_idletasks()
         self._sync_back()
@@ -1449,8 +1014,10 @@ class App:
 
     def _build_shadow(self):
         self.shad = tk.Toplevel(self.root)
-        self.shad.overrideredirect(True)
+        self.shad.title("ChatMatrix Reader (shadow)")
+        plat.borderless(self.shad, keyboard=True)
         self.shad.configure(bg=BG)
+        plat.setup_front(self.shad)
         self.shad.withdraw()
         self.shad.update_idletasks()
         box = tk.Frame(self.shad, bg=BG, highlightthickness=1, highlightbackground=BG, highlightcolor=BG)
@@ -1480,7 +1047,7 @@ class App:
             self.stext.configure(fg="#000000")
             self.stext.tag_configure("all", foreground="#000000")
         self.stext.configure(**self._spacing())
-        self.shad.attributes("-transparentcolor", BG)
+        plat.set_keycolor(self.shad, BG)
         self.shad.attributes("-alpha", tx)
         top = bool(self.cfg["topmost"]) and not self.cfg.get("topmost_wow_only")
         self.shad.attributes("-topmost", top)
@@ -1531,12 +1098,6 @@ class App:
         if self._shadow_active():
             self._sync_shadow()
 
-    def _set_passthrough(self, on):
-        for win in (self.root, self.back):
-            if on:
-                _set_exstyle(win, add=WS_EX_LAYERED | WS_EX_TRANSPARENT)
-            else:
-                _set_exstyle(win, remove=WS_EX_TRANSPARENT)
 
     def set_click_through(self, on):
         self._interactive = False
@@ -1590,27 +1151,10 @@ class App:
         self.root.mainloop()
 
 
-def _msgbox(text, icon=0x10):
-    try:
-        ctypes.windll.user32.MessageBoxW(None, text, "ChatMatrix Reader", icon)
-    except Exception:
-        pass
 
 
-_mutex = None
 
 
-def _single_instance():
-    """False if another copy is already running (it would fight for the hotkey and the capture)."""
-    global _mutex
-    try:
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
-        k32.CreateMutexW.restype = wintypes.HANDLE
-        _mutex = k32.CreateMutexW(None, False, "Local\\ChatMatrixReader.SingleInstance")
-        return ctypes.get_last_error() != 183            # ERROR_ALREADY_EXISTS
-    except Exception:
-        return True
 
 
 def main():

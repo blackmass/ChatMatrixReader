@@ -101,10 +101,39 @@ lines, status = drain(10)
 assert [(l.id, l.text) for l in lines] == [(3, "second v2 line")] and "v2·8" in status, (lines, status)
 print("3 ok: new v2 lines keep coming")
 
+# a macOS-like screen: cells of 4.5 px and Display-P3 colour mixing (only v2 can be read)
+P3 = np.array([[0.8224621, 0.1775380, 0.0], [0.0331941, 0.9668058, 0.0], [0.0170827, 0.0723974, 0.9105199]])
+
+
+def scaled_screen(i, text, f=1.125):
+    img = proto2.draw(proto2.encode([FS.join(["S", str(i), "Mac", text, "K"])], i, 8))
+    lin = proto2._to_lin(img[:, :, [2, 1, 0]].astype(np.float64) / 255) @ P3.T
+    img[:, :, [2, 1, 0]] = np.round(proto2._from_lin(lin) * 255).astype(np.uint8)
+    h, w = img.shape[:2]
+    nh, nw = int(h * f), int(w * f)
+    ys, xs = np.linspace(0, h - 1, nh), np.linspace(0, w - 1, nw)
+    y0, x0 = np.floor(ys).astype(int), np.floor(xs).astype(int)
+    y1, x1 = np.minimum(y0 + 1, h - 1), np.minimum(x0 + 1, w - 1)
+    fy, fx = (ys - y0)[:, None, None], (xs - x0)[None, :, None]
+    a = img.astype(np.float32)
+    z = (a[y0][:, x0] * (1 - fx) * (1 - fy) + a[y0][:, x1] * fx * (1 - fy)
+         + a[y1][:, x0] * (1 - fx) * fy + a[y1][:, x1] * fx * fy).astype(np.uint8)
+    put(z, x=37, y=441)
+
+
+scaled_screen(5, "hello from a retina screen")
+lines, status = drain(20)
+assert [(l.id, l.sender, l.text, l.cls) for l in lines] == [(5, "Mac", "hello from a retina screen", "K")], lines
+print("4 ok: scaled matrix with mixed colours read; status:", status)
+scaled_screen(6, "next one")
+lines, status = drain(10)
+assert [(l.id, l.text) for l in lines] == [(6, "next one")] and "v2·8" in status, (lines, status)
+print("5 ok: scaled matrix keeps being tracked")
+
 v1_screen(4, "and back to v1")
 lines, status = drain(15)
 assert [(l.id, l.text) for l in lines] == [(4, "and back to v1")], lines
-print("4 ok: back to v1")
+print("6 ok: back to v1")
 
 w.stop()
 w.join(timeout=5)

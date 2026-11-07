@@ -118,6 +118,40 @@ def _centres(region, n_rows):
     return c[:, :, [2, 1, 0]].reshape(-1, 3).astype(np.int32)
 
 
+def _to_lin(v):
+    v = np.clip(v, 0.0, 1.0)
+    return np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4)
+
+
+def _from_lin(v):
+    v = np.clip(v, 0.0, 1.0)
+    return np.where(v <= 0.0031308, v * 12.92, 1.055 * v ** (1 / 2.4) - 0.055)
+
+
+def _gamut_fix(first):
+    """Some screens/systems convert the colours to another colour space (macOS: sRGB -> Display P3), which mixes the
+    channels: pure green (0,255,0) arrives as (117,251,76). The preamble holds pure red, green and blue (cells 2-4) plus
+    black and white, so the mixing can be measured and undone. -> function(cells) or None if nothing needs undoing."""
+    hi, lo = first[0].astype(np.float64), first[1].astype(np.float64)
+    span = hi - lo
+    if (span < MIN_CONTRAST).any():
+        return None
+    P = (first[2:5].astype(np.float64) - lo) / span              # rows: what pure R, G, B look like (0..1 per channel)
+    off = P - np.diag(np.diag(P))
+    if off.max() < 0.06 or np.diag(P).min() < 0.5:
+        return None                                              # no noticeable mixing (or not primaries): leave as is
+    M = _to_lin(P).T                                             # linear light: column j = what primary j became
+    if np.linalg.cond(M) > 50:
+        return None
+    inv = np.linalg.inv(M)
+
+    def fix(cells):
+        lin = _to_lin((np.asarray(cells, dtype=np.float64) - lo) / span)
+        return _from_lin(lin @ inv.T) * span + lo
+
+    return fix
+
+
 def decode(arr, x, y):
     """Decode a v2 matrix whose top-left pixel is (x, y). -> (Frame2, None) or (None, reason)."""
     h, w = arr.shape[:2]
@@ -128,6 +162,9 @@ def decode(arr, x, y):
     if (hi - lo).min() < MIN_CONTRAST:
         return None, "no preamble"
     thr2 = hi + lo
+    fix = _gamut_fix(first)
+    if fix is not None:
+        first = fix(first)
     bits = (2 * first[:RAMP_START] > thr2).astype(np.int32)
     if [tuple(r) for r in bits[:N_PRE].tolist()] != PREAMBLE:
         return None, "no preamble"
@@ -139,6 +176,8 @@ def decode(arr, x, y):
     if y + rows * CELL > h:
         return None, "outside"
     cells = _centres(arr[y:y + rows * CELL, x:x + WIDTH], rows)
+    if fix is not None:
+        cells = fix(cells)
     n = rows * COLS
     end = (2 * cells[n - N_END:] > thr2).astype(np.int32)
     if [tuple(r) for r in end.tolist()] != END:

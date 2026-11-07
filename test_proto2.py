@@ -154,3 +154,22 @@ for _ in range(10):
     p.find_and_decode(corner)
 print("7 ok: corner window search %.1f ms" % ((time.perf_counter() - t) * 100))
 print("ALL v2 TESTS PASSED")
+
+
+# --- colour-space conversion (macOS: sRGB -> Display P3 mixes the channels) is measured from the preamble and undone
+def _to_p3(img):
+    m = np.array([[0.8224621, 0.1775380, 0.0], [0.0331941, 0.9668058, 0.0], [0.0170827, 0.0723974, 0.9105199]])
+    lin = p._to_lin(img[:, :, [2, 1, 0]].astype(np.float64) / 255) @ m.T
+    out = img.copy()
+    out[:, :, [2, 1, 0]] = np.round(p._from_lin(lin) * 255).astype(np.uint8)
+    return out
+
+
+for lv in (16, 8, 4, 2):
+    cells = p.encode(["S\x1f1\x1fBob\x1fhello 안녕\x1fA"] * 3, 9, levels=lv)
+    scr = np.full((p.size_px(lv)[1] + 20, 200, 4), 30, np.uint8)
+    img = p.draw(cells)
+    scr[10:10 + img.shape[0], 10:138] = _to_p3(img)
+    f, why = p.decode(scr, 10, 10)
+    assert f is not None and f.levels == lv and len(f.lines) == 3 and f.lines[0].cls == "A", (lv, why)
+print("8 ok: Display-P3 colour mixing is undone for 16/8/4/2 levels")

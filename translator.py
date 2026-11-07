@@ -151,7 +151,13 @@ def _opener(url):
         # Declare the protocol we actually speak (ALPN "http/1.1"), as browsers and curl do. Python sends no ALPN
         # by default, and Google's key-less endpoint answers such connections with HTTP 429 on some Python builds.
         try:
-            ctx = ssl.create_default_context()
+            cafile = None
+            try:                                   # python.org builds on macOS ship without root certificates
+                import certifi
+                cafile = certifi.where()
+            except Exception:
+                pass
+            ctx = ssl.create_default_context(cafile=cafile)
             ctx.set_alpn_protocols(["http/1.1"])
             return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
         except Exception:

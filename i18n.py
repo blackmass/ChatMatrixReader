@@ -14,6 +14,9 @@ Text without an entry is shown in Korean.
 """
 import ctypes
 import locale
+import sys
+import subprocess
+import re
 import logging
 import os
 
@@ -95,6 +98,16 @@ def available():
 
 def system_locale():
     """e.g. 'ko-KR', 'en-US' ('' if unknown)."""
+    if sys.platform == "darwin":                   # the program's own LANG is not the language of the Mac
+        try:
+            out = subprocess.run(["defaults", "read", "-g", "AppleLanguages"], capture_output=True, text=True,
+                                 timeout=3).stdout
+            m = re.search(r'"?([A-Za-z]{2,3}(?:-[A-Za-z0-9]+)*)"?\s*[,)]', out)
+            if m:
+                parts = m.group(1).split("-")           # 'ko-KR', 'zh-Hans-CN' ...
+                return parts[0] + ("-" + parts[-1] if len(parts) > 1 and len(parts[-1]) == 2 else "")
+        except Exception:
+            pass
     try:
         buf = ctypes.create_unicode_buffer(85)
         if ctypes.windll.kernel32.GetUserDefaultLocaleName(buf, 85):
