@@ -4,11 +4,11 @@
 - It does not involve DLL injection, nor does it rely on heavy, low-accuracy OCR. This is a 100% safe method for real-time translation.
 - 완전 안전하게 실시간으로 와우 채팅 번역하기. 무겁고 불안정한 OCR도 아니고, DLL 삽입도 아닙니다.
 
-- Three requirements. 필요한 3가지. (<a href="https://www.curseforge.com/wow/addons/chatmatrix">ChatMatrix</a>, <a href="https://github.com/blackmass/ChatMatrixReader/releases">ChatMatrixReader</a>, <a href="https://www.python.org/downloads/release/python-3110/">python-3.11</a>)
+- Three requirements. 필요한 3가지. (<a href="https://www.curseforge.com/wow/addons/chatmatrix">ChatMatrix</a>, <a href="https://github.com/blackmass/ChatMatrixReader/releases">ChatMatrixReader</a>, <a href="https://www.python.org/downloads/release/python-3110/">python-3.11</a> or <a href="https://www.python.org/downloads/release/python-3152/">python-3.15</a>)
 - You must use Python version 3.11. Search for "Python" on your Windows system to check which version is currently installed. If you have version 3.15, please install version 3.11 as well.
 - 파이썬은 꼭 3.11 버전을 받아야합니다. 윈도우 python을 검색해서 몇버전이 설치되었는지 확인하세요. 3.15가 설치되어 있다면. 3.11도 같이 설치해두세요.
-- Clicking the yellow button at the link above will download the latest version, which causes issues. You should download the 'Windows installer (64-bit)' version found further down the page.
-- 위 링크에서 노란색 버튼을 누르면 최신 버전을 받기 때문에 문제가 생깁니다. 하단에 'Windows installer (64-bit)' 를 받으셔야합니다.
+- If you encounter translation issues with Python 3.11, please install Python 3.15 and then run 'run 3.15.bat'.
+- 현재 파이썬 버전에 의해 번역 문제가 발생합니다. 일단 최신 릴리즈를 받고 파이썬 3.11에서 문제가 발생한다면 파이썬 3.15를 설치후 'run 3.15.bat'를 실행하세요.
 
 # Addon
 <a href="https://www.curseforge.com/wow/addons/chatmatrix">Addon - Chatmatrix </a>
