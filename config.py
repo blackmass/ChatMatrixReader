@@ -44,6 +44,7 @@ DEFAULTS = {
     "shadow_color": "#000000",
     "shadow_dx": 1,
     "shadow_dy": 1,
+    "translate_test_start": True,         # at start, send a tiny test request so the user sees whether the translation server answers
     "check_updates": True,                # look for a newer GitHub release at start (a notice only, nothing is installed)
     "font_family": "",                    # "" = default (Malgun Gothic); else a font loaded from the fonts/ folder
     "line_spacing": 4,                    # pixels between chat lines

@@ -53,6 +53,7 @@ import i18n
 import logsetup
 import translator
 import updatecheck
+import usage
 import version
 from i18n import tr
 from capture import CaptureWorker
@@ -392,6 +393,7 @@ class App:
         i18n.init(self.cfg.get("language", i18n.AUTO))      # before any text is created
         glossary.ensure_default(self.cfg.get("glossary_file"))
         self.q = queue.Queue()
+        translator.usage_notify = self._usage_notice
         self.opt = None
         self.tokens = itertools.count(1)
         self.marks = {}            # token -> text mark name (where the translation goes)
@@ -576,6 +578,8 @@ class App:
         self.add_system(tr("제목줄/스크롤은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | Ctrl+Alt+O: 옵션 | 클릭 통과 중에는 Shift를 누른 채로 조작"))
         if self.cfg.get("check_updates", True):
             self.check_update(self._on_start_update)
+        if self.cfg.get("translate_test_start", True) and self.cfg.get("translator", "none") != "none":
+            self._translate_test()
 
     def _build_back(self):
         """Background-only window used when background and text opacity differ."""
@@ -710,6 +714,38 @@ class App:
             self.q.put(("call", lambda: callback(tag, err)))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _translate_test(self):
+        """Send a tiny request with the current translation method and say in the chat window whether it answered."""
+        cfg = dict(self.cfg)
+        mode = cfg.get("translator")
+        if mode == "google":
+            who = "Google" + (" (API Key)" if (cfg.get("google_api_key") or "").strip() else "")
+        else:
+            who = cfg.get("api_model") or cfg.get("api_url") or "AI"
+
+        def work():
+            t0 = time.perf_counter()
+            try:
+                translator.translate(cfg, "hi")
+                ms = int((time.perf_counter() - t0) * 1000)
+                msg, tag = "✔ " + tr("번역 서버 연결 양호: {who} ({ms}ms)", who=who, ms=ms), "system"
+            except Exception as e:
+                msg = "✖ " + tr("번역 서버에 연결하지 못했습니다: {who}", who=who) + " - " + (str(e) or e.__class__.__name__)[:160]
+                tag = "error"
+            self.q.put(("call", lambda: self.add_system(msg, tag)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _usage_notice(self, total):
+        """Called from a translation thread each time the month's Google API character count passes a multiple of 100,000."""
+        over = total > usage.FREE_LIMIT
+        msg = tr("Google 번역 API 사용량이 이번 달 약 {used}자입니다 (무료 {limit}자 기준, 추정값)",
+                 used=f"{total:,}", limit=f"{usage.FREE_LIMIT:,}")
+        if over:
+            msg += " - " + tr("무료 구간을 넘었을 수 있습니다")
+        log.info("사용량 알림: %d자", total)
+        self.q.put(("call", lambda: self.add_system("ℹ " + msg, "error" if over else "system")))
 
     def _on_start_update(self, tag, err):
         if tag:

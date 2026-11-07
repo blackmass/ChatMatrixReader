@@ -3,11 +3,13 @@
 Only the standard library is used (urllib), so nothing extra has to be installed.
 """
 import glossary
+import usage
 import json
 import logging
 import random
 import re
 import socket
+import ssl
 import threading
 import time
 import urllib.error
@@ -145,6 +147,15 @@ def _opener(url):
     host = urllib.parse.urlparse(url).hostname or ""
     if host in ("localhost", "127.0.0.1", "::1") or host.startswith(("192.168.", "10.")):
         return urllib.request.build_opener(urllib.request.ProxyHandler({}))   # never use a proxy for local servers
+    if url.lower().startswith("https:"):
+        # Declare the protocol we actually speak (ALPN "http/1.1"), as browsers and curl do. Python sends no ALPN
+        # by default, and Google's key-less endpoint answers such connections with HTTP 429 on some Python builds.
+        try:
+            ctx = ssl.create_default_context()
+            ctx.set_alpn_protocols(["http/1.1"])
+            return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+        except Exception:
+            pass
     return urllib.request.build_opener()
 
 
@@ -319,6 +330,9 @@ def _google_limited(reason):
     raise RateLimited(tr("Google이 요청을 제한했습니다 ({reason}). {secs}초 동안 요청을 멈추고 다시 시도합니다", reason=reason, secs=secs), secs)
 
 
+usage_notify = None          # set by the app: called with the month total each time it passes a multiple of 100,000
+
+
 def translate_google(cfg: dict, text: str) -> str:
     global _g_block_n
     tl = lang_code(cfg.get("target_lang", "한국어"))
@@ -333,9 +347,16 @@ def translate_google(cfg: dict, text: str) -> str:
         data = _http_json(GOOGLE_V2_URL + "?" + urllib.parse.urlencode({"key": key}),
                           {"q": sent, "target": tl, "format": "text"}, None, timeout)
         try:
-            return data["data"]["translations"][0]["translatedText"]
+            out = data["data"]["translations"][0]["translatedText"]
         except (KeyError, IndexError, TypeError):
             raise TranslateError(tr("예상하지 못한 Google 응답")) from None
+        hit = usage.add(len(sent))                       # the official API bills by characters sent
+        if hit is not None and usage_notify:
+            try:
+                usage_notify(hit)
+            except Exception:
+                pass
+        return out
     _google_gate()
     params = urllib.parse.urlencode({"client": "gtx", "sl": "auto", "tl": tl, "dt": "t", "q": sent})
     try:
@@ -400,6 +421,8 @@ class TranslationService:
     """submit() never blocks. Results arrive on out_queue as ("trans", (token, result|None, error|None)).
     result None with no error means 'nothing to add' (translation identical to the original)."""
 
+    SHORT_MAX = 500          # short-term memory: distinct recent lines
+    LONG_MAX = 100           # long-term memory: lines that came up again while still in the short-term memory
     MAX_RETRIES = 3          # after a rate limit: how often one line is retried
     MAX_WAIT = 150           # ... and the longest pause worth waiting for (seconds); longer -> show the error
 
@@ -407,7 +430,9 @@ class TranslationService:
         self.out = out_queue
         self.get_cfg = get_cfg
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="trans")
-        self.cache = OrderedDict()
+        self.cache = OrderedDict()                       # short-term memory: the most recent SHORT_MAX different lines
+        self.long = OrderedDict()                        # long-term memory: lines seen again while in the short-term memory
+        self.inflight = {}                               # key -> tokens of identical lines that arrived while it is being translated
         self.lock = threading.Lock()
         self.pending = 0
 
@@ -416,13 +441,24 @@ class TranslationService:
         key = (cfg.get("translator"), cfg.get("target_lang"), cfg.get("api_model"),
                hash(cfg.get("prompt")), glossary.cache_key(cfg), text)
         with self.lock:
-            if key in self.cache:
-                self.cache.move_to_end(key)
-                self.out.put(("trans", (token, self.cache[key], None)))
+            if key in self.long:                         # long-term first
+                self.long.move_to_end(key)
+                self.out.put(("trans", (token, self.long[key], None)))
+                return True
+            if key in self.cache:                        # seen twice -> worth keeping longer
+                val = self.cache.pop(key)
+                self.long[key] = val
+                while len(self.long) > self.LONG_MAX:
+                    self.long.popitem(last=False)
+                self.out.put(("trans", (token, val, None)))
+                return True
+            if key in self.inflight:                     # same line is being translated right now: wait for that one
+                self.inflight[key].append(token)
                 return True
             if self.pending >= int(cfg.get("max_pending", 20)):
                 return False
             self.pending += 1
+            self.inflight[key] = []
         self.pool.submit(self._run, token, text, cfg, key)
         return True
 
@@ -434,9 +470,9 @@ class TranslationService:
                 result = None
             with self.lock:
                 self.cache[key] = result
-                while len(self.cache) > 500:
+                while len(self.cache) > self.SHORT_MAX:
                     self.cache.popitem(last=False)
-            self.out.put(("trans", (token, result, None)))
+            self._deliver(key, token, result, None)
         except RateLimited as e:                         # keep the line waiting instead of failing it
             if attempt < self.MAX_RETRIES and e.delay <= self.MAX_WAIT:
                 retry = True
@@ -446,13 +482,20 @@ class TranslationService:
                 timer.daemon = True
                 timer.start()
             else:
-                self.out.put(("trans", (token, None, str(e))))
+                self._deliver(key, token, None, str(e))
         except Exception as e:                           # TranslateError or anything unexpected
-            self.out.put(("trans", (token, None, str(e) or e.__class__.__name__)))
+            self._deliver(key, token, None, str(e) or e.__class__.__name__)
         finally:
             if not retry:
                 with self.lock:
                     self.pending -= 1
+
+    def _deliver(self, key, token, result, err):
+        """Hand the outcome to the line that started the request and to identical lines that waited for it."""
+        with self.lock:
+            waiting = self.inflight.pop(key, [])
+        for t in [token] + waiting:
+            self.out.put(("trans", (t, result, err)))
 
     def shutdown(self):
         self.pool.shutdown(wait=False, cancel_futures=True)

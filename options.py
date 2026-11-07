@@ -15,6 +15,7 @@ import glossary
 import hotkeys
 import logsetup
 import updatecheck
+import usage
 import version
 import translator
 import credits
@@ -59,6 +60,7 @@ class OptionsWindow:
             "click_through": tk.BooleanVar(value=bool(cfg["click_through"])),
             "font_size": tk.IntVar(value=int(cfg["font_size"])),
             "check_updates": tk.BooleanVar(value=bool(cfg.get("check_updates", True))),
+            "translate_test_start": tk.BooleanVar(value=bool(cfg.get("translate_test_start", True))),
             "latest_text": tk.StringVar(value=""),
             "shadow_on": tk.BooleanVar(value=bool(cfg.get("shadow_on"))),
             "shadow_color": tk.StringVar(value=cfg.get("shadow_color") or "#000000"),
@@ -127,6 +129,8 @@ class OptionsWindow:
         cb.bind("<<ComboboxSelected>>", lambda e: self.refresh_states())
         ttk.Label(top, text=tr("목표 언어")).grid(row=1, column=0, sticky="w", **PAD)
         ttk.Combobox(top, textvariable=v["target_lang"], values=LANGS, width=34).grid(row=1, column=1, **PAD)
+        ttk.Checkbutton(top, text=tr("시작할 때 번역 서버 연결 확인 (아주 짧은 글자 1~2개를 보냅니다)"),
+                        variable=v["translate_test_start"]).grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
 
         # --- OpenAI compatible
         g1 = ttk.LabelFrame(tab, text=tr("OpenAI 호환 API (LM Studio 등)"))
@@ -167,6 +171,9 @@ class OptionsWindow:
         ttk.Label(g2, text=tr("비우면 키 없이 쓰는 비공식 무료 방식입니다 (제한되거나 바뀔 수 있음).\n"
                               "Cloud Translation API 키를 넣으면 공식 방식을 사용합니다."),
                   foreground="#666", justify="left").grid(row=1, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(g2, text=tr("이번 달 사용량: 약 {used} / {limit}자 (추정값이며 정확하지 않습니다)",
+                              used=f"{usage.total():,}", limit=f"{usage.FREE_LIMIT:,}"),
+                  foreground="#666").grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
         self.google_widgets += [e3]
 
         # --- glossary
@@ -707,6 +714,7 @@ class OptionsWindow:
             "api_model": v["api_model"].get().strip(),
             "api_key": v["api_key"].get(),
             "google_api_key": v["google_api_key"].get().strip(),
+            "translate_test_start": bool(v["translate_test_start"].get()),
             "temperature": max(0.0, min(2.0, temp)),
             "timeout": max(2.0, min(300.0, timeout)),
             "skip_same_lang": bool(v["skip_same_lang"].get()),
