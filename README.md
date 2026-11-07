@@ -38,8 +38,8 @@
 - If the matrix remains hidden for an extended period, it may not be immediately recognized when you shift focus to WoW; in such cases, please click the window refresh icon.
 - 매트릭스가 장기간 가려지면, 와우로 초점을 옮겨도 바로 인식되지 않기, 창 새로고침 아이콘을 누르세요.
 
-- 추천하는 세팅 (배경 투명, 와우 창 위에만 표시, 클릭 통과 후 쉬프트로만 상호작용.)
 - Recommended settings (transparent background, display only over the WoW window, ignore mouse clicks—interact only while holding Shift.)
+- 추천하는 세팅 (배경 투명, 와우 창 위에만 표시, 클릭 통과 후 쉬프트로만 상호작용.)
   
 <img width="676" height="955" alt="image" src="https://github.com/user-attachments/assets/048bee64-077d-4e3a-a77a-f776b8a98bef" />
 <img width="676" height="505" alt="image" src="https://github.com/user-attachments/assets/8ffddbb3-8917-4d62-bffd-1890a6af1042" />
