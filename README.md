@@ -35,6 +35,8 @@
 - <b>화면의 색상을 변경하는 dlss5, hdr, 윈도우 화면 배율 등을 사용할 경우 작동하지 않을 가능성이 있습니다.</b>
 - Starting with version 1.3.1, an automatic detection feature for color changes has been included. Additionally, the add-on now allows for the adjustment of matrix levels. If the colors differ from the original or if the brightness has changed, lowering the level while increasing the matrix size will improve the detection rate.
 - 다만 1.3.1 버전부터 색상 변화에 대한 자동감지 기능을 넣었습니다. 애드온에서 매트릭스 레벨 단계를 조절할 수 있는 기능을 넣었습니다. 원본 색상이 아니거나 밝기가 변경되는 경우, 레벨 단계를 낮추고 매트릭스를 키우면 인지율이 올라가니다.
+- If the matrix remains hidden for an extended period, it may not be immediately recognized when you shift focus to WoW; in such cases, please click the window refresh icon.
+- 매트릭스가 장기간 가려지면, 와우로 초점을 옮겨도 바로 인식되지 않기, 창 새로고침 아이콘을 누르세요.
 
 - 추천하는 세팅 (배경 투명, 와우 창 위에만 표시, 클릭 통과 후 쉬프트로만 상호작용.)
 - Recommended settings (transparent background, display only over the WoW window, ignore mouse clicks—interact only while holding Shift.)
