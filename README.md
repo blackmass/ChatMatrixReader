@@ -47,3 +47,14 @@
 # update
 - 1.3.1 버전부터 색상 변화에 대한 자동감지 기능을 넣었습니다. 애드온에서 매트릭스 레벨 단계를 조절할 수 있는 기능을 넣었습니다. 원본 색상이 아니거나 밝기가 변경되는 경우, 레벨 단계를 낮추고 매트릭스를 키우면 인지율이 올라가니다.
 - If the matrix remains hidden for an extended period, it may not be immediately recognized when you shift focus to WoW; in such cases, please click the window refresh icon.
+
+# Development Philosophy (개발 방향성)
+- Lightweight: Designed to be as lightweight as possible, with a minimal footprint and no unnecessary resource consumption.
+- Text-Only: Does not rely on image recognition (such as OCR or AI-based vision); instead, it extracts text directly from the game’s chat data, ensuring 100% accuracy.
+- Unobtrusive: Keeps the interface minimal, displaying only the translated text whenever possible.
+- Educational: I have no intention of completely removing or replacing the original English text; that is not the direction I wish to take.
+- 
+- 가벼움 : 다른 부가적인 자원 소모 없이 최대한 가볍고 용량 적게.
+- 텍스트만 : 이미지 인식 금지(OCR, AI Vision)을 쓰지 않고 애드온에서 직접 채팅 데이터를 가져와 100% 정확하게 텍스트만 추출합니다.
+- 간결하게 : 가능하면 인터페이스를 최대한 노출하지 않고 번역 텍스트만 노출되게.
+- 학습성 : 저는 절대로 영어를 완전히 지우고 대체하려 하지 않을 겁니다. 그것은 제가 바라는 방향이 아닙니다.
