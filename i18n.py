@@ -23,6 +23,7 @@ import os
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCALE_DIR = os.path.join(APP_DIR, "locale")
 DEFAULT_LANG = "ko-KR"           # built in, needs no file
+FALLBACK_LANG = "en-US"          # used when the system language has no file
 AUTO = ""                        # config value meaning "use the system language"
 
 log = logging.getLogger("cmr.i18n")
@@ -122,7 +123,8 @@ def system_locale():
 
 
 def pick(preferred=AUTO):
-    """Language code to use: the configured one if it exists, else the system language, else Korean."""
+    """Language code to use: the configured one if it exists, else the system language, else English
+    (a user whose language has no file is better served by English than by the built-in Korean)."""
     codes = {c.lower(): c for c, _ in available()}
     if preferred and preferred.lower() in codes:
         return codes[preferred.lower()]
@@ -136,7 +138,7 @@ def pick(preferred=AUTO):
         for low, code in codes.items():            # e.g. en-GB -> en-US
             if low.split("-")[0] == prim:
                 return code
-    return DEFAULT_LANG
+    return FALLBACK_LANG if FALLBACK_LANG.lower() in codes else DEFAULT_LANG
 
 
 def set_language(code):
