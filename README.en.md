@@ -56,3 +56,4 @@ A real-time, automated translator for World of Warcraft.
 
 # Frequently Asked Questions (FAQ)
 - Which servers do you play on? : North America Retail (Tichondrius) and North America Forever (PvP)
+- I’ve hit a Google Translate limit: I’ve never encountered this myself, even when leaving it running for an entire week, so it’s highly likely that the issue stems from something else. Please try installing Python 3.11 and 3.15, then run the commands 'run 3.11' and 'run 3.15' respectively; let me know if either of them works.

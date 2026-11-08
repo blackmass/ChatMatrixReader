@@ -499,6 +499,7 @@ class WindowMixin:
         if entering:
             for ms in (0, 400, 1200):
                 self.root.after(ms, self._fix_order_if_covered)
+            self._game_entered()
 
     def _fix_order_if_covered(self):
         try:

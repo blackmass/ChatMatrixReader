@@ -399,11 +399,16 @@ class WindowMixin:
 
     def _follow_game(self):
         """Same idea as on Windows: floating (above everything) while the game has the focus; as soon as another
-        program is active the window drops to just above the game window, so that program can cover it."""
+        program is active the window drops to just above the game window, so that program can cover it.
+        Also notices the moment the focus comes back to the game (the matrix is searched again if it was lost)."""
         try:
+            g = self._find_game()
+            fg = macutil.foreground()
+            if g and fg == g and self._fg_last != g:
+                self._game_entered()
+            if fg:
+                self._fg_last = fg
             if self.cfg.get("topmost_wow_only"):
-                g = self._find_game()
-                fg = macutil.foreground()
                 if not g:
                     if self._follow_top:
                         self._set_follow_topmost(False, None)

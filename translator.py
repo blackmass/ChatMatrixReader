@@ -159,6 +159,14 @@ def _opener(url):
                 pass
             ctx = ssl.create_default_context(cafile=cafile)
             ctx.set_alpn_protocols(["http/1.1"])
+            if host.endswith(".googleapis.com"):
+                # Measured: on python.org's Python 3.11.0 (OpenSSL 1.1.1q) the key-less endpoint answers a TLS 1.2
+                # handshake with HTTP 429 every time, while a TLS 1.3 handshake is accepted (as on newer Pythons).
+                # Google speaks TLS 1.3 everywhere, so require it for Google's own hosts only.
+                try:
+                    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+                except (AttributeError, ValueError):
+                    pass
             return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
         except Exception:
             pass

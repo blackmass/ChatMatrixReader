@@ -517,6 +517,17 @@ class App(WindowMixin):
             self._insert([("⬆ " + tr("새 버전 {latest}이 있습니다 (현재 v{cur})", latest=tag, cur=version.__version__) + ": ", None),
                           (version.RELEASES_URL, "link"), ("\n", None)], "system")
 
+    def _game_entered(self):
+        """The focus has come back to the game. If the matrix is not being read (it was covered / the game was away),
+        search for it again by itself, as the refresh button would. The game redraws a moment later, so look twice."""
+        for ms in (400, 1500):
+            self.root.after(ms, self._research_if_lost)
+
+    def _research_if_lost(self):
+        if not self._connected:
+            log.info("게임으로 돌아옴: 매트릭스를 읽고 있지 않아 다시 찾습니다")
+            self.worker.research()
+
     def _refresh_matrix(self):
         log.info("매트릭스 다시 찾기 (새로고침 버튼)")
         self.worker.research()
