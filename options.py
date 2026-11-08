@@ -151,6 +151,18 @@ class OptionsWindow:
         ttk.Button(row, text=tr("저장"), command=self.save).pack(side="left")
         ttk.Button(row, text=tr("닫기"), command=win.destroy).pack(side="left", padx=6)
         ttk.Button(row, text=tr("프로그램 종료"), command=app.on_close).pack(side="left", padx=(18, 0))
+        # keyboard: Ctrl+S saves, Esc closes (for screens where the buttons below do not fit)
+        def key_save(e):
+            self.save()
+            return "break"
+
+        def key_close(e):
+            win.destroy()
+            return "break"
+
+        win.bind("<Control-s>", key_save)
+        win.bind("<Control-S>", key_save)
+        win.bind("<Escape>", key_close)
         self.refresh_states()
         self._fit_tabs()
         self._place_beside_main()
