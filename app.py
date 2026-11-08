@@ -19,6 +19,7 @@ from plat import (Hotkey, Tray, WindowMixin, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS
 import itertools
 import logging
 import os
+import re
 import queue
 import sys
 import traceback
@@ -48,6 +49,8 @@ logsetup.setup()
 log = logging.getLogger("cmr.app")
 
 BG_SOLID = "#1e1f22"      # the colour key of the front window in two-window mode (Windows): nothing else may use it
+CLEARED_ALPHA = 0.01      # "fully transparent" on hover: not exactly 0, so the system keeps treating the windows as present
+                          # (going to 0 and back may switch the game between display modes = a short stutter)
 BG = plat.KEY_BG or BG_SOLID   # macOS: really transparent instead
 TITLE_BG = "#2b2d31"
 INPUT_BG = "#262a31"
@@ -65,21 +68,44 @@ TAG_COLORS = {
     "officer": "#40c040", "whisper": "#ff80ff", "channel": "#ffc8c8",
     "community": "#80d0d0", "other": "#aaaaaa", "restricted": "#777777", "system": DIM,
     "trans": "#7fd6b0", "error": "#d67f7f",
+    "yell": "#ff4040", "emote": "#ff8040", "raidwarning": "#ff4800", "bnet": "#00fff6",
 }
+# "Other" messages (line codes starting with "!"): the game's default chat colours, approximately. The addon does not send
+# colours; a code that is not listed here is shown with the "other" colour.
+OTHER_COLORS = {
+    "!SY": "#ffff00", "!IG": "#ff0000", "!XP": "#6f6fff", "!HN": "#f0b300", "!RP": "#8080ff", "!SK": "#5555ff",
+    "!LT": "#00aa00", "!CY": "#00aa00", "!MN": "#ffff00", "!CI": "#8080ff", "!AC": "#ffff00", "!GA": "#40ff40",
+    "!BH": "#ff4040", "!BA": "#4090ff", "!BN": "#ffa040",
+    "!MS": "#ffff9e", "!MY": "#ff4040", "!ME": "#ff8040", "!MW": "#ffb5f0", "!MP": "#aaaaff",
+    "!BE": "#ffdd00", "!BW": "#ffdd00",
+}
+TAG_COLORS.update({code: color for code, color in OTHER_COLORS.items()})
+# "Other" lines that are somebody speaking (NPC / boss): these are translated; loot, money, experience ... are not
+SPEECH_CODES = ("!MS", "!MY", "!ME", "!MW", "!MP", "!BE", "!BW")
 
 
 def channel_tag(ch: str) -> str:
-    if ch in ("S", "Y", "E"):
+    if ch == "Y":
+        return "yell"
+    if ch == "E":
+        return "emote"
+    if ch == "RW":
+        return "raidwarning"
+    if ch == "B":
+        return "bnet"
+    if ch.startswith("!"):
+        return ch if ch in OTHER_COLORS else "other"
+    if ch == "S":
         return "say"
     if ch == "P":
         return "party"
-    if ch in ("R", "RW", "I"):
+    if ch in ("R", "I"):
         return "raid"
     if ch == "G":
         return "guild"
     if ch == "O":
         return "officer"
-    if ch in ("W", "B"):
+    if ch == "W":
         return "whisper"
     if ch == "CM":
         return "community"
@@ -190,6 +216,12 @@ class App(WindowMixin):
         self._follow_logged = 0.0
         self._placed_for = None        # game window we last stacked above
         self._follow_top = False       # currently kept topmost because the game has the focus
+        self._btn_prev = False         # a mouse button was down at the previous check
+        self._press_outside = False    # ... and the press began outside this window (camera turning in the game, a drag ...)
+        self._ghost_pass = False       # the window lets mouse input through only while such a press lasts
+        self._hover_cleared = False    # fully transparent because the mouse is over the window (option "hover_clear")
+        self._blur_on = False          # the background window is currently blurred (experiment)
+        self._blur_paused = False      # blur switched off while the window is being moved / resized (it makes that very slow)
         self._fg_last = None           # window that had the focus at the previous check
         self._prev_fg = None           # window that had focus before we became interactive
         self.latest = None             # newest release tag found by the update check (e.g. "v1.3.0")
@@ -198,6 +230,7 @@ class App(WindowMixin):
         self._shadow_on = False
         self._shadow_job = None
         self._shadow_last = None
+        self._shad_pad = 0             # bottom margin of the shadow text, so it is as tall as the real text (send box open)
         self._send_open = False        # the send box (input line) is shown
         self._send_busy = False        # a translation is running
         self._send_armed = False       # Enter was let go once since the box opened
@@ -324,6 +357,7 @@ class App(WindowMixin):
         # ---- overlay: scrollbar and resize grip
         self.sb = MiniScrollbar(self.body, self.text.yview)
         self.text.configure(yscrollcommand=self._on_yscroll)
+        self.text.bind("<Configure>", self._on_text_resized, add="+")
         self.sb.bind("<MouseWheel>", self._wheel)
         self.grip = tk.Label(self.body, text="◢", bg=BG, fg="#5a5f69", font=("Segoe UI Symbol", 9),
                              cursor=plat.RESIZE_CURSOR)
@@ -401,6 +435,16 @@ class App(WindowMixin):
         try:
             ct = bool(self.cfg["click_through"])
             inside = self._cursor_inside()
+            # A mouse button held down since before the pointer reached this window (turning the camera in the game: the
+            # pointer is hidden but still moves) must not be taken over by this window: let the input through until release.
+            btn = self._key_down(0x01) or self._key_down(0x02)
+            if btn and not self._btn_prev:
+                self._press_outside = not inside
+            self._btn_prev = btn
+            ghost = (not ct) and btn and self._press_outside
+            if ghost != self._ghost_pass:
+                self._ghost_pass = ghost
+                self._set_passthrough(ghost or ct)
             if ct:
                 # Shift + mouse over the window = behave like a normal window; a started drag/selection is finished first
                 keep = self._interactive and (self.dragging or self._key_down(0x01))      # 0x01 = left button
@@ -419,15 +463,64 @@ class App(WindowMixin):
                         self.text.tag_remove("sel", "1.0", "end")       # a half-made selection is not kept
                         self._leave_interactive()
                 want = self.dragging or interactive
+                self._set_hover_clear(bool(self.cfg.get("hover_clear")) and inside and not interactive and not self.dragging
+                                      and not self._send_open and not self._send_pending)
             else:
-                want = self.dragging or inside
+                want = self.dragging or (inside and not ghost)
+                self._set_hover_clear(False)
             self.set_chrome(bool(want))
+            self._set_blur_paused(bool(self.dragging))              # also ends the pause when a drag ended by other paths
             self.tick_n += 1
             if self.two_window and self.tick_n % 10 == 0:
                 self._stack_back()
         finally:
             self.root.after(50, self._hover_tick)
 
+
+    def _set_blur_paused(self, paused):
+        """A blurred window follows the pointer very slowly while it is moved or resized: show the plain translucent
+        background during the drag and bring the blur back when the button is released."""
+        if paused == self._blur_paused or not self._blur_on:
+            return
+        self._blur_paused = paused
+        try:
+            bg = max(0.03, min(1.0, float(self.cfg.get("bg_opacity", 1.0))))
+            if paused:
+                plat.set_blur(self.back, False)
+                self.back.configure(bg=BG_SOLID)
+                self.back.attributes("-alpha", max(0.3, bg))     # not nearly invisible: it only lasts for the drag
+            else:
+                self.back.attributes("-alpha", 1.0)
+                self.back.configure(bg="#000000")
+                plat.set_blur(self.back, True, BG_SOLID, bg, int(self.cfg.get("blur_state", 3)))
+        except tk.TclError:
+            pass
+
+    def _set_hover_clear(self, on):
+        """The mouse is over the (click-through) window and Shift is not held: make everything fully transparent so the
+        game chat behind it can be read; back to normal as soon as the mouse leaves or Shift is pressed."""
+        if on == self._hover_cleared:
+            return
+        self._hover_cleared = on
+        try:
+            if on:
+                self.root.attributes("-alpha", CLEARED_ALPHA)
+                if self.two_window:
+                    self.back.attributes("-alpha", CLEARED_ALPHA)   # only the alpha changes: hiding / re-creating the blurred
+                    if self.shad is not None:                    # window makes the game stutter for a moment
+                        self.shad.attributes("-alpha", CLEARED_ALPHA)
+            else:
+                bg = max(0.03, min(1.0, float(self.cfg.get("bg_opacity", 1.0))))
+                tx = max(0.2, min(1.0, float(self.cfg.get("text_opacity", 1.0))))
+                self.root.attributes("-alpha", tx)
+                if self.two_window:
+                    self.back.attributes("-alpha", 1.0 if (self._blur_on and not self._blur_paused) else bg)     # blurred: its tint carries the opacity
+                    if self._blur_on:                                                # the system may have dropped the blur strength
+                        plat.set_blur(self.back, True, BG_SOLID, bg, int(self.cfg.get("blur_state", 3)))
+                    if self.shad is not None and self._shadow_active():
+                        self.shad.attributes("-alpha", tx)
+        except tk.TclError:
+            pass
 
     def _enter_interactive(self):
         if self._send_open or self._send_pending:        # the send box has the focus: never hand it back
@@ -711,6 +804,7 @@ class App(WindowMixin):
     # ---- moving / resizing
     def _drag_start(self, e):
         self.dragging = True
+        self._set_blur_paused(True)
         self._dx = e.x_root - self.root.winfo_x()
         self._dy = e.y_root - self.root.winfo_y()
 
@@ -722,6 +816,7 @@ class App(WindowMixin):
 
     def _resize_start(self, e):
         self.dragging = True
+        self._set_blur_paused(True)
         self._rs = (e.x_root, e.y_root, self.root.winfo_width(), self.root.winfo_height())
         if plat.POLL_RESIZE:
             self._resize_poll()
@@ -883,19 +978,29 @@ class App(WindowMixin):
     # ------------------------------------------------------------------ data flow
     def on_new_line(self, line):
         """A chat line that has not been seen before: show it, and ask for a translation."""
+        if self.cfg.get("skip_regex_hide") and line.text != "[restricted]" \
+                and translator.matches_skip_regex(chattext.plain(line.text), self.cfg):
+            return                                                # the user's pattern matches: leave the line out
         ts = (time.strftime("%H:%M:%S") + " ") if self.cfg.get("show_time", True) else ""
         restricted = line.text == "[restricted]"
         tag = "restricted" if restricted else channel_tag(line.channel)
-        if line.sender:                                           # [name]: message  (the name in the class colour)
+        sender, body = line.sender, line.text
+        if not restricted:
+            body = chattext.resolve_josa(body)                    # the Korean client leaves  |1이;가;  in event texts
+            if line.channel.startswith("!") and "%s" in body and sender:
+                body, sender = body.replace("%s", sender), ""     # NPC emotes: "%s waves." -> the name goes into the text
+        if sender:                                                # [name]: message  (the name in the class colour)
             ctag = f"cls_{line.cls}" if (self.cfg.get("class_colors", True) and line.cls in chattext.CLASS_COLORS) else None
-            parts = [(f"{ts}({line.channel}) [", None), (line.sender, ctag), ("]: ", None)]
+            parts = [(f"{ts}({line.channel}) [", None), (sender, ctag), ("]: ", None)]
         else:
             parts = [(f"{ts}({line.channel}) ", None)]
-        parts += [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(line.text)]
+        parts += [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(body)]
         parts.append(("\n", None))
         self._insert(parts, tag)
 
-        text = chattext.plain(line.text)                          # item-link markers removed
+        text = chattext.plain(body)                               # item-link markers removed
+        if line.channel.startswith("!") and line.channel not in SPEECH_CODES:
+            return                                                # loot, money, experience, system ...: nothing to translate
         if restricted or not translator.should_translate(text, self.cfg):
             return
         token = next(self.tokens)
@@ -986,13 +1091,20 @@ class App(WindowMixin):
         bg = max(0.03, min(1.0, float(self.cfg.get("bg_opacity", 1.0))))
         tx = max(0.2, min(1.0, float(self.cfg.get("text_opacity", 1.0))))
         self._shadow_on = bool(self.cfg.get("shadow_on"))
-        self.two_window = plat.FORCE_TWO_WINDOW or abs(bg - tx) >= 0.005 or self._shadow_on          # the shadow needs the see-through text window
+        self._blur_paused = False
+        self._hover_cleared = False                      # (re)applying brings the window back; the next tick clears it again
+        self.two_window = (plat.FORCE_TWO_WINDOW or abs(bg - tx) >= 0.005 or self._shadow_on
+                           or bool(self.cfg.get("blur_experiment")))          # the shadow needs the see-through text window
         if not self.two_window:
             if self.shad is not None:
                 self.shad.withdraw()
             plat.set_keycolor(self.root, "")
             self.root.attributes("-alpha", tx)
             self.back.withdraw()
+            if self._blur_on:
+                plat.set_blur(self.back, False)
+                self.back.configure(bg=BG_SOLID)
+                self._blur_on = False
             return
         self.back.attributes("-alpha", bg)
         plat.set_keycolor(self.root, BG)                    # background pixels of the text window disappear
@@ -1002,6 +1114,15 @@ class App(WindowMixin):
         self._hide_from_taskbar(self.back)
         self.back.deiconify()
         self._hide_from_taskbar(self.back)
+        if self.cfg.get("blur_experiment"):             # blur behind the background window; its tint = "background" opacity
+            self._blur_on = bool(plat.set_blur(self.back, True, BG_SOLID, bg, int(self.cfg.get("blur_state", 3))))
+            if self._blur_on:
+                self.back.attributes("-alpha", 1.0)
+                self.back.configure(bg="#000000")        # the system treats pure black drawn by the window as "show the blur here"
+        elif self._blur_on:
+            plat.set_blur(self.back, False)
+            self.back.configure(bg=BG_SOLID)
+            self._blur_on = False
         self._apply_shadow(tx)
         self._stack_back()
 
@@ -1037,6 +1158,7 @@ class App(WindowMixin):
                              highlightthickness=0, padx=8, pady=6, insertwidth=0, cursor="arrow", takefocus=0,
                              selectbackground=BG, selectforeground="#000000", inactiveselectbackground=BG,
                              **self._spacing())
+        self._shad_pad = 0
         self.stext.pack(fill="both", expand=True, padx=(0, SB_W + 2))
         self.stext.tag_configure("all", foreground="#000000")
         self._shadow_last = None
@@ -1091,15 +1213,36 @@ class App(WindowMixin):
         except tk.TclError:
             pass
 
+    def _on_text_resized(self, _e=None):
+        if self._shadow_active():
+            self.root.after_idle(self._match_shadow_height)
+
+    def _match_shadow_height(self):
+        """The real text gets shorter while the send box is open; the shadow text must get shorter by the same amount,
+        otherwise the two scroll to different positions at the bottom and the shadow no longer lines up."""
+        if not self._shadow_active():
+            return
+        try:
+            self.shad.update_idletasks()
+            d = self.stext.winfo_height() - self.text.winfo_height()
+            if d:
+                self._shad_pad = max(0, self._shad_pad + d)
+                self.stext.pack_configure(pady=(0, self._shad_pad))
+                self.shad.update_idletasks()
+            self._sync_shadow()
+        except tk.TclError:
+            pass
+
     def _sync_shadow(self):
         """Give the shadow text exactly the scroll position of the real text (to the pixel)."""
         if not self._shadow_active():
             return
         try:
-            self.stext.yview_moveto(self.text.yview()[0])
-            idx = self.text.index("@0,0")
+            idx = self.text.index("@0,0")                     # the first line (part of it) shown by the real text
+            self.stext.yview(idx)                              # same line on top (by index: a fraction can be off by a
+                                                               # whole line while Tk is still measuring a new line)
             a, b = self.text.dlineinfo(idx), self.stext.dlineinfo(idx)
-            if a and b and a[1] != b[1]:
+            if a and b and a[1] != b[1]:                       # then the pixel offset of a partly scrolled line
                 self.stext.yview_scroll(b[1] - a[1], "pixels")
         except tk.TclError:
             pass
@@ -1115,6 +1258,12 @@ class App(WindowMixin):
         self._set_passthrough(bool(on))
 
     def open_options(self):
+        dump = getattr(self, "_state_dump", None)
+        if dump:                                   # if the window had vanished, this shows why (before saving repairs it)
+            try:
+                log.info("옵션 열림 | 창 상태: %s", dump())
+            except Exception:
+                log.exception("창 상태 기록 실패")
         if self.opt is not None and self.opt.alive():
             self.opt.lift()
             return

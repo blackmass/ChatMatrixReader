@@ -481,6 +481,7 @@ class WindowMixin:
                     self._set_follow_topmost(False, None)
                 self._placed_for = None
             self._watch_game_focus()
+            self._watchdog()
         except Exception:
             if not self._follow_failed:
                 self._follow_failed = True
@@ -501,7 +502,132 @@ class WindowMixin:
                 self.root.after(ms, self._fix_order_if_covered)
             self._game_entered()
 
-    def _fix_order_if_covered(self):
+    def _above_game(self, g):
+        """Is our text window higher in the stacking order than the game window?"""
+        u = _user32()
+        u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+        u.GetWindow.restype = wintypes.HWND
+        me = _hwnd(self.root)
+        p, n = u.GetWindow(g, 3), 0                              # GW_HWNDPREV: from the game upwards
+        while p and n < 1000:
+            if p == me:
+                return True
+            p, n = u.GetWindow(p, 3), n + 1
+        return False
+
+    def _ensure_above_game(self):
+        """While another program has the focus we sit just above the game. The game may move itself above us
+        afterwards (it did, seconds after the switch), and nothing else looks at the order then - so look again."""
+        try:
+            if not self.cfg.get("topmost_wow_only") or self._follow_top:
+                return
+            g = self._game_hwnd
+            u = _user32()
+            u.IsIconic.argtypes = [wintypes.HWND]
+            u.GetForegroundWindow.restype = wintypes.HWND
+            fg = u.GetForegroundWindow()
+            if not g or u.IsIconic(g) or not fg or fg == g or self._pid_of(fg) == os.getpid():
+                return
+            if self._above_game(g):
+                return
+            now = time.monotonic()
+            if now - self._watchdog_logged > 30:
+                self._watchdog_logged = now
+                log.warning("점검: 번역창이 게임 창 아래로 내려가 있음 -> 다시 게임 바로 위로")
+                log.info("점검 상태: %s", self._state_dump())
+            self._place_above_game(force=True)
+        except Exception:
+            log.exception("게임 위 배치 점검 실패")
+
+    def _state_dump(self):
+        """One line describing our windows and what is stacked above the text window (for the log)."""
+        u = _user32()
+        u.IsWindowVisible.argtypes = [wintypes.HWND]
+        u.IsIconic.argtypes = [wintypes.HWND]
+        u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        u.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+        u.GetWindow.restype = wintypes.HWND
+        u.GetLayeredWindowAttributes.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD),
+                                                 ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(wintypes.DWORD)]
+        out = []
+        for name, win in (("본창", self.root), ("배경", self.back), ("그림자", self.shad)):
+            if win is None:
+                continue
+            try:
+                h = _hwnd(win)
+                r = wintypes.RECT()
+                u.GetWindowRect(h, ctypes.byref(r))
+                ck, al, fl = wintypes.DWORD(), ctypes.c_ubyte(), wintypes.DWORD()
+                ok = u.GetLayeredWindowAttributes(h, ctypes.byref(ck), ctypes.byref(al), ctypes.byref(fl))
+                out.append("%s hwnd=%s 보임=%s 최소화=%s 확장스타일=0x%X 알파=%s 위치=(%d,%d,%d,%d)" % (
+                    name, h, bool(u.IsWindowVisible(h)), bool(u.IsIconic(h)), u.GetWindowLongW(h, -20) & 0xFFFFFFFF,
+                    al.value if ok else "-", r.left, r.top, r.right, r.bottom))
+            except Exception as e:
+                out.append("%s 상태 읽기 실패 %r" % (name, e))
+        try:
+            above, p, n = [], u.GetWindow(_hwnd(self.root), 3), 0
+            buf = ctypes.create_unicode_buffer(60)
+            while p and n < 6:
+                r = wintypes.RECT()
+                u.GetWindowRect(p, ctypes.byref(r))
+                u.GetWindowTextW(p, buf, 60)
+                above.append("%s[%s|%s|%s|%s|(%d,%d,%d,%d)]" % (
+                    p, self._exe_of(p) or "?", buf.value[:20], "보임" if u.IsWindowVisible(p) else "숨김",
+                    "최상위" if u.GetWindowLongW(p, -20) & 0x8 else "일반", r.left, r.top, r.right, r.bottom))
+                p, n = u.GetWindow(p, 3), n + 1
+            out.append("본창 위 창(가까운 순): " + (" ".join(above) if above else "없음"))
+        except Exception as e:
+            out.append("위 창 읽기 실패 %r" % (e,))
+        return " | ".join(out)
+
+    _watchdog_next = 0.0
+    _watchdog_logged = 0.0
+
+    def _watchdog(self):
+        """Safety net for what the focus events can miss (the game raising itself late, a window that vanished):
+        once a second, while the game has the focus, check that our window is shown and not covered. When
+        everything is right it does nothing at all."""
+        now = time.monotonic()
+        if now < self._watchdog_next:
+            return
+        self._watchdog_next = now + 1.0
+        g = self._game_hwnd
+        if not g:
+            return
+        if self._fg_last != g:                                  # another program has the focus
+            self._ensure_above_game()
+            return
+        u = _user32()
+        u.IsWindowVisible.argtypes = [wintypes.HWND]
+        u.IsIconic.argtypes = [wintypes.HWND]
+        u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        me = _hwnd(self.root)
+        visible, iconic = bool(u.IsWindowVisible(me)), bool(u.IsIconic(me))
+        topmost = bool(u.GetWindowLongW(me, -20) & 0x8)
+        want_top = self._follow_top or bool(self.cfg.get("topmost") and not self.cfg.get("topmost_wow_only"))
+        layered_lost = bool(self.two_window) and not (u.GetWindowLongW(me, -20) & 0x80000)      # WS_EX_LAYERED
+        problem = (not visible) or iconic or (want_top and not topmost) or layered_lost
+        if problem:
+            if now - self._watchdog_logged > 30:
+                self._watchdog_logged = now
+                log.warning("점검: 번역창 상태 이상 | 보임=%s 최소화=%s 최상위=%s (필요=%s) 투명속성 유실=%s -> 복구", visible, iconic,
+                            topmost, want_top, layered_lost)
+                log.info("점검 상태: %s", self._state_dump())
+            try:
+                if iconic or not visible:
+                    self.root.deiconify()
+                if layered_lost:
+                    self.apply_opacity()                      # what saving the options does: alpha / see-through again
+                if want_top:
+                    u.SetWindowPos(me, -1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)
+                self._stack_back()
+            except Exception:
+                log.exception("점검 복구 실패")
+            return
+        self._fix_order_if_covered(late=True)
+
+    def _fix_order_if_covered(self, late=False):
         try:
             if not (self._follow_top or (self.cfg.get("topmost") and not self.cfg.get("topmost_wow_only"))):
                 return
@@ -526,7 +652,7 @@ class WindowMixin:
                 return                                            # the order is right: touch nothing (no flicker)
             u.SetWindowPos(me, -1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)  # HWND_TOPMOST; NOSIZE | NOMOVE | NOACTIVATE
             self._stack_back()
-            log.info("게임 창이 위에 있어 다시 맨 위로 올림")
+            log.info("게임 창이 위에 있어 다시 맨 위로 올림%s", " (뒤늦게 발견: 점검)" if late else "")
         except Exception:
             log.exception("창 순서 확인 실패")
 
@@ -550,6 +676,8 @@ class WindowMixin:
         else:
             if game:
                 self._place_above_game(force=True)               # just above the game, no longer topmost
+                for ms in (300, 1000):                           # the game may re-order itself right after the switch
+                    self.root.after(ms, self._ensure_above_game)
             else:
                 u.SetWindowPos(me, -2, 0, 0, 0, 0, flags)        # HWND_NOTOPMOST
                 self._stack_back()
@@ -637,6 +765,32 @@ RIGHT_CLICKS = ("<Button-3>",)
 
 def borderless(win, keyboard=True):
     win.overrideredirect(True)
+
+
+def set_blur(win, on, color="#1e1f22", alpha=0.6, state=3):
+    """Blur what is behind a window (undocumented SetWindowCompositionAttribute, Windows 10 1803+).
+    `alpha` is the strength of the tint colour. Returns True when the system accepted it."""
+    try:
+        h = _hwnd(win)
+        class ACCENT(ctypes.Structure):
+            _fields_ = [("state", ctypes.c_int), ("flags", ctypes.c_int), ("gradient", ctypes.c_uint), ("anim", ctypes.c_int)]
+
+        class DATA(ctypes.Structure):
+            _fields_ = [("attr", ctypes.c_int), ("data", ctypes.c_void_p), ("size", ctypes.c_size_t)]
+        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+        a = int(max(0.0, min(1.0, alpha)) * 255)
+        acc = ACCENT(int(state) if on else 0, 2 if on else 0, (a << 24) | (b << 16) | (g << 8) | r, 0)
+        d = DATA(19, ctypes.cast(ctypes.pointer(acc), ctypes.c_void_p), ctypes.sizeof(acc))      # 19 = WCA_ACCENT_POLICY
+        f = ctypes.windll.user32.SetWindowCompositionAttribute
+        f.argtypes = [wintypes.HWND, ctypes.POINTER(DATA)]
+        f.restype = wintypes.BOOL
+        ok = bool(f(h, ctypes.byref(d)))
+        log.info("블러 %s: 결과=%s 상태=%s 투명도=%d 창 스타일=0x%X 윈도우 빌드=%s", "켬" if on else "끔", ok, state, a,
+                 ctypes.windll.user32.GetWindowLongW(h, -20) & 0xFFFFFFFF, getattr(sys.getwindowsversion(), "build", "?"))
+        return ok if on else True
+    except Exception:
+        log.exception("블러 적용 실패")
+        return False
 
 
 def set_keycolor(win, color):

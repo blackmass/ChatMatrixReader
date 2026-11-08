@@ -67,6 +67,9 @@ def key_down(vk):
         if vk == 0x01:
             import AppKit
             return bool(Q.CGEventSourceButtonState(_SESSION, 0)) or bool(AppKit.NSEvent.pressedMouseButtons() & 1)
+        if vk == 0x02:                                 # right button
+            import AppKit
+            return bool(Q.CGEventSourceButtonState(_SESSION, 1)) or bool(AppKit.NSEvent.pressedMouseButtons() & 2)
         code = _MAC.get(vk)
         return code is not None and bool(Q.CGEventSourceKeyState(_SESSION, code))
     except Exception:

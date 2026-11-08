@@ -127,12 +127,37 @@ def looks_like_target(text: str, target_lang: str) -> bool:
     return hit / len(letters) >= need
 
 
+_regex_cache = {}
+
+
+def compile_skip_regex(pattern: str):
+    """The user's 'do not translate' pattern as a compiled regex; None when empty. Raises re.error if invalid."""
+    pattern = (pattern or "").strip()
+    if not pattern:
+        return None
+    if pattern not in _regex_cache:
+        if len(_regex_cache) > 8:
+            _regex_cache.clear()
+        _regex_cache[pattern] = re.compile(pattern)
+    return _regex_cache[pattern]
+
+
+def matches_skip_regex(text: str, cfg: dict) -> bool:
+    try:
+        rx = compile_skip_regex(cfg.get("skip_regex", ""))
+    except re.error:
+        return False                                  # an invalid pattern never blocks translation (options checks it on save)
+    return bool(rx and rx.search(text))
+
+
 def should_translate(text: str, cfg: dict) -> bool:
     if cfg.get("translator", "none") == "none":
         return False
     if not any(c.isalpha() for c in text):
         return False
     if cfg.get("skip_same_lang", True) and looks_like_target(text, cfg.get("target_lang", "")):
+        return False
+    if matches_skip_regex(text, cfg):
         return False
     return True
 

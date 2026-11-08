@@ -50,6 +50,7 @@ class CaptureWorker(threading.Thread):
         self._seen = deque(maxlen=2000)
         self._seen_set = set()
         self._last_seq = None
+        self._seq_time = time.time()      # when the sequence number last changed
 
     def stop(self):
         self._stop_evt.set()
@@ -209,6 +210,11 @@ class CaptureWorker(threading.Thread):
                         # addon was reloaded (seq and line ids restart) -> forget old ids
                         self._seen.clear()
                         self._seen_set.clear()
+                    now_t = time.time()
+                    if self._last_seq is not None and frame.seq > self._last_seq + 1 and now_t - self._seq_time > 5:
+                        log.info("순번 %d -> %d: %.0f초 동안 그대로이다가 %d 건너뜀 (게임이 화면을 느리게 그리고 있었을 수 있음)",
+                                 self._last_seq, frame.seq, now_t - self._seq_time, frame.seq - self._last_seq)
+                    self._seq_time = now_t
                     self._last_seq = frame.seq
                     new = []
                     for line in frame.lines:

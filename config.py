@@ -24,6 +24,11 @@ DEFAULTS = {
     "timeout": 30,
     "max_tokens": 300,
     "skip_same_lang": True,
+    "hover_clear": False,             # click-through only: the window turns fully transparent while the mouse is over it
+    "blur_experiment": False,         # Windows: blur what is behind the background window
+    "blur_state": 3,                  # 3 = light blur, 4 = acrylic (stronger; tinted by the "background" opacity)
+    "skip_regex_hide": False,        # also leave the matching lines out of the window (not only untranslated)
+    "skip_regex": "",                # lines matching this regular expression are not translated (empty = off)
     "max_pending": 20,
     "max_parallel": 2,
     # send box: type in your own language, get the translation on the clipboard

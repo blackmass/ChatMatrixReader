@@ -28,6 +28,12 @@ Payload: UTF-8, lines separated by `\n`. Each line has four fields separated by 
 ```
 
 - channel: S say, Y yell, E emote, P party, R raid, RW raid warning, I instance, G guild, O officer, W whisper, B bnet whisper, C<n> numbered channel n, CM community channel
+- "other" messages (the chat window's "Other" settings) use codes that start with `!`: `!SY` system, `!XP` experience, `!HN` honor,
+  `!RP` reputation, `!SK` skill, `!LT` loot, `!CY` currency, `!MN` money, `!TS` trade skills, `!OP` opening, `!PI` pet info,
+  `!CI` misc. combat info, `!AC` / `!GA` achievements, `!BH` / `!BA` / `!BN` battleground, `!IG` ignored, `!TI` target icons,
+  `!MS` `!MY` `!ME` `!MW` `!MP` NPC say / yell / emote / whisper / party, `!BE` `!BW` raid boss emote / whisper.
+  Except for the NPC / boss speech the sender field is empty (the text already contains the names). A reader that does
+  not know a `!` code can show the line like any other; the codes never start with `C`, so they cannot be mistaken for channels.
 - id: message counter 1..65535 (wraps). Use it to detect which lines are new.
 - text `[restricted]` with sender `?` means the client did not let the addon read that message.
 
@@ -40,7 +46,10 @@ Item links are reduced to their name; the quality (rarity) is kept as a marker a
 
     \x02 <digit 0-8> [Item Name] \x03
 
-0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary, 6 artifact, 7 heirloom, 8 token. A reader that does not
+0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary, 6 artifact, 7 heirloom, 8 token,
+9 = a quest link (the name is `[[level] Quest Name]`; an id appended by another addon is removed).
+Achievement links also use 9; spell links use 8 (light blue like the heirloom colour). The addon puts the link names in the
+language of the player's own client when the client knows the id (option "Show linked items ..."). A reader that does not
 know the marker can simply delete the bytes 0x02 and 0x03 (and the digit after 0x02). A message cut by the byte
 limit may lack the closing 0x03. This does not change the pixel format or the protocol version.
 

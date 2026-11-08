@@ -119,6 +119,11 @@ def _style(win):
         return False
 
 
+def set_blur(win, on, color="#1e1f22", alpha=0.6, state=4):
+    """Not implemented on macOS (the experiment is Windows only)."""
+    return False
+
+
 def set_keycolor(win, color):
     """Windows: colour key. Here the front window is transparent by itself, so there is nothing to do."""
 

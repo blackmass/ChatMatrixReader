@@ -37,6 +37,42 @@ def _open_file(path):
         os.startfile(path)
 
 
+class _Fold(ttk.Frame):
+    """A titled section that folds in and out when its title is clicked. Used like a LabelFrame: put the widgets
+    into the object itself and pack() it (the frame around it and the title come with pack)."""
+
+    def __init__(self, parent, title):
+        self.title = title
+        self.opened = True
+        self.box = ttk.LabelFrame(parent)
+        self.head = ttk.Label(self.box, cursor="hand2")
+        self.box.configure(labelwidget=self.head)
+        self.head.bind("<Button-1>", lambda e: self.set_open(not self.opened))
+        # A frame with no child keeps whatever size it had (Tk stops resizing it), so a folded box would stay full size
+        # and, when folded before it was ever shown, would be 1 pixel high with no visible title. This thin child
+        # keeps the box resizing itself.
+        ttk.Frame(self.box, height=2).pack(side="bottom", fill="x")
+        super().__init__(self.box)
+        self._show_title()
+
+    def _show_title(self):
+        self.head.configure(text=("\u25be " if self.opened else "\u25b8 ") + self.title)
+
+    def pack(self, **kw):
+        self.box.pack(**kw)
+        ttk.Frame.pack(self, fill="both", expand=True)
+
+    def set_open(self, opened):
+        if opened == self.opened:
+            return
+        self.opened = opened
+        if opened:
+            ttk.Frame.pack(self, fill="both", expand=True)
+        else:
+            self.pack_forget()
+        self._show_title()
+
+
 class OptionsWindow:
     def __init__(self, app):
         self.app = app
@@ -58,6 +94,8 @@ class OptionsWindow:
             "temperature": tk.StringVar(value=str(cfg["temperature"])),
             "timeout": tk.StringVar(value=str(cfg["timeout"])),
             "skip_same_lang": tk.BooleanVar(value=bool(cfg["skip_same_lang"])),
+            "skip_regex": tk.StringVar(value=cfg.get("skip_regex", "")),
+            "skip_regex_hide": tk.BooleanVar(value=bool(cfg.get("skip_regex_hide", False))),
             "glossary_file": tk.StringVar(value=cfg["glossary_file"]),
             "glossary_google": tk.BooleanVar(value=bool(cfg["glossary_google"])),
             "glossary_style": tk.StringVar(value=tr(glossary.GLOSSARY_STYLES.get(cfg["glossary_style"], glossary.GLOSSARY_STYLES["paren"]))),
@@ -69,6 +107,9 @@ class OptionsWindow:
             "topmost": tk.BooleanVar(value=bool(cfg["topmost"])),
             "topmost_wow_only": tk.BooleanVar(value=bool(cfg.get("topmost_wow_only"))),
             "click_through": tk.BooleanVar(value=bool(cfg["click_through"])),
+            "hover_clear": tk.BooleanVar(value=bool(cfg.get("hover_clear", False))),
+            "blur_experiment": tk.BooleanVar(value=bool(cfg.get("blur_experiment", False))),
+            "blur_kind": tk.StringVar(value=tr("진하게 (아크릴)") if int(cfg.get("blur_state", 3)) == 4 else tr("가볍게")),
             "font_size": tk.IntVar(value=int(cfg["font_size"])),
             "check_updates": tk.BooleanVar(value=bool(cfg.get("check_updates", True))),
             "translate_test_start": tk.BooleanVar(value=bool(cfg.get("translate_test_start", True))),
@@ -93,6 +134,8 @@ class OptionsWindow:
         self.openai_widgets = []
         self.google_widgets = []
         self.test_widgets = []
+        self.folds = {}
+        self._fold_mode = None
 
         row = ttk.Frame(win)
         row.pack(side="bottom", anchor="e", padx=8, pady=(2, 8))     # packed first: always visible, whatever the size
@@ -176,7 +219,7 @@ class OptionsWindow:
                         variable=v["translate_test_start"]).grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
 
         # --- OpenAI compatible
-        g1 = ttk.LabelFrame(tab, text=tr("OpenAI 호환 API (LM Studio 등)"))
+        g1 = self.folds["openai"] = _Fold(tab, tr("OpenAI 호환 API (LM Studio 등)"))
         g1.pack(fill="x", padx=8, pady=4)
         ttk.Label(g1, text="API URL").grid(row=0, column=0, sticky="w", **PAD)
         e1 = ttk.Entry(g1, textvariable=v["api_url"], width=44)
@@ -206,7 +249,7 @@ class OptionsWindow:
         self.openai_widgets += [e1, self.model_cb, b1, e2, s1, s2, c1, e5]
 
         # --- Google
-        g2 = ttk.LabelFrame(tab, text=tr("Google 번역"))
+        g2 = self.folds["google"] = _Fold(tab, tr("Google 번역"))
         g2.pack(fill="x", padx=8, pady=4)
         ttk.Label(g2, text=tr("API Key (선택)")).grid(row=0, column=0, sticky="w", **PAD)
         e3 = ttk.Entry(g2, textvariable=v["google_api_key"], width=44, show="*")
@@ -220,7 +263,7 @@ class OptionsWindow:
         self.google_widgets += [e3]
 
         # --- glossary
-        gg = ttk.LabelFrame(tab, text=tr("단어장 (Google, AI 공통)"))
+        gg = self.folds["glossary"] = _Fold(tab, tr("단어장 (Google, AI 공통)"))
         gg.pack(fill="x", padx=8, pady=4)
         ttk.Label(gg, text=tr("파일")).grid(row=0, column=0, sticky="w", **PAD)
         ttk.Entry(gg, textvariable=v["glossary_file"], width=34).grid(row=0, column=1, sticky="w", **PAD)
@@ -240,7 +283,7 @@ class OptionsWindow:
         self.google_widgets += [gc, gs]
 
         # --- prompt
-        g3 = ttk.LabelFrame(tab, text=tr("프롬프트 (OpenAI 호환 API 전용. {target_lang}: 목표 언어, {{파일명}}: 그 파일 내용)"))
+        g3 = self.folds["prompt"] = _Fold(tab, tr("프롬프트 (OpenAI 호환 API 전용. {target_lang}: 목표 언어, {{파일명}}: 그 파일 내용)"))
         g3.pack(fill="both", padx=8, pady=4)
         holder = ttk.Frame(g3)
         holder.pack(fill="both", padx=6, pady=(4, 2))
@@ -260,6 +303,22 @@ class OptionsWindow:
         # --- common
         ttk.Checkbutton(tab, text=tr("목표 언어와 같은 문장은 번역 생략 (한국어 등 글자로 판별 가능한 경우)"),
                         variable=v["skip_same_lang"]).pack(anchor="w", padx=10, pady=2)
+        gx = ttk.Frame(tab)
+        gx.pack(fill="x", padx=10, pady=(2, 0))
+        ttk.Label(gx, text=tr("번역 제외 패턴 (정규식):")).pack(side="left")
+        ttk.Entry(gx, textvariable=v["skip_regex"], width=34).pack(side="left", padx=6)
+        ttk.Checkbutton(tab, text=tr("일치하는 문장은 원문도 숨김 (창에 표시하지 않음)"),
+                        variable=v["skip_regex_hide"]).pack(anchor="w", padx=10, pady=2)
+        ttk.Label(tab, text=tr("비워 두면 사용하지 않습니다. 이 패턴이 한 글자라도 일치하는 문장은 번역하지 않고 원문만 표시합니다. "
+                               "(목표 언어를 바꾸면 패턴도 직접 바꿔 주세요.)"),
+                  foreground="#666", wraplength=470, justify="left").pack(anchor="w", padx=10)
+        ex = ttk.Frame(tab)
+        ex.pack(fill="x", padx=10, pady=(0, 4))
+        ttk.Label(ex, text=tr("예 (한글이 있는 문장 제외):"), foreground="#666").pack(side="left")
+        exe = ttk.Entry(ex, width=20)                          # read-only: the text can be selected and copied
+        exe.insert(0, "[가-힣ㄱ-ㅎㅏ-ㅣ]")
+        exe.configure(state="readonly")
+        exe.pack(side="left", padx=6)
 
         # --- test
         g4 = ttk.LabelFrame(tab, text=tr("테스트 (저장하지 않아도 지금 입력한 설정으로 시험)"))
@@ -373,6 +432,35 @@ class OptionsWindow:
         ttk.Spinbox(sh, from_=-5, to=5, textvariable=v["shadow_dy"], width=4).grid(row=1, column=6, **PAD)
         ttk.Label(sh, text=tr("켜면 창이 하나 더 쓰입니다. 문제가 있으면 끄세요."), foreground="#666").grid(
             row=2, column=0, columnspan=7, sticky="w", padx=6)
+
+        ov = ttk.LabelFrame(tab, text=tr("게임 채팅창 위에 겹쳐 쓰기"))
+        ov.grid(row=12, column=0, columnspan=2, sticky="we", padx=6, pady=(8, 3))
+
+        def on_overlay():
+            cfg["hover_clear"] = bool(v["hover_clear"].get())
+            cfg["blur_experiment"] = bool(v["blur_experiment"].get())
+            app.apply_opacity()
+
+        ttk.Checkbutton(ov, text=tr("마우스를 올리면 창을 완전히 투명하게 (클릭 통과를 켠 경우만. Shift를 누르면 다시 보임)"),
+                        variable=v["hover_clear"], command=on_overlay).grid(row=0, column=0, sticky="w", **PAD)
+        if sys.platform == "win32":                       # the blur is not implemented on macOS
+            bl = ttk.Frame(ov)
+            bl.grid(row=1, column=0, sticky="w")
+            ttk.Checkbutton(bl, text=tr("배경 블러 (Windows)"), variable=v["blur_experiment"],
+                            command=on_overlay).pack(side="left", padx=6, pady=3)
+
+            def on_blur_kind(_e=None):
+                cfg["blur_state"] = 4 if v["blur_kind"].get() == tr("진하게 (아크릴)") else 3
+                if cfg.get("blur_experiment"):
+                    app.apply_opacity()
+
+            kind = ttk.Combobox(bl, textvariable=v["blur_kind"], values=[tr("가볍게"), tr("진하게 (아크릴)")], width=16,
+                                state="readonly")
+            kind.pack(side="left", padx=6)
+            kind.bind("<<ComboboxSelected>>", on_blur_kind)
+            ttk.Label(ov, text=tr("흐림 정도는 시스템이 정해서 바꿀 수 없습니다. '진하게'는 위의 '배경' 투명도로 색 농도를 정하고, "
+                                  "'가볍게'는 배경 투명도의 영향을 받지 않습니다. 창을 움직이는 동안은 블러가 잠시 꺼집니다."),
+                      foreground="#666", wraplength=440, justify="left").grid(row=2, column=0, sticky="w", padx=6)
 
     def _tab_capture(self, nb):
         v = self.v
@@ -640,6 +728,11 @@ class OptionsWindow:
         self._set_enabled(self.openai_widgets, mode == "openai")
         self._set_enabled(self.google_widgets, mode == "google")
         self._set_enabled(self.test_widgets, mode != "none")
+        if mode != self._fold_mode:                    # a new translation method: fold away what it does not use
+            self._fold_mode = mode
+            show = {"openai": ("openai", "prompt", "glossary"), "google": ("google", "glossary")}.get(mode, ())
+            for key, fold in self.folds.items():
+                fold.set_open(key in show)
 
     def open_glossary(self):
         name = self.v["glossary_file"].get().strip() or glossary.DEFAULT_NAME
@@ -743,6 +836,11 @@ class OptionsWindow:
                 raise ValueError
         except ValueError:
             raise ValueError(tr("'추론 끄기용 JSON'이 올바른 { } 형식의 JSON이 아닙니다.")) from None
+        skip_regex = v["skip_regex"].get().strip()
+        try:
+            translator.compile_skip_regex(skip_regex)
+        except re.error as e:
+            raise ValueError(tr("'번역 제외 패턴'이 올바른 정규식이 아닙니다: {err}", err=e)) from None
         return {
             "disable_reasoning": bool(v["disable_reasoning"].get()),
             "reasoning_off_body": v["reasoning_off_body"].get().strip() or translator.DEFAULT_REASONING_OFF,
@@ -756,6 +854,8 @@ class OptionsWindow:
             "temperature": max(0.0, min(2.0, temp)),
             "timeout": max(2.0, min(300.0, timeout)),
             "skip_same_lang": bool(v["skip_same_lang"].get()),
+            "skip_regex": skip_regex,
+            "skip_regex_hide": bool(v["skip_regex_hide"].get()),
             "glossary_file": v["glossary_file"].get().strip() or glossary.DEFAULT_NAME,
             "glossary_google": bool(v["glossary_google"].get()),
             "glossary_style": {tr(label): key for key, label in glossary.GLOSSARY_STYLES.items()}.get(
@@ -851,6 +951,8 @@ class OptionsWindow:
                 messagebox.showerror(tr("옵션"), tr("좌표는 정수여야 합니다."), parent=self.win)
                 return
         cfg.update(new)
+        cfg.update(hover_clear=bool(v["hover_clear"].get()), blur_experiment=bool(v["blur_experiment"].get()),
+                   blur_state=4 if v["blur_kind"].get() == tr("진하게 (아크릴)") else 3)
         cfg.update(send_enabled=bool(v["send_enabled"].get()),
                    send_lang=v["send_lang"].get().strip() or "English", send_hotkey=hotkey,
                    send_autopaste=bool(v["send_autopaste"].get()),
