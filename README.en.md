@@ -36,8 +36,8 @@ A real-time, automated translator for World of Warcraft.
 # Requirements for Installation
 - Python (<a href="https://www.python.org/downloads/release/python-3110/">python-3.11</a> or <a href="https://www.python.org/downloads/release/python-3152/">python-3.15</a>) ※ Please download the 'macOS 64-bit universal2 installer' or 'Windows installer (64-bit)'—whichever matches your operating system—rather than using the 'Python install manager' (the yellow button).
 - Add-on: ChatMatrix (available on <a href="https://www.curseforge.com/wow/addons/chatmatrix">CurseForge</a>)
-- Program: ChatMatrixReader (available on <a href="https://github.com/blackmass/ChatMatrixReader/releases">GitHub</a>) ※ Please download the 'ChatMatrixReader.xxx.zip' file, not the source code. # Add-on Features
-...Under construction
+- Program: ChatMatrixReader (available on <a href="https://github.com/blackmass/ChatMatrixReader/releases">GitHub</a>) ※ Please download the 'ChatMatrixReader.xxx.zip' file, not the source code. 
+- In the event that the approval of the latest version of the addon is delayed on CurseForge, please check this <a href="https://drive.google.com/drive/u/0/folders/1vAJJ8w9MMW5qJzxfjg5qSktN5XhH77ow">Google Drive</a> folder.
 
 # Addon Features
 - Upon the first launch, a green "matrix box" will appear. Drag it to a clearly visible area and use the command `/cm lock` to secure it in place. Ensure it is not obstructed by other interface elements.

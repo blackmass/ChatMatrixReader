@@ -38,6 +38,7 @@
 - 파이썬 (<a href="https://www.python.org/downloads/release/python-3110/">python-3.11</a> or <a href="https://www.python.org/downloads/release/python-3152/">python-3.15</a>) ※ 노란 버튼의 파이썬 매니저(Python install manager)가 아니라, 하단의 'macOS 64-bit universal2 installer', 'Windows installer (64-bit)' 둘 중 OS에 맞게 설치하세요.
 - 애드온 (<a href="https://www.curseforge.com/wow/addons/chatmatrix">curseforge</a>) ChatMatrix
 - 프로그램 (<a href="https://github.com/blackmass/ChatMatrixReader/releases">github</a>) ChatMatrixReader  ※ 소스코드가 아니라, ChatMatrixReader.xxx.zip 를 받으셔야합니다.
+- 혹시나 curseforge 에서 애드온 최신 버전의 승인이 늦어질 경우 (<a href="https://drive.google.com/drive/u/0/folders/1vAJJ8w9MMW5qJzxfjg5qSktN5XhH77ow">구글 드라이브<a/>)를 확인해주세요.
 
 # 애드온 기능
 - 처음 실행하면 초록색으로 매트릭스 박스가 강조됩니다. 드래그 해서 잘 보이는 위치에 배치하고 '/cm lock'해서 고정하세요. 다른 인터페이스에 가려지지 않아야 합니다.
