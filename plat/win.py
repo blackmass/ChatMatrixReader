@@ -531,11 +531,13 @@ class WindowMixin:
             if self._above_game(g):
                 return
             now = time.monotonic()
-            if now - self._watchdog_logged > 30:
-                self._watchdog_logged = now
-                log.warning("점검: 번역창이 게임 창 아래로 내려가 있음 -> 다시 게임 바로 위로")
+            if now - self._ensure_logged > 5:
+                self._ensure_logged = now
+                log.warning("점검: 번역창이 게임 창 아래로 내려가 있음 -> 다시 게임 바로 위로 (최상위 속성: %s)", self._topmost_flags())
                 log.info("점검 상태: %s", self._state_dump())
             self._place_above_game(force=True)
+            if self._ensure_logged == now:
+                log.info("다시 배치한 뒤: %s", "여전히 아래" if not self._above_game(g) else "게임 위로 올라감")
         except Exception:
             log.exception("게임 위 배치 점검 실패")
 
@@ -583,6 +585,7 @@ class WindowMixin:
 
     _watchdog_next = 0.0
     _watchdog_logged = 0.0
+    _ensure_logged = 0.0
 
     def _watchdog(self):
         """Safety net for what the focus events can miss (the game raising itself late, a window that vanished):
@@ -627,6 +630,42 @@ class WindowMixin:
             return
         self._fix_order_if_covered(late=True)
 
+    def _is_covered(self, g):
+        """Is the game window above any of our windows (text, shadow, background)?"""
+        u = _user32()
+        u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+        u.GetWindow.restype = wintypes.HWND
+        me = _hwnd(self.root)
+        for h in (me,) + tuple(self._below_hwnds()):
+            p, n = u.GetWindow(h, 3), 0                           # GW_HWNDPREV: the windows above h, nearest first
+            while p and n < 300:
+                if p == g:
+                    return True
+                p, n = u.GetWindow(p, 3), n + 1
+        return False
+
+    def _topmost_flags(self):
+        u = _user32()
+        u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        res = []
+        for name, win in (("본창", self.root), ("배경", self.back), ("그림자", self.shad)):
+            if win is not None:
+                try:
+                    res.append("%s=%s" % (name, bool(u.GetWindowLongW(_hwnd(win), -20) & 0x8)))
+                except Exception:
+                    pass
+        return " ".join(res)
+
+    def _raise_topmost(self):
+        """Put the text window (and the ones under it) topmost. Returns (SetWindowPos result, last error)."""
+        u = _user32()
+        me = _hwnd(self.root)
+        flags = 0x1 | 0x2 | 0x10                                  # NOSIZE | NOMOVE | NOACTIVATE
+        ok = u.SetWindowPos(me, -1, 0, 0, 0, 0, flags)            # HWND_TOPMOST
+        err = ctypes.windll.kernel32.GetLastError() if not ok else 0
+        self._stack_back()
+        return bool(ok), err
+
     def _fix_order_if_covered(self, late=False):
         try:
             if not (self._follow_top or (self.cfg.get("topmost") and not self.cfg.get("topmost_wow_only"))):
@@ -634,25 +673,24 @@ class WindowMixin:
             g = self._game_hwnd
             if not g:
                 return
-            u = _user32()
-            u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
-            u.GetWindow.restype = wintypes.HWND
-            me = _hwnd(self.root)
-            covered = False
-            for h in (me,) + tuple(self._below_hwnds()):
-                p, n = u.GetWindow(h, 3), 0                       # GW_HWNDPREV: the windows above h, nearest first
-                while p and n < 300:
-                    if p == g:
-                        covered = True
-                        break
-                    p, n = u.GetWindow(p, 3), n + 1
-                if covered:
-                    break
-            if not covered:
+            if not self._is_covered(g):
                 return                                            # the order is right: touch nothing (no flicker)
-            u.SetWindowPos(me, -1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)  # HWND_TOPMOST; NOSIZE | NOMOVE | NOACTIVATE
-            self._stack_back()
-            log.info("게임 창이 위에 있어 다시 맨 위로 올림%s", " (뒤늦게 발견: 점검)" if late else "")
+            ok, err = self._raise_topmost()
+            after = self._is_covered(g)
+            how = "한 번에"
+            if after:                                             # topmost did not stick: drop it and set it again
+                u = _user32()
+                me = _hwnd(self.root)
+                u.SetWindowPos(me, -2, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)       # HWND_NOTOPMOST
+                ok, err = self._raise_topmost()
+                after = self._is_covered(g)
+                how = "내렸다 다시 올려서"
+            log.info("게임 창이 위에 있어 다시 맨 위로 올림%s | 결과: %s%s | SetWindowPos=%s 오류=%s | 최상위 속성: %s",
+                     " (뒤늦게 발견: 점검)" if late else "", "여전히 가려짐" if after else "해결", ("(" + how + ")") if not after else "",
+                     ok, err, self._topmost_flags())
+            if after and self._watchdog_logged + 30 < time.monotonic():
+                self._watchdog_logged = time.monotonic()
+                log.info("점검 상태: %s", self._state_dump())
         except Exception:
             log.exception("창 순서 확인 실패")
 
