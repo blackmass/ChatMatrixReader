@@ -1,6 +1,6 @@
 [한국어](./README.md) | [English](./README.en.md)
 
-<img width="491" height="450" alt="Image" src="https://github.com/user-attachments/assets/23c26dcb-d928-4d1c-ab75-25564d7e6431" />
+<img width="479" height="417" alt="image" src="https://github.com/user-attachments/assets/6cb0a2e0-7340-4b8d-989f-ef7d1eb729e9" />
 
 # ChatMatrixReader
 A real-time, automated translator for World of Warcraft.
