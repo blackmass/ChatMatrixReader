@@ -78,10 +78,17 @@ OTHER_COLORS = {
     "!BH": "#ff4040", "!BA": "#4090ff", "!BN": "#ffa040",
     "!MS": "#ffff9e", "!MY": "#ff4040", "!ME": "#ff8040", "!MW": "#ffb5f0", "!MP": "#aaaaff",
     "!BE": "#ffdd00", "!BW": "#ffdd00",
+    "!PG": "#ff5050",                                  # pings: stand out like a yell
+    "!BI": "#66ccff",                                  # Battle.net friend online / offline (light blue like the game)
+    "!TM": "#ffff00",                                  # "appearance added to your collection": a yellow system line
 }
+TM_ITEM_COLOR = "#e86bd0"                              # ... whose item name is one purple-pink colour (any link quality)
 TAG_COLORS.update({code: color for code, color in OTHER_COLORS.items()})
 # "Other" lines that are somebody speaking (NPC / boss): these are translated; loot, money, experience ... are not
 SPEECH_CODES = ("!MS", "!MY", "!ME", "!MW", "!MP", "!BE", "!BW")
+# the symbol in front of a ping (the addon replaces the game's icon by it), coloured by kind
+PING_COLORS = {"\u25c8": "#4da3ff", "\u2691": "#4ddc6b", "\u26a0": "#ff4545", "\u2694": "#ff9a2e", "\u25bc": "#4da3ff"}
+SHOWN_CODE = {"WT": "W→", "BT": "B→"}        # whispers you sent: the name in the line is the receiver
 
 
 def channel_tag(ch: str) -> str:
@@ -91,7 +98,7 @@ def channel_tag(ch: str) -> str:
         return "emote"
     if ch == "RW":
         return "raidwarning"
-    if ch == "B":
+    if ch in ("B", "BT"):
         return "bnet"
     if ch.startswith("!"):
         return ch if ch in OTHER_COLORS else "other"
@@ -105,7 +112,7 @@ def channel_tag(ch: str) -> str:
         return "guild"
     if ch == "O":
         return "officer"
-    if ch == "W":
+    if ch in ("W", "WT"):
         return "whisper"
     if ch == "CM":
         return "community"
@@ -197,6 +204,8 @@ class App(WindowMixin):
         self.opt = None
         self.tokens = itertools.count(1)
         self.marks = {}            # token -> text mark name (where the translation goes)
+        self.swapinfo = {}         # token -> what the "translation above the original" mode needs to fill / undo the top line
+        self.link_names = {}       # token -> link names hidden behind [L1] [L2] while the line is translated
         self.last_error = None
         self.chrome_on = False
         self.dragging = False
@@ -260,6 +269,7 @@ class App(WindowMixin):
 
         self.custom_fonts = fonts.load_all()
         self.font = tkfont.Font(family=self._font_family(), size=int(self.cfg["font_size"]))
+        self.font_trans = tkfont.Font(family=self._font_family(), size=self._trans_size())
         self._build_main()
         self._build_back()
         self.root.update_idletasks()
@@ -302,10 +312,14 @@ class App(WindowMixin):
         self.text.bind("<<Modified>>", self._on_text_modified)
         for name, color in TAG_COLORS.items():
             self.text.tag_configure(name, foreground=color)
+        self._configure_layout_tags(self.text)
+        self.text.tag_configure("qtm", foreground=TM_ITEM_COLOR)
         for q, color in chattext.QUALITY_COLORS.items():          # created after the channel tags -> they win
             self.text.tag_configure(f"q{q}", foreground=color)
         for letter, color in chattext.CLASS_COLORS.items():
             self.text.tag_configure(f"cls_{letter}", foreground=color)
+        for glyph, color in PING_COLORS.items():
+            self.text.tag_configure(f"pg{ord(glyph)}", foreground=color)
         self.text.tag_configure("link", foreground="#6ea8fe", underline=True)          # clickable link (release page)
         self.text.tag_bind("link", "<Button-1>", lambda e: self.open_releases())
         self.text.tag_bind("link", "<Enter>", lambda e: self.text.configure(cursor="hand2"))
@@ -749,10 +763,12 @@ class App(WindowMixin):
             self.add_system("⚠ " + tr("클립보드에 복사하지 못했습니다"), "error")
             return
         log.info("보내기: 클립보드에 복사 (%d바이트)", len(res.text.encode("utf-8")))
-        self._insert("↗ " + res.text + "\n", "trans")
+        if cfg.get("send_show_log", False):
+            self._insert("↗ " + res.text + "\n", "trans")
         if res.note:
             self.add_system(res.note)
         self._send_close(refocus=True, paste=bool(cfg.get("send_autopaste")))
+        self.root.after(60, self._scroll_to_end_again)
 
     def _send_cancel(self, _e=None):
         self._send_close(refocus=True)
@@ -946,6 +962,7 @@ class App(WindowMixin):
     def clear_text(self):
         self.text.delete("1.0", "end")
         self.marks.clear()
+        self.link_names.clear()
 
     def _at_bottom(self):
         """Is the last line on screen? (The fraction from yview() can be off while Tk is still measuring lines, which
@@ -958,81 +975,227 @@ class App(WindowMixin):
             pass
         return self.text.yview()[1] >= 0.999
 
-    def _insert(self, s, tag, index="end"):
-        """`s` is a string, or a list of (text, extra_tag_or_None) pieces drawn in `tag` (+ the extra tag)."""
+    def _insert(self, s, tag, index="end", group=True):
+        """`s` is a string, or a list of (text, extra_tag_or_None) pieces drawn in `tag` (+ the extra tag).
+        group=True: the line starts a new group (gap above); a translation or an error of a line is part of its group."""
         at_bottom = self._at_bottom()
+        base = (tag, "gstart") if group else (tag,)
         if isinstance(s, str):
-            self.text.insert(index, s, tag)
+            self.text.insert(index, s, base)
         else:
             args = []
             for piece, extra in s:
-                args += [piece, (tag, extra) if extra else tag]
+                args += [piece, base + ((extra,) if extra else ())]
             self.text.insert(index, *args)                      # one call: the pieces stay in order at a mark too
         n = int(self.text.index("end-1c").split(".")[0])
         keep = int(self.cfg["max_lines"])
         if n > keep:
             self.text.delete("1.0", f"{n - keep}.0")
         if at_bottom:
+            self._scroll_to_end()
+
+    def _scroll_to_end(self):
+        """Follow the newest line. Tk measures the height of a wrapped line later than it inserts it, so one see("end")
+        scrolled only by the first display line of a line that wraps into two or more: measure, scroll, and look again
+        a moment later (the window may also have changed size meanwhile, e.g. the send box closing)."""
+        try:
+            self.text.update_idletasks()
             self.text.see("end")
+            self.root.after(30, self._scroll_to_end_again)
+        except tk.TclError:
+            pass
+
+    def _scroll_to_end_again(self):
+        try:
+            if self.text.bbox("end-1c") is None:                  # still not on screen
+                self.text.update_idletasks()
+                self.text.see("end")
+        except tk.TclError:
+            pass
 
     # ------------------------------------------------------------------ data flow
     def on_new_line(self, line):
         """A chat line that has not been seen before: show it, and ask for a translation."""
         if self.cfg.get("skip_regex_hide") and line.text != "[restricted]" \
-                and translator.matches_skip_regex(chattext.plain(line.text), self.cfg):
+                and translator.matches_skip_regex(chattext.check_text(line.text), self.cfg):
             return                                                # the user's pattern matches: leave the line out
         ts = (time.strftime("%H:%M:%S") + " ") if self.cfg.get("show_time", True) else ""
         restricted = line.text == "[restricted]"
-        tag = "restricted" if restricted else channel_tag(line.channel)
+        if restricted:
+            self._show_restricted(ts)
+            return
+        if line.channel == "!RS":                                 # the addon: the chat restriction is over
+            self._restr_n = 0
+            self._insert(f"{ts}{tr('✓ 채팅 제한이 해제되었습니다')}\n", "restricted")
+            return
+        self._restr_n = 0                                         # a normal line ends a run of restricted ones
+        tag = channel_tag(line.channel)
         sender, body = line.sender, line.text
+        if not sender and line.channel.startswith("C") and line.channel != "CM":
+            tag = "!SY"                                           # nobody speaks (server announcement in a channel): yellow like system text
         if not restricted:
             body = chattext.resolve_josa(body)                    # the Korean client leaves  |1이;가;  in event texts
             if line.channel.startswith("!") and "%s" in body and sender:
                 body, sender = body.replace("%s", sender), ""     # NPC emotes: "%s waves." -> the name goes into the text
         if sender:                                                # [name]: message  (the name in the class colour)
             ctag = f"cls_{line.cls}" if (self.cfg.get("class_colors", True) and line.cls in chattext.CLASS_COLORS) else None
-            parts = [(f"{ts}({line.channel}) [", None), (sender, ctag), ("]: ", None)]
+            parts = [(f"{ts}{self._code_prefix(line.channel)}[", None), (sender, ctag), ("]: ", None)]
         else:
-            parts = [(f"{ts}({line.channel}) ", None)]
-        parts += [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(body)]
+            parts = [(f"{ts}{self._code_prefix(line.channel)}", None)]
+        pieces = [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(body)]
+        if line.channel == "!TM":                                 # every item name of this message in one colour
+            pieces = [(p, "qtm" if q is not None else None) for p, q in chattext.segments(body)]
+        if line.channel == "!PG" and pieces and pieces[0][0][:1] in PING_COLORS and pieces[0][1] is None:
+            first, extra = pieces[0]                              # the ping symbol gets its own colour
+            pieces[0:1] = [(first[0], f"pg{ord(first[0])}"), (first[1:], extra)]
+        text = chattext.plain(body)                               # item-link markers removed
+        translatable = not (line.channel.startswith("!") and line.channel not in SPEECH_CODES) \
+            and translator.should_translate(text, self.cfg, chattext.check_text(body))
+        if self.cfg.get("swap_trans") and translatable:
+            self._show_swapped(parts, pieces, tag, body)
+            return
+        parts += pieces
         parts.append(("\n", None))
         self._insert(parts, tag)
 
-        text = chattext.plain(body)                               # item-link markers removed
-        if line.channel.startswith("!") and line.channel not in SPEECH_CODES:
-            return                                                # loot, money, experience, system ...: nothing to translate
-        if restricted or not translator.should_translate(text, self.cfg):
-            return
+        if not translatable:
+            return                                                # loot, money, experience, system ... or nothing to translate
+        text, names = chattext.mask_links(body)                   # links become [L1] [L2] for the translator
         token = next(self.tokens)
+        if names:
+            self.link_names[token] = names
         mark = f"tr{token}"
         self.text.mark_set(mark, "end-1c")
         self.text.mark_gravity(mark, "left")          # later lines are inserted after the mark
         self.marks[token] = mark
         if not self.translations.submit(token, text):
+            self.link_names.pop(token, None)
             self._drop_mark(token)
             self.status.set(tr("번역 대기열이 가득 차서 일부 줄을 번역하지 못했습니다"))
 
+    # ---- "translation above, original below": the top line is reserved with a "…" and filled when the translation arrives
+    def _mark_here(self, name):
+        self.text.mark_set(name, "end-1c")
+        self.text.mark_gravity(name, "left")                      # text inserted at the mark goes after it
+
+    def _show_swapped(self, head, pieces, tag, body):
+        masked, names = chattext.mask_links(body)
+        token = next(self.tokens)
+        self._insert(head, tag)                                   # the name part of the top line ...
+        self._mark_here(f"trb{token}")                            # ... then the translation goes here, instead of the "…"
+        self._insert([("…", None), ("\n", None)], tag)
+        self._mark_here(f"trl{token}")                            # start of the lower line (the original)
+        self._insert("    " + chattext.plain(body) + "\n", "trans", group=False)
+        mark = f"tr{token}"
+        self._mark_here(mark)                                     # end of the group: errors are inserted here
+        self.marks[token] = mark
+        self.swapinfo[token] = {"tag": tag, "head": head, "orig": pieces,
+                                "names": names, "quals": chattext.link_qualities(body) if names else []}
+        if names:
+            self.link_names[token] = names
+        if not self.translations.submit(token, masked):
+            self.link_names.pop(token, None)
+            self._swap_fallback(token)
+            self.swapinfo.pop(token, None)
+            self._drop_mark(token)
+            self.status.set(tr("번역 대기열이 가득 차서 일부 줄을 번역하지 못했습니다"))
+
+    def _swap_fill(self, token, result):
+        """The translation arrived: it replaces the "…" of the top line. False if that line is gone."""
+        info = self.swapinfo[token]
+        trb = f"trb{token}"
+        if self.text.get(trb, f"{trb}+1c") != "…":
+            return False
+        pieces = [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None)
+                  for p, q in chattext.split_translation(result, info["names"], info["quals"])]
+        self.text.delete(trb, f"{trb}+1c")
+        self._insert(pieces, info["tag"], index=trb, group=False)
+        return True
+
+    def _swap_fallback(self, token):
+        """No translation: the top line shows the original after all, and the lower copy goes away."""
+        info = self.swapinfo.get(token)
+        if not info:
+            return
+        trb, trl = f"trb{token}", f"trl{token}"
+        try:
+            if self.text.get(trb, f"{trb}+1c") == "…":
+                self.text.delete(trb, f"{trb}+1c")
+                self._insert(info["orig"], info["tag"], index=trb, group=False)
+                if self.text.get(trl, f"{trl}+4c") == "    ":     # the original is shown above now: drop the lower copy
+                    self.text.delete(trl, f"{trl} lineend+1c")
+        except tk.TclError:
+            pass
+
+    _restr_n = 0
+
+    def _code_prefix(self, ch):
+        """What stands in front of a line: nothing, like the game's chat, except "(1)" for numbered channels and an arrow
+        for a whisper you sent. The option "show channel codes in detail" brings back  (S) (W→) (C1) (!LT)."""
+        if self.cfg.get("channel_detail", False):
+            return f"({SHOWN_CODE.get(ch, ch)}) "
+        if ch in ("WT", "BT"):
+            return "→ "
+        if ch.startswith("C") and ch[1:].isdigit():
+            return f"({ch[1:]}) "
+        return ""
+
+    def _show_restricted(self, ts):
+        """The client did not let the addon read these messages (during some fights). A run of them is ONE notice with
+        a counter, instead of a line "[?]: [restricted]" for every message."""
+        self._restr_n += 1
+        text = tr("⚠ 채팅이 제한되어 읽을 수 없음") if self._restr_n == 1 else \
+            tr("⚠ 채팅이 제한되어 읽을 수 없음 ({n}줄)", n=self._restr_n)
+        line = f"{ts}{text}\n"
+        try:
+            if self._restr_n > 1 and "restr" in self.text.mark_names() and "restricted" in self.text.tag_names("restr"):
+                self.text.delete("restr", "restr lineend+1c")      # replace the notice of this run
+                self._insert(line, "restricted", index="restr")
+            else:
+                self.text.mark_set("restr", "end-1c")
+                self.text.mark_gravity("restr", "left")
+                self._insert(line, "restricted")
+        except tk.TclError:
+            pass
+
     def _drop_mark(self, token):
         mark = self.marks.pop(token, None)
-        if mark:
+        for m in ((mark,) if mark else ()) + (f"trb{token}", f"trl{token}"):
             try:
-                self.text.mark_unset(mark)
+                self.text.mark_unset(m)
             except tk.TclError:
                 pass
 
     def on_translation(self, token, result, err):
+        names = self.link_names.pop(token, None)
         mark = self.marks.get(token)
         if mark is None:
             return
+        if token in self.swapinfo:                               # "translation above" mode
+            filled = False
+            if result and not err:
+                try:
+                    filled = self._swap_fill(token, result)
+                except Exception:
+                    log.exception("번역을 위 줄에 넣지 못함")
+            if filled:
+                self.last_error = None
+                self.swapinfo.pop(token, None)
+                self._drop_mark(token)
+                return
+            self._swap_fallback(token)                           # failed: the original in the top line, then the usual way
+            self.swapinfo.pop(token, None)
+        if result and names:
+            result = chattext.unmask_links(result, names)
         try:
             if err:
                 self.status.set(tr("번역 오류: {err}", err=err))
                 if err != self.last_error:                  # don't flood the window with the same error
                     self.last_error = err
-                    self._insert("    ⚠ " + tr("번역 오류: {err}", err=err) + "\n", "error", index=mark)
+                    self._insert("    ⚠ " + tr("번역 오류: {err}", err=err) + "\n", "error", index=mark, group=False)
             elif result:
                 self.last_error = None
-                self._insert(f"    → {result}\n", "trans", index=mark)
+                self._insert(f"    {result}\n", "trans", index=mark, group=False)
         except tk.TclError:
             pass
         finally:
@@ -1048,27 +1211,45 @@ class App(WindowMixin):
             self._connected = False
             log.warning("캡처: %s", text)
 
+    _poll_errors = 0
+
     def poll(self):
+        """Takes what the background threads queued (status, lines, translations ...). One item that raises must never
+        stop this loop: before, a single error here ended it for good - the window kept saying "connected" while no
+        line was shown any more, until the program was restarted."""
         try:
             while True:
-                kind, payload = self.q.get_nowait()
-                if kind == "status":
-                    self.status.set(payload)
-                    self._log_status(payload)
-                elif kind == "lines":
-                    for line in payload:
-                        self.on_new_line(line)
-                elif kind == "trans":
-                    self.on_translation(*payload)
-                elif kind == "call":
-                    payload()
-                elif kind == "options":
-                    self.open_options()
-                elif kind == "quit":
-                    self.on_close()
-        except queue.Empty:
-            pass
-        self.root.after(50, self.poll)
+                try:
+                    kind, payload = self.q.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    if kind == "status":
+                        self.status.set(payload)
+                        self._log_status(payload)
+                    elif kind == "lines":
+                        for line in payload:
+                            try:
+                                self.on_new_line(line)
+                            except Exception:
+                                self._poll_failed("줄 표시", repr(getattr(line, "text", ""))[:80])
+                    elif kind == "trans":
+                        self.on_translation(*payload)
+                    elif kind == "call":
+                        payload()
+                    elif kind == "options":
+                        self.open_options()
+                    elif kind == "quit":
+                        self.on_close()
+                except Exception:
+                    self._poll_failed(str(kind), "")
+        finally:
+            self.root.after(50, self.poll)
+
+    def _poll_failed(self, what, detail):
+        self._poll_errors += 1
+        if self._poll_errors <= 20 or self._poll_errors % 100 == 0:      # a repeating error must not flood the log
+            log.exception("화면 갱신 중 오류 (%s, 누적 %d회) %s", what, self._poll_errors, detail)
 
     # ------------------------------------------------------------------ window settings
     def _font_family(self):
@@ -1077,7 +1258,9 @@ class App(WindowMixin):
 
     def apply_window_settings(self):
         self.font.configure(family=self._font_family(), size=int(self.cfg["font_size"]))
+        self.font_trans.configure(family=self._font_family(), size=self._trans_size())
         self.text.configure(**self._spacing())
+        self._configure_layout_tags(self.text)
         top = bool(self.cfg["topmost"]) and not self.cfg.get("topmost_wow_only")
         self.root.attributes("-topmost", top)
         self.back.attributes("-topmost", top)
@@ -1141,8 +1324,31 @@ class App(WindowMixin):
         return out
 
     def _spacing(self):
-        gap = max(0, min(40, int(self.cfg.get("line_spacing", 4))))
+        gap = max(0, min(40, int(self.cfg.get("line_spacing", 0))))
         return dict(spacing1=gap // 2, spacing3=gap - gap // 2, spacing2=gap // 2)   # between lines / wrapped rows
+
+    def _trans_size(self):
+        """Font size of the translation: its own option, or the same as the original (0 / empty)."""
+        try:
+            n = int(self.cfg.get("trans_font_size") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        return n if 8 <= n <= 32 else int(self.cfg["font_size"])
+
+    def _trans_color(self):
+        c = (self.cfg.get("trans_color") or "").strip()
+        return c if re.fullmatch(r"#[0-9a-fA-F]{6}", c) else TAG_COLORS["trans"]
+
+    def _configure_layout_tags(self, widget, colors=True):
+        """Tags that change the layout: "trans" (translation: size, and colour in the real window) and "gstart" (the first
+        line of a group = an original line with its translation: extra space above, the group gap)."""
+        gap = max(0, min(40, int(self.cfg.get("line_spacing", 0))))
+        group = max(0, min(60, int(self.cfg.get("group_spacing", 4))))
+        widget.tag_configure("gstart", spacing1=gap // 2 + group)
+        if colors:
+            widget.tag_configure("trans", foreground=self._trans_color(), font=self.font_trans)
+        else:
+            widget.tag_configure("trans", font=self.font_trans)
 
     def _build_shadow(self):
         self.shad = tk.Toplevel(self.root)
@@ -1161,6 +1367,7 @@ class App(WindowMixin):
         self._shad_pad = 0
         self.stext.pack(fill="both", expand=True, padx=(0, SB_W + 2))
         self.stext.tag_configure("all", foreground="#000000")
+        self._configure_layout_tags(self.stext, colors=False)
         self._shadow_last = None
         log.info("그림자 창 생성")
 
@@ -1180,6 +1387,7 @@ class App(WindowMixin):
             self.stext.configure(fg="#000000")
             self.stext.tag_configure("all", foreground="#000000")
         self.stext.configure(**self._spacing())
+        self._configure_layout_tags(self.stext, colors=False)
         plat.set_keycolor(self.shad, BG)
         self.shad.attributes("-alpha", tx)
         top = bool(self.cfg["topmost"]) and not self.cfg.get("topmost_wow_only")
@@ -1204,11 +1412,19 @@ class App(WindowMixin):
         if not self._shadow_active():
             return
         try:
-            content = self.text.get("1.0", "end-1c")
-            if content != self._shadow_last:
+            segs, active = [], set()                          # the text with the layout tags (translation size, group gap)
+            for key, val, _idx in self.text.dump("1.0", "end-1c", text=True, tag=True):
+                if key == "tagon" and val in ("trans", "gstart"):
+                    active.add(val)
+                elif key == "tagoff":
+                    active.discard(val)
+                elif key == "text":
+                    segs.append((val, ("all",) + tuple(sorted(active))))
+            if segs != self._shadow_last:
                 self.stext.delete("1.0", "end")
-                self.stext.insert("1.0", content, "all")
-                self._shadow_last = content
+                for val, tags in segs:
+                    self.stext.insert("end", val, tags)
+                self._shadow_last = segs
             self._sync_shadow()
         except tk.TclError:
             pass

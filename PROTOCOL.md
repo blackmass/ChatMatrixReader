@@ -27,14 +27,26 @@ Payload: UTF-8, lines separated by `\n`. Each line has four fields separated by 
 <channel> \x1F <id> \x1F <sender> \x1F <text>
 ```
 
-- channel: S say, Y yell, E emote, P party, R raid, RW raid warning, I instance, G guild, O officer, W whisper, B bnet whisper, C<n> numbered channel n, CM community channel
+- channel: S say, Y yell, E emote, P party, R raid, RW raid warning, I instance, G guild, O officer, W whisper, B bnet whisper, WT whisper you sent (the name is the receiver), BT bnet whisper you sent, C<n> numbered channel n, CM community channel
 - "other" messages (the chat window's "Other" settings) use codes that start with `!`: `!SY` system, `!XP` experience, `!HN` honor,
   `!RP` reputation, `!SK` skill, `!LT` loot, `!CY` currency, `!MN` money, `!TS` trade skills, `!OP` opening, `!PI` pet info,
   `!CI` misc. combat info, `!AC` / `!GA` achievements, `!BH` / `!BA` / `!BN` battleground, `!IG` ignored, `!TI` target icons,
   `!MS` `!MY` `!ME` `!MW` `!MP` NPC say / yell / emote / whisper / party, `!BE` `!BW` raid boss emote / whisper.
   Except for the NPC / boss speech the sender field is empty (the text already contains the names). A reader that does
   not know a `!` code can show the line like any other; the codes never start with `C`, so they cannot be mistaken for channels.
+
+- `!PG` - ping (`CHAT_MSG_PING`). The sender is kept. The text starts with one symbol that names the ping:
+  `◈` normal / unknown (blue), `⚑` assist (green), `⚠` warning (red), `⚔` attack (orange), `▼` on my way (blue).
+- Built-in text emotes (`CHAT_MSG_TEXT_EMOTE`) use channel `E` with an empty sender; the text already contains the names.
+- `!BI` - Battle.net friend came online / went offline (rebuilt by the addon from `CHAT_MSG_BN_INLINE_TOAST_ALERT`). Empty sender.
+- `!RS` - the chat restriction (boss fights) is over; sent only if unreadable lines (`[restricted]`) were seen during it. Empty sender; the text is ignored, the reader shows its own notice.
+- `!TM` - "appearance added to your collection". The game prints this itself (it is not a chat event); the addon builds it from
+  `TRANSMOG_COLLECTION_SOURCE_ADDED`. Empty sender. The reader shows the line yellow and the item name in one colour.
+- Sent whispers use `WT` (character) and `BT` (Battle.net); the sender is the recipient.
+- `/cm raw` prints the raw text of every chat event (with colour and link codes) for diagnosis; it is not part of the matrix.
 - id: message counter 1..65535 (wraps). Use it to detect which lines are new.
+- An empty sender in a normal channel line (`C<n>` ...) means nobody spoke: a server announcement (e.g. the Defense channel). The reader
+  shows such a line without a name, in the system colour.
 - text `[restricted]` with sender `?` means the client did not let the addon read that message.
 
 Each redraw shows the newest lines that fit into the byte budget, so the same lines appear in several consecutive frames.
@@ -48,6 +60,8 @@ Item links are reduced to their name; the quality (rarity) is kept as a marker a
 
 0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary, 6 artifact, 7 heirloom, 8 token,
 9 = a quest link (the name is `[[level] Quest Name]`; an id appended by another addon is removed).
+Map pin links (`worldmap:mapID:x:y`) also use 9: the addon sends them as `[◈ Map Pin Location]` (the game's diamond icon
+becomes the character ◈; the label comes from the client's own `MAP_PIN_HYPERLINK` text). The coordinates are not sent.
 Achievement links also use 9; spell links use 8 (light blue like the heirloom colour). The addon puts the link names in the
 language of the player's own client when the client knows the id (option "Show linked items ..."). A reader that does not
 know the marker can simply delete the bytes 0x02 and 0x03 (and the digit after 0x02). A message cut by the byte

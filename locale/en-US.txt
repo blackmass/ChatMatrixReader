@@ -88,7 +88,6 @@ Ctrl+Alt+O 단축키를 등록하지 못해서 켤 수 없습니다.\n(다시 �
 켜면 평소에는 이 창이 마우스 입력을 받지 않습니다.\nShift를 누른 채로 창 위에 마우스를 올리면 클릭, 드래그 선택(선택하면 자동 복사), 스크롤, 창 이동이 됩니다.\n옵션은 Ctrl+Alt+O 로도 열 수 있습니다.\n\n계속할까요? = When on, this window normally ignores the mouse.\nHold Shift while hovering over it to click, drag-select (selection is copied automatically), scroll and move the window.\nThe options can also be opened with Ctrl+Alt+O.\n\nContinue?
 클릭 통과 (마우스 입력이 창 뒤로 전달됨. Shift를 누르고 있는 동안만 조작 가능) = Click-through (mouse input goes to the window behind; interactive only while Shift is held)
 글자 크기 = Font size
-줄 간격 (픽셀) = Line spacing (pixels)
 채팅 시간 표시 = Show chat time
 최대 보관 줄 수 = Max lines kept
 화면 지우기 = Clear screen
@@ -211,3 +210,14 @@ Google 번역 API 사용량이 이번 달 약 {used}자입니다 (무료 {limit}
 가볍게 = Light
 진하게 (아크릴) = Strong (acrylic)
 흐림 정도는 시스템이 정해서 바꿀 수 없습니다. '진하게'는 위의 '배경' 투명도로 색 농도를 정하고, '가볍게'는 배경 투명도의 영향을 받지 않습니다. 창을 움직이는 동안은 블러가 잠시 꺼집니다. = The system decides how strong the blur is; it cannot be changed. 'Strong' uses the 'Background' opacity above for its colour strength; 'Light' ignores it. The blur is switched off for a moment while the window is moved.
+보낸 번역을 번역창에 표시 (↗ 줄) = Show the translation you send in the window (↗ line)
+채널 코드를 자세히 표시 (문제 확인용) = Show channel codes in detail (for troubleshooting)
+⚠ 채팅이 제한되어 읽을 수 없음 = ⚠ Chat is restricted - cannot be read
+⚠ 채팅이 제한되어 읽을 수 없음 ({n}줄) = ⚠ Chat is restricted - cannot be read ({n} lines)
+✓ 채팅 제한이 해제되었습니다 = ✓ Chat restriction lifted
+줄 간격 (원문-번역, 픽셀) = Line spacing (original-translation, px)
+묶음 간격 (묶음 사이, 픽셀) = Group spacing (between groups, px)
+아래 줄 글자 크기 (0: 위 줄과 같게) = Lower line font size (0: same as the upper line)
+아래 줄 글자 색 (비우면 기본) = Lower line text colour (empty: default)
+번역 글자 색은 #RRGGBB 형식이어야 합니다 (예: #7fd6b0) = The translation colour must look like #RRGGBB (e.g. #7fd6b0)
+번역을 위에, 원문을 아래에 표시 (원문 번역 교체) = Show the translation above and the original below (swap)

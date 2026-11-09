@@ -47,9 +47,13 @@ class CaptureWorker(threading.Thread):
         self.get_cfg = get_cfg           # callable returning the current config dict
         self._stop_evt = threading.Event()
         self._research = threading.Event()
-        self._seen = deque(maxlen=2000)
+        self._seen = deque(maxlen=2000)       # keys of lines already passed on: (id, channel, sender, text)
         self._seen_set = set()
+        self._n_seq = 0                       # frames with a new sequence number / new lines passed on (for the log)
+        self._n_new = 0
         self._last_seq = None
+        self._n_gap = 0                       # matrix pictures that were never seen (sequence number jumps)
+        self._gap_log = 0.0
         self._seq_time = time.time()      # when the sequence number last changed
 
     def stop(self):
@@ -211,24 +215,36 @@ class CaptureWorker(threading.Thread):
                         self._seen.clear()
                         self._seen_set.clear()
                     now_t = time.time()
+                    if self._last_seq is not None and frame.seq > self._last_seq + 1:
+                        gap = frame.seq - self._last_seq - 1          # matrix pictures that were drawn but never seen
+                        self._n_gap += gap
+                        if now_t - self._seq_time <= 5 and now_t - self._gap_log >= 1:
+                            self._gap_log = now_t
+                            log.info("매트릭스 그림 %d장을 놓침 (순번 %d -> %d, %.2f초 사이)", gap, self._last_seq, frame.seq,
+                                     now_t - self._seq_time)
                     if self._last_seq is not None and frame.seq > self._last_seq + 1 and now_t - self._seq_time > 5:
                         log.info("순번 %d -> %d: %.0f초 동안 그대로이다가 %d 건너뜀 (게임이 화면을 느리게 그리고 있었을 수 있음)",
                                  self._last_seq, frame.seq, now_t - self._seq_time, frame.seq - self._last_seq)
                     self._seq_time = now_t
                     self._last_seq = frame.seq
+                    self._n_seq += 1
                     new = []
                     for line in frame.lines:
-                        if line.id not in self._seen_set:
-                            self._remember(line.id)
+                        key = (line.id, line.channel, line.sender, line.text)
+                        if key not in self._seen_set:             # the id alone repeats after an addon reload / id wrap
+                            self._remember(key)
                             new.append(line)
                     if new:
+                        self._n_new += len(new)
                         self.out.put(("lines", new))
                     self._status(tr("연결됨 @ {x},{y}", x=pos[0], y=pos[1]) + f" | seq {frame.seq}"
                                  + (f" | v2·{frame.levels}" if mode != "v1" else ""))
 
             if perf_n and time.time() - perf_log >= 60:        # one line a minute: how expensive is the grabbing?
-                log.info("캡처 | 최근 %d회 평균 %.2f ms (최대 초당 %d회)", perf_n, perf_t / perf_n * 1000, int(1 / period))
+                log.info("캡처 | 최근 %d회 평균 %.2f ms (최대 초당 %d회) | 순번 변경 %d회, 놓친 그림 %d장, 새 줄 %d개 전달 (순번 %s)", perf_n,
+                         perf_t / perf_n * 1000, int(1 / period), self._n_seq, self._n_gap, self._n_new, self._last_seq)
                 perf_n, perf_t, perf_log = 0, 0.0, time.time()
+                self._n_seq = self._n_new = self._n_gap = 0
             self._sleep_rest(t0, period)
 
     def _sleep_rest(self, t0, period):

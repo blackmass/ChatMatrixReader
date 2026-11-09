@@ -138,6 +138,25 @@ def apply_google(text, name=None, style="paren"):
     return regex.sub(rep, text)
 
 
+def apply_google_masked(text, name=None, style="paren", start=1):
+    """Like apply_google, but each glossary term is replaced by a placeholder [L<start>], [L<start+1>] ... and the words
+    that belong there are returned: (masked text, [words]). Google never sees the Korean meaning, so it cannot take the
+    whole sentence for Korean (it then returns it untranslated); the words are put back after the translation."""
+    _, _, regex, lookup = _load(name)
+    if regex is None:
+        return text, []
+    words = []
+
+    def rep(m):
+        meaning = lookup.get(m.group(0).lower())
+        if meaning is None:
+            return m.group(0)
+        words.append(meaning if style == "replace" else f"{m.group(0)}({meaning})")
+        return "[L%d]" % (start + len(words) - 1)
+
+    return regex.sub(rep, text), words
+
+
 def expand_placeholders(prompt):
     """Replace {{File.txt}} in a prompt by the file's lines (comments and blank lines removed)."""
     def repl(m):

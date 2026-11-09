@@ -35,6 +35,7 @@ DEFAULTS = {
     "send_enabled": True,
     "send_lang": "English",
     "send_hotkey": "Shift+Enter",
+    "send_show_log": False,               # show the translated text sent (the "↗" line) in the window; off: it comes back as a chat line
     "send_autopaste": False,              # press Ctrl+V in the game for you (off: you press it)
     "send_prompt": DEFAULT_SEND_PROMPT,
     # window
@@ -52,8 +53,13 @@ DEFAULTS = {
     "translate_test_start": True,         # at start, send a tiny test request so the user sees whether the translation server answers
     "check_updates": True,                # look for a newer GitHub release at start (a notice only, nothing is installed)
     "font_family": "",                    # "" = default (Malgun Gothic); else a font loaded from the fonts/ folder
-    "line_spacing": 4,                    # pixels between chat lines
+    "line_spacing": 0,                    # pixels between chat lines (inside a group: an original line and its translation)
+    "group_spacing": 4,                   # extra pixels between groups (an original line + its translation)
+    "trans_color": "",                    # colour of the translated text ("" = default)
+    "swap_trans": False,                  # translation above, the original below it (in the second-line colour / size)
+    "trans_font_size": 0,                 # size of the translated text (0 = same as the original)
     "class_colors": True,                 # colour the speaker's name by class (needs the addon to send the class)
+    "channel_detail": False,              # show the line codes "(S) (W→) (C1) (!LT)" as before; off: only "(1)" for numbered channels
     "show_time": True,                    # prefix every line with the time it was read
     "max_lines": 500,
     "geometry": "560x420",

@@ -583,6 +583,64 @@ class WindowMixin:
             out.append("위 창 읽기 실패 %r" % (e,))
         return " | ".join(out)
 
+    _inner_logged = 0.0
+
+    def _is_above(self, a, b):
+        """Is window a higher in the stacking order than window b?"""
+        u = _user32()
+        u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+        u.GetWindow.restype = wintypes.HWND
+        p, n = u.GetWindow(b, 3), 0                              # GW_HWNDPREV: from b upwards
+        while p and n < 1000:
+            if p == a:
+                return True
+            p, n = u.GetWindow(p, 3), n + 1
+        return False
+
+    def _inner_order_ok(self):
+        """text window above shadow above background (anywhere in the order, other windows may lie between)."""
+        chain = [_hwnd(self.root)] + list(self._below_hwnds())
+        return all(self._is_above(chain[k], chain[k + 1]) for k in range(len(chain) - 1))
+
+    def _check_inner_order(self):
+        """Our own windows must sit text window > shadow > background. Something (a window being shown again, a topmost
+        flag set one after the other ...) can swap them, and then the shadow is drawn OVER the text. The focus switches
+        put them in order again; this also does it while another program has the focus. Nothing happens (no flicker)
+        while the order is right. If putting the lower windows back under the text window does not help, the text
+        window is raised above them instead."""
+        try:
+            if not self.two_window or not self._below_hwnds():
+                return
+            if self._inner_order_ok():
+                return
+            u = _user32()
+            flags = 0x1 | 0x2 | 0x10                                 # NOSIZE | NOMOVE | NOACTIVATE
+            u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+            first = self._state_dump()
+            self._stack_back()
+            how = "아래 창들을 글자 창 밑으로"
+            if not self._inner_order_ok():                           # that did not work: raise the text window instead
+                me = _hwnd(self.root)
+                hi = None
+                for h in self._below_hwnds():
+                    if self._is_above(h, me) and (hi is None or self._is_above(h, hi)):
+                        hi = h
+                if hi is not None:
+                    above = u.GetWindow(hi, 3)
+                    topmost = bool(u.GetWindowLongW(hi, -20) & 0x8)
+                    ia = above if above else (-1 if topmost else 0)  # HWND_TOPMOST / HWND_TOP
+                    ok = u.SetWindowPos(me, ia, 0, 0, 0, 0, flags)
+                    err = ctypes.windll.kernel32.GetLastError() if not ok else 0
+                    self._stack_back()
+                    how = "글자 창을 위로 올림 (SetWindowPos=%s 오류=%s)" % (bool(ok), err)
+            now = time.monotonic()
+            if now - self._inner_logged > 30:
+                self._inner_logged = now
+                log.info("번역창 안쪽 순서가 어긋남(그림자/배경이 글자 창 위로 올라옴) -> %s -> %s | 정렬 전: %s", how,
+                         "해결" if self._inner_order_ok() else "여전히 어긋남", first)
+        except Exception:
+            log.exception("창 안쪽 순서 점검 실패")
+
     _watchdog_next = 0.0
     _watchdog_logged = 0.0
     _ensure_logged = 0.0
@@ -595,6 +653,7 @@ class WindowMixin:
         if now < self._watchdog_next:
             return
         self._watchdog_next = now + 1.0
+        self._check_inner_order()
         g = self._game_hwnd
         if not g:
             return

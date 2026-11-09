@@ -14,7 +14,7 @@ CLASS_COLORS = {          # speaker class letter (PROTOCOL.md) -> the game's cla
     "H": "#3FC7EB", "I": "#8788EE", "J": "#00FF98", "K": "#FF7C0A", "L": "#A330C9", "M": "#33937F",
 }
 QUALITY_COLORS = {
-    0: "#9d9d9d", 1: "#ffffff", 2: "#1eff00", 3: "#4a9eff", 4: "#c06bff",
+    0: "#9d9d9d", 1: "#ffffff", 2: "#1eff00", 3: "#0070dd", 4: "#a335ee",
     5: "#ff8000", 6: "#e6cc80", 7: "#00ccff", 8: "#00ccff",
     9: "#ffff00",             # 9 = quest link (yellow)
 }
@@ -50,6 +50,70 @@ def _name(q, name):
 def plain(text):
     """Text without markers (what gets translated / copied)."""
     return _STRAY.sub("", _MARK.sub(lambda m: _name(int(m.group(1)), m.group(2)), text))
+
+
+def mask_links(text):
+    """(text with every link replaced by a placeholder [L1] [L2] ..., [link names]).
+    The translator sees  "[L1] Who needs this?"  instead of  "[센달 생존 전문가의 장화] Who needs this?": a link name in
+    another language made Google guess the wrong source language and leave the sentence untouched. A line without
+    other letters is left alone (nothing to gain)."""
+    names = []
+
+    def rep(m):
+        names.append(_name(int(m.group(1)), m.group(2)))
+        return "[L%d]" % len(names)
+
+    masked = _STRAY.sub("", _MARK.sub(rep, text))
+    if not names or not any(c.isalpha() for c in _PLACEHOLDER.sub("", masked)):
+        return plain(text), []
+    return masked, names
+
+
+_PLACEHOLDER = re.compile(r"[\[\uff3b\u3010(\uff08]\s*[Ll]\s*(\d+)\s*[\]\uff3d\u3011)\uff09]")
+
+PLACEHOLDER = _PLACEHOLDER
+
+
+def link_qualities(text):
+    """The quality digit of every link marker, in the order mask_links() numbers them ([L1] [L2] ...)."""
+    return [int(m.group(1)) for m in _MARK.finditer(text)]
+
+
+def split_translation(text, names, quals):
+    """[(piece, quality or None)] of a translated text that still holds the placeholders [L1] [L2] ...: the links come back
+    as pieces of their own (so the reader can colour them), the rest is plain text."""
+    out, pos = [], 0
+    for m in _PLACEHOLDER.finditer(text):
+        i = int(m.group(1))
+        if not (1 <= i <= len(names) and names[i - 1]):
+            continue                                            # unknown placeholder: stays as the translator wrote it
+        if m.start() > pos:
+            out.append((text[pos:m.start()], None))
+        out.append((names[i - 1], quals[i - 1] if i - 1 < len(quals) else None))
+        pos = m.end()
+    if pos < len(text):
+        out.append((text[pos:], None))
+    return [(p, q) for p, q in out if p]
+
+
+def unmask_links(text, names):
+    """Put the link names back where the translator left the placeholders (it may change the brackets or spacing)."""
+    if not names:
+        return text
+
+    def rep(m):
+        i = int(m.group(1))
+        return names[i - 1] if 1 <= i <= len(names) and names[i - 1] else m.group(0)
+
+    return _PLACEHOLDER.sub(rep, text)
+
+
+def check_text(text):
+    """The text the 'do not translate' checks (language detection, the user's regex) look at: the line without its links.
+    A link name is a fixed word in the client's language (the addon renames links), so it says nothing about the
+    language the speaker wrote in. A line that is nothing but links is checked as it is."""
+    rest = _STRAY.sub("", _MARK.sub("", text))
+    return rest if any(c.isalpha() for c in rest) else plain(text)
 
 
 def segments(text):

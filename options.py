@@ -119,8 +119,13 @@ class OptionsWindow:
             "shadow_dx": tk.IntVar(value=int(cfg.get("shadow_dx", 1))),
             "shadow_dy": tk.IntVar(value=int(cfg.get("shadow_dy", 1))),
             "font_family": tk.StringVar(value=cfg.get("font_family") if cfg.get("font_family") in app.custom_fonts else tr("기본 글꼴 (맑은 고딕)")),
-            "line_spacing": tk.IntVar(value=int(cfg.get("line_spacing", 4))),
+            "line_spacing": tk.IntVar(value=int(cfg.get("line_spacing", 0))),
+            "group_spacing": tk.IntVar(value=int(cfg.get("group_spacing", 4))),
+            "swap_trans": tk.BooleanVar(value=bool(cfg.get("swap_trans", False))),
+            "trans_font_size": tk.IntVar(value=int(cfg.get("trans_font_size", 0) or 0)),
+            "trans_color": tk.StringVar(value=cfg.get("trans_color") or ""),
             "show_time": tk.BooleanVar(value=bool(cfg.get("show_time", True))),
+            "channel_detail": tk.BooleanVar(value=bool(cfg.get("channel_detail", False))),
             "class_colors": tk.BooleanVar(value=bool(cfg.get("class_colors", True))),
             "max_lines": tk.IntVar(value=int(cfg["max_lines"])),
             "poll_hz": tk.IntVar(value=int(cfg["poll_hz"])),
@@ -128,6 +133,7 @@ class OptionsWindow:
             "send_lang": tk.StringVar(value=cfg.get("send_lang") or "English"),
             "send_hotkey": tk.StringVar(value=cfg.get("send_hotkey") or hotkeys.DEFAULT),
             "send_autopaste": tk.BooleanVar(value=bool(cfg.get("send_autopaste", False))),
+            "send_show_log": tk.BooleanVar(value=bool(cfg.get("send_show_log", False))),
             "pos_x": tk.StringVar(value=str(mp[0]) if mp else ""),
             "pos_y": tk.StringVar(value=str(mp[1]) if mp else ""),
         }
@@ -417,12 +423,27 @@ class OptionsWindow:
         ttk.Spinbox(tab, from_=50, to=5000, increment=50, textvariable=v["max_lines"],
                     width=6).grid(row=4, column=1, sticky="w", **PAD)
         ttk.Button(tab, text=tr("화면 지우기"), command=app.clear_text).grid(row=5, column=0, sticky="w", **PAD)
-        ttk.Label(tab, text=tr("줄 간격 (픽셀)")).grid(row=7, column=0, sticky="w", **PAD)
-        ttk.Spinbox(tab, from_=0, to=40, textvariable=v["line_spacing"], width=6).grid(row=7, column=1, sticky="w", **PAD)
+        sp = ttk.Frame(tab)                               # both gaps in one row
+        sp.grid(row=7, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(sp, text=tr("줄 간격 (원문-번역, 픽셀)")).pack(side="left")
+        ttk.Spinbox(sp, from_=0, to=40, textvariable=v["line_spacing"], width=5).pack(side="left", padx=(4, 16))
+        ttk.Label(sp, text=tr("묶음 간격 (묶음 사이, 픽셀)")).pack(side="left")
+        ttk.Spinbox(sp, from_=0, to=60, textvariable=v["group_spacing"], width=5).pack(side="left", padx=4)
+        ttk.Checkbutton(tab, text=tr("번역을 위에, 원문을 아래에 표시 (원문 번역 교체)"), variable=v["swap_trans"]).grid(
+            row=16, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("아래 줄 글자 크기 (0: 위 줄과 같게)")).grid(row=14, column=0, sticky="w", **PAD)
+        ttk.Spinbox(tab, from_=0, to=32, textvariable=v["trans_font_size"], width=6).grid(row=14, column=1, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("아래 줄 글자 색 (비우면 기본)")).grid(row=15, column=0, sticky="w", **PAD)
+        tc = ttk.Frame(tab)
+        tc.grid(row=15, column=1, sticky="w", **PAD)
+        ttk.Entry(tc, textvariable=v["trans_color"], width=9).pack(side="left")
+        ttk.Button(tc, text=tr("색 선택"), command=self.pick_trans_color).pack(side="left", padx=4)
         ttk.Checkbutton(tab, text=tr("채팅 시간 표시"), variable=v["show_time"]).grid(
             row=8, column=0, columnspan=2, sticky="w", **PAD)
         ttk.Checkbutton(tab, text=tr("직업 색상으로 이름 표시"), variable=v["class_colors"]).grid(
             row=11, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Checkbutton(tab, text=tr("채널 코드를 자세히 표시 (문제 확인용)"), variable=v["channel_detail"]).grid(
+            row=13, column=0, columnspan=2, sticky="w", **PAD)
         ttk.Label(tab, text=tr("글꼴")).grid(row=9, column=0, sticky="w", **PAD)
         fam = ttk.Frame(tab)
         fam.grid(row=9, column=1, sticky="w", **PAD)
@@ -487,6 +508,13 @@ class OptionsWindow:
         ttk.Button(tab, text=tr("매트릭스 다시 찾기"), command=self.app.worker.research).grid(
             row=2, column=0, sticky="w", **PAD)
 
+    def pick_trans_color(self):
+        cur = self.v["trans_color"].get().strip()
+        rgb, hexv = colorchooser.askcolor(color=cur if re.fullmatch(r"#[0-9a-fA-F]{6}", cur) else "#7fd6b0",
+                                          parent=self.win)
+        if hexv:
+            self.v["trans_color"].set(hexv)
+
     def pick_shadow_color(self):
         cur = self.v["shadow_color"].get()
         rgb, hexv = colorchooser.askcolor(color=cur if re.fullmatch(r"#[0-9a-fA-F]{6}", cur) else "#000000",
@@ -514,11 +542,13 @@ class OptionsWindow:
         ttk.Label(tab, text=tr("꺼 두면 번역 후 와우로 돌아가 Ctrl+V, Enter를 직접 누릅니다. 이 프로그램은 게임에 어떤 입력도 보내지 않습니다."),
                   foreground="#666", wraplength=430, justify="left").grid(row=4, column=0, columnspan=3, sticky="w", padx=22, pady=(0, 6))
 
-        ttk.Label(tab, text=tr("보내기 번역 프롬프트")).grid(row=5, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Checkbutton(tab, text=tr("보낸 번역을 번역창에 표시 (↗ 줄)"),
+                        variable=v["send_show_log"]).grid(row=5, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("보내기 번역 프롬프트")).grid(row=6, column=0, columnspan=2, sticky="w", **PAD)
         self.send_prompt_text = tk.Text(tab, width=62, height=9, wrap="word", font=("Malgun Gothic", 9))
-        self.send_prompt_text.grid(row=6, column=0, columnspan=3, sticky="we", padx=6)
+        self.send_prompt_text.grid(row=7, column=0, columnspan=3, sticky="we", padx=6)
         self.send_prompt_text.insert("1.0", self.app.cfg.get("send_prompt") or translator.DEFAULT_SEND_PROMPT)
-        ttk.Button(tab, text=tr("기본 프롬프트로"), command=self._reset_send_prompt).grid(row=7, column=0, sticky="w", **PAD)
+        ttk.Button(tab, text=tr("기본 프롬프트로"), command=self._reset_send_prompt).grid(row=8, column=0, sticky="w", **PAD)
 
     def _reset_send_prompt(self):
         self.send_prompt_text.delete("1.0", "end")
@@ -934,6 +964,9 @@ class OptionsWindow:
             poll_hz = max(5, min(60, int(v["poll_hz"].get())))
             max_lines = max(50, min(5000, int(v["max_lines"].get())))
             line_spacing = max(0, min(40, int(v["line_spacing"].get())))
+            group_spacing = max(0, min(60, int(v["group_spacing"].get())))
+            trans_size = int(v["trans_font_size"].get())
+            trans_size = 0 if trans_size < 8 else min(32, trans_size)
         except (ValueError, tk.TclError) as e:
             messagebox.showerror(tr("옵션"), str(e) if isinstance(e, ValueError) else tr("숫자 값이 올바르지 않습니다."),
                                  parent=self.win)
@@ -942,6 +975,10 @@ class OptionsWindow:
             hotkey = hotkeys.normalize(v["send_hotkey"].get())
         except ValueError:
             messagebox.showerror(tr("옵션"), tr("보내기 단축키가 올바르지 않습니다."), parent=self.win)
+            return
+        trans_color = v["trans_color"].get().strip()
+        if trans_color and not re.fullmatch(r"#[0-9a-fA-F]{6}", trans_color):
+            messagebox.showerror(tr("옵션"), tr("번역 글자 색은 #RRGGBB 형식이어야 합니다 (예: #7fd6b0)"), parent=self.win)
             return
         shadow_color = v["shadow_color"].get().strip()
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", shadow_color):
@@ -967,12 +1004,13 @@ class OptionsWindow:
                    blur_state=4 if v["blur_kind"].get() == tr("진하게 (아크릴)") else 3)
         cfg.update(send_enabled=bool(v["send_enabled"].get()),
                    send_lang=v["send_lang"].get().strip() or "English", send_hotkey=hotkey,
-                   send_autopaste=bool(v["send_autopaste"].get()),
+                   send_autopaste=bool(v["send_autopaste"].get()), send_show_log=bool(v["send_show_log"].get()),
                    send_prompt="" if sprompt == translator.DEFAULT_SEND_PROMPT.strip() else sprompt)
         cfg.update(check_updates=bool(v["check_updates"].get()))
         cfg.update(shadow_on=bool(v["shadow_on"].get()), shadow_color=shadow_color, shadow_dx=sdx, shadow_dy=sdy)
-        cfg.update(font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, max_lines=max_lines, manual_pos=manual,
-                   line_spacing=line_spacing, show_time=bool(v["show_time"].get()),
+        cfg.update(swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, max_lines=max_lines, manual_pos=manual,
+                   line_spacing=line_spacing, group_spacing=group_spacing, trans_font_size=trans_size, trans_color=trans_color,
+                   show_time=bool(v["show_time"].get()), channel_detail=bool(v["channel_detail"].get()),
                    class_colors=bool(v["class_colors"].get()))
         app.apply_window_settings()
         config.save(cfg)

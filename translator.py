@@ -2,6 +2,7 @@
 
 Only the standard library is used (urllib), so nothing extra has to be installed.
 """
+import chattext
 import glossary
 import usage
 import json
@@ -150,14 +151,16 @@ def matches_skip_regex(text: str, cfg: dict) -> bool:
     return bool(rx and rx.search(text))
 
 
-def should_translate(text: str, cfg: dict) -> bool:
+def should_translate(text: str, cfg: dict, check: str = None) -> bool:
+    """check: the text the language / regex tests look at (the line without its links); default = text."""
     if cfg.get("translator", "none") == "none":
         return False
     if not any(c.isalpha() for c in text):
         return False
-    if cfg.get("skip_same_lang", True) and looks_like_target(text, cfg.get("target_lang", "")):
+    check = text if check is None else check
+    if cfg.get("skip_same_lang", True) and looks_like_target(check, cfg.get("target_lang", "")):
         return False
-    if matches_skip_regex(text, cfg):
+    if matches_skip_regex(check, cfg):
         return False
     return True
 
@@ -372,32 +375,53 @@ def _google_limited(reason):
 usage_notify = None          # set by the app: called with the month total each time it passes a multiple of 100,000
 
 
+def _same_text(a: str, b: str) -> bool:
+    return " ".join((a or "").split()).lower() == " ".join((b or "").split()).lower()
+
+
 def translate_google(cfg: dict, text: str) -> str:
-    global _g_block_n
     tl = lang_code(cfg.get("target_lang", "한국어"))
     key = (cfg.get("google_api_key") or "").strip()
     timeout = min(float(cfg.get("timeout", 30)), 10)
-    sent = text
+    sent, words = text, []
     if cfg.get("glossary_google", True):
-        sent = glossary.apply_google(text, cfg.get("glossary_file"), cfg.get("glossary_style", "paren"))
-        if sent != text:
-            log.info("단어장 적용: %s -> %s", _short(text, 60), _short(sent, 60))
+        # Glossary terms ("lfm" -> "lfm(구인)") go through Google as placeholders [L3] ...: Korean words inside an English
+        # sentence made Google take the whole text for Korean and return it untranslated. The numbers continue after
+        # the link placeholders the window already put in (those are put back by the window).
+        used = [int(n) for n in chattext.PLACEHOLDER.findall(text)]
+        sent, words = glossary.apply_google_masked(text, cfg.get("glossary_file"), cfg.get("glossary_style", "paren"),
+                                                   max(used, default=0) + 1)
+        if words:
+            log.info("단어장 적용: %s -> %s | %s", _short(text, 60), _short(sent, 60), ", ".join(words))
+    out, _ = _google_once(key, sent, tl, "auto", timeout)
+    if words:
+        first = max(used, default=0)
+        out = chattext.unmask_links(out, [None] * first + words)
+    return out
+
+
+def _google_once(key: str, q: str, tl: str, sl: str, timeout: float):
+    """One Google request -> (translation, detected source language or "")."""
+    global _g_block_n
     if key:
-        data = _http_json(GOOGLE_V2_URL + "?" + urllib.parse.urlencode({"key": key}),
-                          {"q": sent, "target": tl, "format": "text"}, None, timeout)
+        body = {"q": q, "target": tl, "format": "text"}
+        if sl != "auto":
+            body["source"] = sl
+        data = _http_json(GOOGLE_V2_URL + "?" + urllib.parse.urlencode({"key": key}), body, None, timeout)
         try:
-            out = data["data"]["translations"][0]["translatedText"]
+            tr0 = data["data"]["translations"][0]
+            out, det = tr0["translatedText"], tr0.get("detectedSourceLanguage") or ""
         except (KeyError, IndexError, TypeError):
             raise TranslateError(tr("예상하지 못한 Google 응답")) from None
-        hit = usage.add(len(sent))                       # the official API bills by characters sent
+        hit = usage.add(len(q))                          # the official API bills by characters sent
         if hit is not None and usage_notify:
             try:
                 usage_notify(hit)
             except Exception:
                 pass
-        return out
+        return out, det
     _google_gate()
-    params = urllib.parse.urlencode({"client": "gtx", "sl": "auto", "tl": tl, "dt": "t", "q": sent})
+    params = urllib.parse.urlencode({"client": "gtx", "sl": sl, "tl": tl, "dt": "t", "q": q})
     try:
         data = _http_json(GOOGLE_GTX_URL + "?" + params, None, None, timeout)
     except TranslateError as e:
@@ -411,9 +435,13 @@ def translate_google(cfg: dict, text: str) -> str:
         raise TranslateError(tr("예상하지 못한 Google 응답")) from None
     if not out:
         raise TranslateError(tr("빈 응답"))
+    try:
+        det = data[2] if isinstance(data[2], str) else ""
+    except (IndexError, TypeError):
+        det = ""
     with _g_lock:
         _g_block_n = 0
-    return out
+    return out, det
 
 
 def _short(text, n=80):
