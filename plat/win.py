@@ -656,6 +656,7 @@ class WindowMixin:
         self._check_inner_order()
         g = self._game_hwnd
         if not g:
+            self._recover_without_game()
             return
         if self._fg_last != g:                                  # another program has the focus
             self._ensure_above_game()
@@ -688,6 +689,39 @@ class WindowMixin:
                 log.exception("점검 복구 실패")
             return
         self._fix_order_if_covered(late=True)
+
+    _nogame_logged = 0.0
+
+    def _recover_without_game(self):
+        """No game window (the game was closed, or has not started): nothing to stack above, so the window must simply
+        behave like any normal window - never hidden, minimized or outside every monitor (the display mode of an
+        exclusive-fullscreen game can move windows away when it ends)."""
+        try:
+            u = _user32()
+            u.IsWindowVisible.argtypes = [wintypes.HWND]
+            u.IsIconic.argtypes = [wintypes.HWND]
+            u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+            u.MonitorFromWindow.restype = wintypes.HANDLE
+            me = _hwnd(self.root)
+            visible, iconic = bool(u.IsWindowVisible(me)), bool(u.IsIconic(me))
+            on_screen = bool(u.MonitorFromWindow(me, 0))              # MONITOR_DEFAULTTONULL: None = on no monitor
+            if visible and not iconic and on_screen:
+                return
+            now = time.monotonic()
+            if now - self._nogame_logged > 30:
+                self._nogame_logged = now
+                log.warning("게임 창이 없는데 번역창이 안 보임 | 보임=%s 최소화=%s 모니터 안=%s -> 복구", visible, iconic, on_screen)
+                log.info("점검 상태: %s", self._state_dump())
+            if iconic or not visible:
+                self.root.deiconify()
+            if not on_screen:
+                self.root.geometry("+100+100")                        # the text window keeps its size
+            self._stack_back()
+            sync = getattr(self, "_sync_back", None)
+            if sync:
+                sync()
+        except Exception:
+            log.exception("게임 없음 상태 복구 실패")
 
     def _is_covered(self, g):
         """Is the game window above any of our windows (text, shadow, background)?"""

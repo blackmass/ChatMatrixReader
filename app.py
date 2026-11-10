@@ -80,9 +80,9 @@ OTHER_COLORS = {
     "!BE": "#ffdd00", "!BW": "#ffdd00",
     "!PG": "#ff5050",                                  # pings: stand out like a yell
     "!BI": "#66ccff",                                  # Battle.net friend online / offline (light blue like the game)
-    "!TM": "#ffff00",                                  # "appearance added to your collection": a yellow system line
+    "!CN": "#ffc0c0",                                  # channel notices ("Changed Channel: [...]"): the channel chat colour
+    "!TM": "#ffff00",                                  # "appearance added to your collection": a yellow system line (the item name keeps its quality colour)
 }
-TM_ITEM_COLOR = "#e86bd0"                              # ... whose item name is one purple-pink colour (any link quality)
 TAG_COLORS.update({code: color for code, color in OTHER_COLORS.items()})
 # "Other" lines that are somebody speaking (NPC / boss): these are translated; loot, money, experience ... are not
 SPEECH_CODES = ("!MS", "!MY", "!ME", "!MW", "!MP", "!BE", "!BW")
@@ -208,6 +208,7 @@ class App(WindowMixin):
         self.link_names = {}       # token -> link names hidden behind [L1] [L2] while the line is translated
         self.last_error = None
         self.chrome_on = False
+        self._past = False             # scrolled up: the newest line is not on screen (the frame and a notice are shown)
         self.dragging = False
         self.two_window = False
         self.tick_n = 0
@@ -313,9 +314,9 @@ class App(WindowMixin):
         for name, color in TAG_COLORS.items():
             self.text.tag_configure(name, foreground=color)
         self._configure_layout_tags(self.text)
-        self.text.tag_configure("qtm", foreground=TM_ITEM_COLOR)
         for q, color in chattext.QUALITY_COLORS.items():          # created after the channel tags -> they win
             self.text.tag_configure(f"q{q}", foreground=color)
+        self.text.tag_configure("guild", foreground=chattext.QUALITY_COLORS[2])      # <Guild Name>: item-green
         for letter, color in chattext.CLASS_COLORS.items():
             self.text.tag_configure(f"cls_{letter}", foreground=color)
         for glyph, color in PING_COLORS.items():
@@ -409,6 +410,13 @@ class App(WindowMixin):
             self.check_update(self._on_start_update)
         if self.cfg.get("translate_test_start", True) and self.cfg.get("translator", "none") != "none":
             self._translate_test()
+        self._warm_last = self._warm_key()
+        self._warm_pending = (None, 0)
+        self._gloss_last = self._gloss_sig()
+        self._gloss_pending = None
+        self._conn_last = self._conn_key()
+        self._conn_pending = None
+        self.root.after(2000, self._warm_tick)
 
     def _build_back(self):
         """Background-only window used when background and text opacity differ."""
@@ -445,10 +453,29 @@ class App(WindowMixin):
 
 
 
+    def _check_past(self):
+        """Is the view scrolled up so that the newest line is hidden? Then the frame stays visible (as if the window were
+        not click-through) with a notice in the title bar, so the old text is never mistaken for the current chat."""
+        try:
+            past = self.text.yview()[1] < 0.999 and self.text.bbox("end-1c") is None
+        except tk.TclError:
+            past = False
+        if past != self._past:
+            self._past = past
+            self._refresh_title()
+        return past
+
+    def _refresh_title(self):
+        if self._past:
+            self.lbl_title.configure(text=tr("▲ 지난 대화 보는 중"), fg="#f0b84a")
+        else:
+            self.lbl_title.configure(text="ChatMatrix", fg="#cfd2d8")
+
     def _hover_tick(self):
         try:
             ct = bool(self.cfg["click_through"])
             inside = self._cursor_inside()
+            past = self._check_past()
             # A mouse button held down since before the pointer reached this window (turning the camera in the game: the
             # pointer is hidden but still moves) must not be taken over by this window: let the input through until release.
             btn = self._key_down(0x01) or self._key_down(0x02)
@@ -476,11 +503,11 @@ class App(WindowMixin):
                     else:
                         self.text.tag_remove("sel", "1.0", "end")       # a half-made selection is not kept
                         self._leave_interactive()
-                want = self.dragging or interactive
+                want = self.dragging or interactive or past
                 self._set_hover_clear(bool(self.cfg.get("hover_clear")) and inside and not interactive and not self.dragging
                                       and not self._send_open and not self._send_pending)
             else:
-                want = self.dragging or (inside and not ghost)
+                want = self.dragging or (inside and not ghost) or past
                 self._set_hover_clear(False)
             self.set_chrome(bool(want))
             self._set_blur_paused(bool(self.dragging))              # also ends the pause when a drag ended by other paths
@@ -584,12 +611,100 @@ class App(WindowMixin):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _translate_test(self):
-        """Send a tiny request with the current translation method and say in the chat window whether it answered."""
+    def _warm_key(self):
+        """What the AI server has to read again when it changes: the prompt, the glossary file, the model/server.
+        None = nothing to warm up (Google or another translator that does not take the prompt)."""
+        cfg = self.cfg
+        mode = cfg.get("translator", "none")
+        if mode == "openai":
+            extra = (cfg.get("api_url"), cfg.get("api_model"))
+        elif mode == "custom" and "{system}" in (cfg.get("custom_body") or ""):
+            extra = (cfg.get("custom_url"), cfg.get("custom_body"))
+        else:
+            return None
+        return (mode, cfg.get("prompt"), glossary.cache_key(cfg), extra)
+
+    def _conn_key(self):
+        """The settings that decide which server answers (changed in the options while the program runs)."""
+        c = self.cfg
+        mode = c.get("translator", "none")
+        if mode == "openai":
+            return (mode, c.get("api_url"), c.get("api_model"), c.get("api_key"))
+        if mode == "google":
+            return (mode, c.get("google_api_key"))
+        if mode == "custom":
+            return (mode, c.get("custom_url"), c.get("custom_key"), c.get("custom_headers"), c.get("custom_body"))
+        return (mode,)
+
+    def _conn_check(self):
+        """The translation method (or its server / key) was changed while running: check the connection again, as
+        at start, when that option is on. Returns True when it sent the request (it also warms the AI server up)."""
+        key = self._conn_key()
+        if key == self._conn_last:
+            self._conn_pending = None
+            return False
+        if self._conn_pending != key:                        # wait one tick: the options may still be being saved
+            self._conn_pending = key
+            return False
+        self._conn_last, self._conn_pending = key, None
+        if key[0] == "none" or not self.cfg.get("translate_test_start", True):
+            return False
+        log.info("번역 방식/서버 설정이 바뀜 -> 연결을 다시 확인합니다")
+        self._translate_test()
+        return True
+
+    def _gloss_sig(self):
+        return glossary._signature(glossary.resolve(self.cfg.get("glossary_file")))
+
+    def _gloss_check(self):
+        """The glossary file was saved: say so in the window (every translator reads it again by itself)."""
+        sig = self._gloss_sig()
+        if sig == self._gloss_last or self.cfg.get("translator", "none") == "none":
+            self._gloss_pending = None
+            self._gloss_last = sig if self.cfg.get("translator", "none") == "none" else self._gloss_last
+            return
+        if self._gloss_pending != sig:                       # wait one more tick: the file may still be being written
+            self._gloss_pending = sig
+            return
+        self._gloss_last, self._gloss_pending = sig, None
+        n = len(glossary.entries(self.cfg.get("glossary_file")))
+        log.info("단어장 파일이 바뀜: %d개 항목", n)
+        self.add_system("ℹ " + tr("단어장을 다시 읽었습니다: {n}개 항목", n=n), "system")
+
+    def _warm_tick(self):
+        """After the prompt or the glossary changed, send the tiny test request once (if the start test is on): the AI
+        server keeps what it read of an unchanged prompt, so the first real line after the change is not the slow one."""
+        try:
+            self._gloss_check()
+            key = self._warm_key()
+            if self._conn_check():                               # that request also carried the prompt: nothing to warm
+                self._warm_last, self._warm_pending = key, (None, 0)
+            elif key is None or not self.cfg.get("translate_test_start", True):
+                self._warm_last, self._warm_pending = key, (None, 0)
+            elif key != self._warm_last:                         # (also: switched from another translator to the AI)
+                pk, n = self._warm_pending
+                if pk == key:                                    # unchanged for a whole tick: the file is saved completely
+                    self._warm_last, self._warm_pending = key, (None, 0)
+                    log.info("프롬프트/단어장이 바뀜 -> 번역 서버에 미리 한 번 보내 둡니다")
+                    self._translate_test(quiet=True)
+                else:
+                    self._warm_pending = (key, 0)
+            else:
+                self._warm_pending = (None, 0)
+        except Exception:
+            log.exception("미리 보내기 점검 실패")
+        finally:
+            self.root.after(2000, self._warm_tick)
+
+    def _translate_test(self, quiet=False):
+        """Send a tiny request with the current translation method and say in the chat window whether it answered.
+        quiet: the warm-up after a prompt / glossary change (a short notice instead of the connection report)."""
         cfg = dict(self.cfg)
         mode = cfg.get("translator")
         if mode == "google":
             who = "Google" + (" (API Key)" if (cfg.get("google_api_key") or "").strip() else "")
+        elif mode == "custom":
+            who = cfg.get("custom_preset") or cfg.get("custom_url") or "HTTP"
         else:
             who = cfg.get("api_model") or cfg.get("api_url") or "AI"
 
@@ -598,6 +713,11 @@ class App(WindowMixin):
             try:
                 translator.translate(cfg, "hi")
                 ms = int((time.perf_counter() - t0) * 1000)
+                if quiet:
+                    log.info("미리 보내기 완료: %s (%dms)", who, ms)
+                    msg, tag = "ℹ " + tr("바뀐 프롬프트/단어장을 번역 서버에 미리 보내 두었습니다 ({ms}ms)", ms=ms), "system"
+                    self.q.put(("call", lambda: self.add_system(msg, tag)))
+                    return
                 msg, tag = "✔ " + tr("번역 서버 연결 양호: {who} ({ms}ms)", who=who, ms=ms), "system"
             except Exception as e:
                 msg = "✖ " + tr("번역 서버에 연결하지 못했습니다: {who}", who=who) + " - " + (str(e) or e.__class__.__name__)[:160]
@@ -923,7 +1043,7 @@ class App(WindowMixin):
             self.root.clipboard_clear()
             self.root.clipboard_append(txt)
             self.lbl_title.configure(text=tr("복사됨 ✓ ({n}자)", n=len(txt)))
-            self.root.after(1500, lambda: self.lbl_title.configure(text="ChatMatrix"))
+            self.root.after(1500, self._refresh_title)
         return "break"
 
     def _auto_copy(self, _e=None):
@@ -1043,11 +1163,12 @@ class App(WindowMixin):
         else:
             parts = [(f"{ts}{self._code_prefix(line.channel)}", None)]
         pieces = [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(body)]
-        if line.channel == "!TM":                                 # every item name of this message in one colour
-            pieces = [(p, "qtm" if q is not None else None) for p, q in chattext.segments(body)]
+        if any(e == "q10" for _, e in pieces) and not line.channel.startswith("!"):
+            log.info("노란 링크(10) 표시: %s", [(p[:30], e) for p, e in pieces])
         if line.channel == "!PG" and pieces and pieces[0][0][:1] in PING_COLORS and pieces[0][1] is None:
             first, extra = pieces[0]                              # the ping symbol gets its own colour
             pieces[0:1] = [(first[0], f"pg{ord(first[0])}"), (first[1:], extra)]
+        pieces = self._guild(pieces)
         text = chattext.plain(body)                               # item-link markers removed
         translatable = not (line.channel.startswith("!") and line.channel not in SPEECH_CODES) \
             and translator.should_translate(text, self.cfg, chattext.check_text(body))
@@ -1090,7 +1211,7 @@ class App(WindowMixin):
         self._mark_here(mark)                                     # end of the group: errors are inserted here
         self.marks[token] = mark
         self.swapinfo[token] = {"tag": tag, "head": head, "orig": pieces,
-                                "names": names, "quals": chattext.link_qualities(body) if names else []}
+                                "names": names, "quals": chattext.link_qualities(body)}
         if names:
             self.link_names[token] = names
         if not self.translations.submit(token, masked):
@@ -1100,14 +1221,26 @@ class App(WindowMixin):
             self._drop_mark(token)
             self.status.set(tr("번역 대기열이 가득 차서 일부 줄을 번역하지 못했습니다"))
 
+    @staticmethod
+    def _guild(pieces):
+        """The parts of a line without a colour of their own: a <Guild Name> in them gets the guild colour."""
+        out = []
+        for p, extra in pieces:
+            if extra is None and "<" in p:
+                out += [(s, "guild" if g else None) for s, g in chattext.split_guild(p)]
+            else:
+                out.append((p, extra))
+        return out
+
     def _swap_fill(self, token, result):
         """The translation arrived: it replaces the "…" of the top line. False if that line is gone."""
         info = self.swapinfo[token]
         trb = f"trb{token}"
         if self.text.get(trb, f"{trb}+1c") != "…":
             return False
-        pieces = [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None)
-                  for p, q in chattext.split_translation(result, info["names"], info["quals"])]
+        seq = (chattext.split_translation(result, info["names"], info["quals"]) if info["names"]
+               else chattext.color_brackets(result, info["quals"]))          # no placeholders: a line of links only
+        pieces = self._guild([(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in seq])
         self.text.delete(trb, f"{trb}+1c")
         self._insert(pieces, info["tag"], index=trb, group=False)
         return True
@@ -1195,7 +1328,7 @@ class App(WindowMixin):
                     self._insert("    ⚠ " + tr("번역 오류: {err}", err=err) + "\n", "error", index=mark, group=False)
             elif result:
                 self.last_error = None
-                self._insert(f"    {result}\n", "trans", index=mark, group=False)
+                self._insert([("    ", None)] + self._guild([(result, None)]) + [("\n", None)], "trans", index=mark, group=False)
         except tk.TclError:
             pass
         finally:
@@ -1227,6 +1360,10 @@ class App(WindowMixin):
                     if kind == "status":
                         self.status.set(payload)
                         self._log_status(payload)
+                    elif kind == "pos":
+                        if self.cfg.get("last_pos") != list(payload):
+                            self.cfg["last_pos"] = list(payload)
+                            config.save(self.cfg)
                     elif kind == "lines":
                         for line in payload:
                             try:

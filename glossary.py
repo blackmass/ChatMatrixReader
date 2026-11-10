@@ -59,18 +59,27 @@ def _read_text(path):
     return raw.decode("utf-8", errors="replace")
 
 
-def _content_lines(text):
+def _content_lines(text, headings=False):
+    """The entry lines of a glossary file. A line starting with ## is a section heading: it is a comment for the
+    translators that replace words (Google), and with headings=True it is kept for the AI prompt, so the AI can tell
+    what kind of word a section holds (places, roles ...)."""
     out = []
     for raw in text.splitlines():
         line = raw.strip()
-        if line and not line.startswith(("#", "//")):
+        if headings and line.startswith("##"):
+            out.append(line)
+        elif line and not line.startswith(("#", "//")):
             out.append(line)
     return out
+
+
+_INLINE_NOTE = re.compile(r"\s+#(?:\s|$).*$")           # "b4 = before   # a note": whitespace, #, whitespace
 
 
 def parse(text):
     entries = []
     for line in _content_lines(text):
+        line = _INLINE_NOTE.sub("", line)                    # a note after " # " is for the AI only
         term, sep, meaning = line.partition("=")
         term, meaning = term.strip(), meaning.strip()
         if sep and term and meaning:
@@ -158,7 +167,7 @@ def apply_google_masked(text, name=None, style="paren", start=1):
 
 
 def expand_placeholders(prompt):
-    """Replace {{File.txt}} in a prompt by the file's lines (comments and blank lines removed)."""
+    """Replace {{File.txt}} in a prompt by the file's lines (comments and blank lines removed; ## headings and notes after " # " are kept)."""
     def repl(m):
         name = m.group(1).strip()
         if not _safe_name(name):
@@ -171,7 +180,7 @@ def expand_placeholders(prompt):
                 log.warning("프롬프트의 {{%s}} 파일이 없습니다: %s", name, path)
             return ""
         try:
-            return "\n".join(_content_lines(_read_text(path)))
+            return "\n".join(_content_lines(_read_text(path), headings=True))
         except OSError as e:
             log.warning("{{%s}} 읽기 실패: %s", name, e)
             return ""

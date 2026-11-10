@@ -7,12 +7,19 @@ PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 DEFAULTS = {
     # translation
-    "translator": "google",               # none | openai | google
+    "translator": "google",               # none | openai | google | custom
     "target_lang": "한국어",
     "language": "",                       # "" = system language, else a locale/<code>.txt name (ko-KR = built in)
     "api_url": "http://localhost:1234/v1",
     "api_model": "",
     "api_key": "",
+    "custom_preset": "",                  # custom HTTP translator: preset name (informational) and the request settings
+    "custom_key": "",
+    "custom_url": "",
+    "custom_headers": "{}",
+    "custom_body_type": "json",           # json | form
+    "custom_body": "",
+    "custom_path": "",                    # where the translation is in the answer, e.g. translations.0.text
     "google_api_key": "",                 # optional; empty = free unofficial endpoint
     "prompt": DEFAULT_PROMPT,
     "glossary_file": "Glossary.txt",      # relative to the app folder, or an absolute path
@@ -30,6 +37,7 @@ DEFAULTS = {
     "skip_regex_hide": False,        # also leave the matching lines out of the window (not only untranslated)
     "skip_regex": "",                # lines matching this regular expression are not translated (empty = off)
     "max_pending": 20,
+    "log_request": False,            # write the full request (prompt) of every translation into the log
     "max_parallel": 2,
     # send box: type in your own language, get the translation on the clipboard
     "send_enabled": True,
@@ -66,6 +74,8 @@ DEFAULTS = {
     # capture
     "poll_hz": 30,
     "manual_pos": None,                   # [x, y] in screen pixels, or None = auto search
+    "last_pos": None,                     # [x, y] where the matrix was found last time (looked at first, every second)
+    "full_scan_sec": 30,                  # whole-screen search while the matrix is missing: at most this often (seconds)
 }
 
 

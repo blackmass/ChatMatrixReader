@@ -39,6 +39,7 @@ Payload: UTF-8, lines separated by `\n`. Each line has four fields separated by 
   `◈` normal / unknown (blue), `⚑` assist (green), `⚠` warning (red), `⚔` attack (orange), `▼` on my way (blue).
 - Built-in text emotes (`CHAT_MSG_TEXT_EMOTE`) use channel `E` with an empty sender; the text already contains the names.
 - `!BI` - Battle.net friend came online / went offline (rebuilt by the addon from `CHAT_MSG_BN_INLINE_TOAST_ALERT`). Empty sender.
+- `!CN` - channel notice ("Changed Channel: [1. General - Stormwind City]", joined, left ...), built by the addon like the game's chat frame does from `CHAT_MSG_CHANNEL_NOTICE`. Empty sender. Filtered like the numbered channels.
 - `!RS` - the chat restriction (boss fights) is over; sent only if unreadable lines (`[restricted]`) were seen during it. Empty sender; the text is ignored, the reader shows its own notice.
 - `!TM` - "appearance added to your collection". The game prints this itself (it is not a chat event); the addon builds it from
   `TRANSMOG_COLLECTION_SOURCE_ADDED`. Empty sender. The reader shows the line yellow and the item name in one colour.
@@ -54,19 +55,27 @@ A reader should accept a frame only if the marker, end marker and checksum are v
 
 ## Item links in the text field
 
-Item links are reduced to their name; the quality (rarity) is kept as a marker around the name:
+Links are reduced to their name; a one-byte code around the name says how to colour it:
 
-    \x02 <digit 0-8> [Item Name] \x03
+    \x02 <code> [Name] \x03
 
-0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary, 6 artifact, 7 heirloom, 8 token,
-9 = a quest link (the name is `[[level] Quest Name]`; an id appended by another addon is removed).
-Map pin links (`worldmap:mapID:x:y`) also use 9: the addon sends them as `[◈ Map Pin Location]` (the game's diamond icon
-becomes the character ◈; the label comes from the client's own `MAP_PIN_HYPERLINK` text). The coordinates are not sent.
-Achievement links also use 9; spell links use 8 (light blue like the heirloom colour). The addon puts the link names in the
-language of the player's own client when the client knows the id (option "Show linked items ..."). A reader that does not
-know the marker can simply delete the bytes 0x02 and 0x03 (and the digit after 0x02). A message cut by the byte
-limit may lack the closing 0x03. This does not change the pixel format or the protocol version.
+The code is the single character `chr(48 + n)` (n = 0..78, i.e. the bytes 0x30 .. 0x7E). The numbers are kept in groups of ten:
 
+| n | meaning |
+|---|---------|
+| 0-9 | item quality: 0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary, 6 artifact, 7 heirloom (8, 9 free). Battle pet and currency links use the quality of their link colour the same way |
+| 10-19 | colours of other game links: 10 yellow (quest, achievement, map pin), 11 light blue `#71d5ff` (spell, talent, mount), 12 gold `#ffd100` (profession recipe), 13 transmog purple `#e86bd0` (item name of "appearance added") |
+| 20-29 | reserved |
+
+(The digits `0`-`9` are therefore the old item-quality codes; 10 is written as `:` and 11 as `;`. Earlier versions used the digit `9`
+for yellow and `8` for light blue: addon and reader must be updated together.)
+Quest links: the name is `[[level] Quest Name]`; an id appended by another addon is removed. Map pin links (`worldmap:mapID:x:y`)
+are sent as `[◈ Map Pin Location]` (the game's diamond icon becomes the character ◈; the label comes from the client's own
+`MAP_PIN_HYPERLINK` text); the coordinates are not sent. The addon puts the link names (item, spell, quest, achievement,
+profession, mount, battle pet, currency) in the language of the player's own client when the client knows the id (option
+"Show linked items ..."). A reader that does not know the marker can delete the bytes 0x02 and 0x03 and the code byte after
+0x02; a code without a colour is shown plain. A message cut by the byte limit may lack the closing 0x03. This does not
+change the pixel format or the protocol version.
 
 ## Speaker class (optional 5th field, v1 and v2)
 

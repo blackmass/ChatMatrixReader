@@ -89,6 +89,13 @@ class OptionsWindow:
             "api_model": tk.StringVar(value=cfg["api_model"]),
             "api_key": tk.StringVar(value=cfg["api_key"]),
             "google_api_key": tk.StringVar(value=cfg["google_api_key"]),
+            "custom_preset": tk.StringVar(value=cfg.get("custom_preset") or tr(translator.CUSTOM_PRESET_MANUAL)),
+            "custom_key": tk.StringVar(value=cfg.get("custom_key", "")),
+            "custom_url": tk.StringVar(value=cfg.get("custom_url", "")),
+            "custom_headers": tk.StringVar(value=cfg.get("custom_headers", "{}")),
+            "custom_body_type": tk.StringVar(value="form" if cfg.get("custom_body_type") == "form" else "json"),
+            "custom_path": tk.StringVar(value=cfg.get("custom_path", "")),
+            "custom_note": tk.StringVar(value=""),
             "disable_reasoning": tk.BooleanVar(value=bool(cfg["disable_reasoning"])),
             "reasoning_off_body": tk.StringVar(value=cfg["reasoning_off_body"]),
             "temperature": tk.StringVar(value=str(cfg["temperature"])),
@@ -129,16 +136,19 @@ class OptionsWindow:
             "class_colors": tk.BooleanVar(value=bool(cfg.get("class_colors", True))),
             "max_lines": tk.IntVar(value=int(cfg["max_lines"])),
             "poll_hz": tk.IntVar(value=int(cfg["poll_hz"])),
+            "full_scan_sec": tk.IntVar(value=int(cfg.get("full_scan_sec", 30))),
             "send_enabled": tk.BooleanVar(value=bool(cfg.get("send_enabled", True))),
             "send_lang": tk.StringVar(value=cfg.get("send_lang") or "English"),
             "send_hotkey": tk.StringVar(value=cfg.get("send_hotkey") or hotkeys.DEFAULT),
             "send_autopaste": tk.BooleanVar(value=bool(cfg.get("send_autopaste", False))),
+            "log_request": tk.BooleanVar(value=bool(cfg.get("log_request", False))),
             "send_show_log": tk.BooleanVar(value=bool(cfg.get("send_show_log", False))),
             "pos_x": tk.StringVar(value=str(mp[0]) if mp else ""),
             "pos_y": tk.StringVar(value=str(mp[1]) if mp else ""),
         }
         self.openai_widgets = []
         self.google_widgets = []
+        self.custom_widgets = []
         self.test_widgets = []
         self.folds = {}
         self._fold_mode = None
@@ -223,8 +233,16 @@ class OptionsWindow:
     def _tab_translate(self, nb):
         v = self.v
         tab = self._tab_frame(nb, tr("번역"))
+        # two columns: left = basics, filters, glossary, test; right = the settings of the translators (they fold by mode)
+        left = ttk.Frame(tab)
+        left.grid(row=0, column=0, sticky="nsew")
+        ttk.Separator(tab, orient="vertical").grid(row=0, column=1, sticky="ns", padx=6, pady=10)
+        right = ttk.Frame(tab)
+        right.grid(row=0, column=2, sticky="nsew")
+        tab.columnconfigure(0, weight=1)
+        tab.columnconfigure(2, weight=1)
 
-        top = ttk.Frame(tab)
+        top = ttk.Frame(left)
         top.pack(fill="x", padx=6, pady=(8, 2))
         ttk.Label(top, text=tr("번역 방식")).grid(row=0, column=0, sticky="w", **PAD)
         cb = ttk.Combobox(top, textvariable=v["translator"], values=[tr(x) for x in TRANSLATOR_LABELS.values()],
@@ -237,10 +255,9 @@ class OptionsWindow:
                         variable=v["translate_test_start"]).grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
 
         # --- OpenAI compatible
-        g1 = self.folds["openai"] = _Fold(tab, tr("OpenAI 호환 API (LM Studio 등)"))
-        g1.pack(fill="x", padx=8, pady=4)
+        g1 = self.folds["openai"] = _Fold(right, tr("OpenAI 호환 API (LM Studio 등)"))
         ttk.Label(g1, text="API URL").grid(row=0, column=0, sticky="w", **PAD)
-        e1 = ttk.Entry(g1, textvariable=v["api_url"], width=44)
+        e1 = ttk.Entry(g1, textvariable=v["api_url"], width=40)
         e1.grid(row=0, column=1, columnspan=2, sticky="w", **PAD)
         ttk.Label(g1, text=tr("모델")).grid(row=1, column=0, sticky="w", **PAD)
         self.model_cb = ttk.Combobox(g1, textvariable=v["api_model"], width=34)
@@ -248,7 +265,7 @@ class OptionsWindow:
         b1 = ttk.Button(g1, text=tr("목록 불러오기"), command=self.fetch_models)
         b1.grid(row=1, column=2, **PAD)
         ttk.Label(g1, text="API Key").grid(row=2, column=0, sticky="w", **PAD)
-        e2 = ttk.Entry(g1, textvariable=v["api_key"], width=44, show="*")
+        e2 = ttk.Entry(g1, textvariable=v["api_key"], width=40, show="*")
         e2.grid(row=2, column=1, columnspan=2, sticky="w", **PAD)
         ttk.Label(g1, text=tr("온도 / 시간제한(초)")).grid(row=3, column=0, sticky="w", **PAD)
         tt = ttk.Frame(g1)
@@ -259,7 +276,7 @@ class OptionsWindow:
         s2.pack(side="left", padx=(8, 0))
         c1 = ttk.Checkbutton(g1, text=tr("추론(reasoning) 끄기 - 아래 JSON을 요청에 추가"), variable=v["disable_reasoning"])
         c1.grid(row=4, column=0, columnspan=3, sticky="w", **PAD)
-        e5 = ttk.Entry(g1, textvariable=v["reasoning_off_body"], width=62)
+        e5 = ttk.Entry(g1, textvariable=v["reasoning_off_body"], width=50)
         e5.grid(row=5, column=0, columnspan=3, sticky="w", **PAD)
         ttk.Label(g1, text=tr("모델마다 끄는 방법이 다릅니다. 서버가 거부(400)하면 자동으로 빼고 다시 요청합니다.\n"
                               "URL은 http://localhost:1234 처럼 써도 /v1 을 자동으로 붙입니다."),
@@ -267,22 +284,58 @@ class OptionsWindow:
         self.openai_widgets += [e1, self.model_cb, b1, e2, s1, s2, c1, e5]
 
         # --- Google
-        g2 = self.folds["google"] = _Fold(tab, tr("Google 번역"))
+        g2 = self.folds["google"] = _Fold(right, tr("Google 번역"))
         g2.pack(fill="x", padx=8, pady=4)
-        ttk.Label(g2, text=tr("API Key (선택)")).grid(row=0, column=0, sticky="w", **PAD)
-        e3 = ttk.Entry(g2, textvariable=v["google_api_key"], width=44, show="*")
+        ttk.Label(g2, text=tr("API Key (선택, Basic v2)")).grid(row=0, column=0, sticky="w", **PAD)
+        e3 = ttk.Entry(g2, textvariable=v["google_api_key"], width=40, show="*")
         e3.grid(row=0, column=1, sticky="w", **PAD)
         ttk.Label(g2, text=tr("비우면 키 없이 쓰는 비공식 무료 방식입니다 (제한되거나 바뀔 수 있음).\n"
-                              "Cloud Translation API 키를 넣으면 공식 방식을 사용합니다."),
+                              "Cloud Translation API(Basic, v2)의 API 키를 넣으면 공식 방식을 사용합니다. 서비스 계정 JSON·v3 키는 쓸 수 없습니다."),
                   foreground="#666", justify="left").grid(row=1, column=0, columnspan=2, sticky="w", **PAD)
         ttk.Label(g2, text=tr("이번 달 사용량: 약 {used} / {limit}자 (추정값이며 정확하지 않습니다)",
                               used=f"{usage.total():,}", limit=f"{usage.FREE_LIMIT:,}"),
                   foreground="#666").grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
         self.google_widgets += [e3]
 
+        # --- custom HTTP (DeepL, Azure, Papago, ... : one request, JSON answer)
+        gu = self.folds["custom"] = _Fold(right, tr("사용자 정의 HTTP (DeepL, Azure, Papago, Claude 등)"))
+        gu.pack(fill="x", padx=8, pady=4)
+        ttk.Label(gu, text=tr("서비스")).grid(row=0, column=0, sticky="w", **PAD)
+        pc = ttk.Combobox(gu, textvariable=v["custom_preset"], state="readonly", width=30,
+                          values=[tr(translator.CUSTOM_PRESET_MANUAL)] + list(translator.CUSTOM_PRESETS))
+        pc.grid(row=0, column=1, sticky="w", **PAD)
+        pc.bind("<<ComboboxSelected>>", lambda e: self.apply_custom_preset())
+        ttk.Label(gu, text="API Key").grid(row=1, column=0, sticky="w", **PAD)
+        uk = ttk.Entry(gu, textvariable=v["custom_key"], width=40, show="*")
+        uk.grid(row=1, column=1, sticky="w", **PAD)
+        ttk.Label(gu, text=tr("주소")).grid(row=2, column=0, sticky="w", **PAD)
+        uu = ttk.Entry(gu, textvariable=v["custom_url"], width=40)
+        uu.grid(row=2, column=1, sticky="w", **PAD)
+        ttk.Label(gu, text=tr("헤더(JSON)")).grid(row=3, column=0, sticky="w", **PAD)
+        uh = ttk.Entry(gu, textvariable=v["custom_headers"], width=40)
+        uh.grid(row=3, column=1, sticky="w", **PAD)
+        ttk.Label(gu, text=tr("본문 종류")).grid(row=4, column=0, sticky="w", **PAD)
+        ub = ttk.Combobox(gu, textvariable=v["custom_body_type"], values=["json", "form"], state="readonly", width=8)
+        ub.grid(row=4, column=1, sticky="w", **PAD)
+        ttk.Label(gu, text=tr("본문")).grid(row=5, column=0, sticky="nw", **PAD)
+        self.custom_body = tk.Text(gu, width=38, height=5, wrap="word", font=("Consolas", 9), undo=True)
+        self.custom_body.grid(row=5, column=1, sticky="w", **PAD)
+        self.custom_body.insert("1.0", self.app.cfg.get("custom_body", ""))
+        ttk.Label(gu, text=tr("번역문 위치")).grid(row=6, column=0, sticky="w", **PAD)
+        up = ttk.Entry(gu, textvariable=v["custom_path"], width=40)
+        up.grid(row=6, column=1, sticky="w", **PAD)
+        ttk.Label(gu, textvariable=v["custom_note"], foreground="#a05a00", wraplength=380, justify="left").grid(
+            row=7, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(gu, text=tr("자리표시: {text} 원문, {key} API Key, {target}/{TARGET} 목표 언어 코드(ko / KO), "
+                              "{system} 프롬프트(AI용), {key1}/{key2} 키를 ':' 로 나눈 앞/뒤. "
+                              "번역문 위치는 응답 JSON 의 경로입니다 (예: translations.0.text)."),
+                  foreground="#666", wraplength=380, justify="left").grid(row=8, column=0, columnspan=2, sticky="w", **PAD)
+        self.custom_widgets += [pc, uk, uu, uh, ub, self.custom_body, up]
+
+        g1.pack(fill="x", padx=8, pady=4)
+
         # --- glossary
-        gg = self.folds["glossary"] = _Fold(tab, tr("단어장 (Google, AI 공통)"))
-        gg.pack(fill="x", padx=8, pady=4)
+        gg = self.folds["glossary"] = _Fold(left, tr("단어장 (Google, AI 공통)"))
         ttk.Label(gg, text=tr("파일")).grid(row=0, column=0, sticky="w", **PAD)
         ttk.Entry(gg, textvariable=v["glossary_file"], width=34).grid(row=0, column=1, sticky="w", **PAD)
         gb = ttk.Frame(gg)
@@ -298,14 +351,17 @@ class OptionsWindow:
         ttk.Label(gg, textvariable=v["glossary_info"], foreground="#666").grid(row=3, column=0, columnspan=3, sticky="w", **PAD)
         ttk.Label(gg, text=tr("AI(OpenAI 호환)에는 프롬프트의 {{Glossary.txt}} 자리에 파일 내용이 들어갑니다. 파일은 저장하면 바로 반영됩니다."),
                   foreground="#666").grid(row=4, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(gg, text=tr("단어장이나 프롬프트를 바꾸면 AI 번역은 첫 번역이 느려질 수 있습니다 (서버가 새 내용을 읽는 시간). "
+                              "'시작할 때 번역 서버 연결 확인'이 켜져 있으면 바뀐 뒤 미리 한 번 보내 두어 줄여 줍니다."),
+                  foreground="#666", wraplength=380, justify="left").grid(row=5, column=0, columnspan=3, sticky="w", **PAD)
         self.google_widgets += [gc, gs]
 
         # --- prompt
-        g3 = self.folds["prompt"] = _Fold(tab, tr("프롬프트 (OpenAI 호환 API 전용. {target_lang}: 목표 언어, {{파일명}}: 그 파일 내용)"))
+        g3 = self.folds["prompt"] = _Fold(right, tr("프롬프트 (OpenAI 호환 API 전용. {target_lang}: 목표 언어, {{파일명}}: 그 파일 내용)"))
         g3.pack(fill="both", padx=8, pady=4)
         holder = ttk.Frame(g3)
         holder.pack(fill="both", padx=6, pady=(4, 2))
-        self.prompt = tk.Text(holder, width=66, height=8, wrap="word", font=("Malgun Gothic", 9), undo=True)
+        self.prompt = tk.Text(holder, width=54, height=8, wrap="word", font=("Malgun Gothic", 9), undo=True)
         sb = ttk.Scrollbar(holder, orient="vertical", command=self.prompt.yview)
         self.prompt.configure(yscrollcommand=sb.set)
         self.prompt.pack(side="left", fill="both", expand=True)
@@ -319,18 +375,18 @@ class OptionsWindow:
         self.openai_widgets += [self.prompt, b2]
 
         # --- common
-        ttk.Checkbutton(tab, text=tr("목표 언어와 같은 문장은 번역 생략 (한국어 등 글자로 판별 가능한 경우)"),
+        ttk.Checkbutton(left, text=tr("목표 언어와 같은 문장은 번역 생략 (한국어 등 글자로 판별 가능한 경우)"),
                         variable=v["skip_same_lang"]).pack(anchor="w", padx=10, pady=2)
-        gx = ttk.Frame(tab)
+        gx = ttk.Frame(left)
         gx.pack(fill="x", padx=10, pady=(2, 0))
         ttk.Label(gx, text=tr("번역 제외 패턴 (정규식):")).pack(side="left")
         ttk.Entry(gx, textvariable=v["skip_regex"], width=34).pack(side="left", padx=6)
-        ttk.Checkbutton(tab, text=tr("일치하는 문장은 원문도 숨김 (창에 표시하지 않음)"),
+        ttk.Checkbutton(left, text=tr("일치하는 문장은 원문도 숨김 (창에 표시하지 않음)"),
                         variable=v["skip_regex_hide"]).pack(anchor="w", padx=10, pady=2)
-        ttk.Label(tab, text=tr("비워 두면 사용하지 않습니다. 이 패턴이 한 글자라도 일치하는 문장은 번역하지 않고 원문만 표시합니다. "
+        ttk.Label(left, text=tr("비워 두면 사용하지 않습니다. 이 패턴이 한 글자라도 일치하는 문장은 번역하지 않고 원문만 표시합니다. "
                                "(목표 언어를 바꾸면 패턴도 직접 바꿔 주세요.)"),
-                  foreground="#666", wraplength=470, justify="left").pack(anchor="w", padx=10)
-        ex = ttk.Frame(tab)
+                  foreground="#666", wraplength=380, justify="left").pack(anchor="w", padx=10)
+        ex = ttk.Frame(left)
         ex.pack(fill="x", padx=10, pady=(0, 4))
         ttk.Label(ex, text=tr("예 (한글이 있는 문장 제외):"), foreground="#666").pack(side="left")
         exe = ttk.Entry(ex, width=20)                          # read-only: the text can be selected and copied
@@ -338,14 +394,16 @@ class OptionsWindow:
         exe.configure(state="readonly")
         exe.pack(side="left", padx=6)
 
+        gg.pack(fill="x", padx=8, pady=4)
+
         # --- test
-        g4 = ttk.LabelFrame(tab, text=tr("테스트 (저장하지 않아도 지금 입력한 설정으로 시험)"))
+        g4 = ttk.LabelFrame(left, text=tr("테스트 (저장하지 않아도 지금 입력한 설정으로 시험)"))
         g4.pack(fill="x", padx=8, pady=(4, 8))
-        e4 = ttk.Entry(g4, textvariable=v["test_text"], width=52)
+        e4 = ttk.Entry(g4, textvariable=v["test_text"], width=40)
         e4.grid(row=0, column=0, **PAD)
         b3 = ttk.Button(g4, text=tr("테스트"), command=self.run_test)
         b3.grid(row=0, column=1, **PAD)
-        ttk.Label(g4, textvariable=v["test_result"], wraplength=470, justify="left").grid(
+        ttk.Label(g4, textvariable=v["test_result"], wraplength=380, justify="left").grid(
             row=1, column=0, columnspan=2, sticky="w", **PAD)
         self.test_widgets += [e4, b3]
 
@@ -505,8 +563,13 @@ class OptionsWindow:
         pos.grid(row=1, column=1, sticky="w", **PAD)
         ttk.Entry(pos, textvariable=v["pos_x"], width=7).pack(side="left")
         ttk.Entry(pos, textvariable=v["pos_y"], width=7).pack(side="left", padx=(4, 0))
+        ttk.Label(tab, text=tr("전체 화면 탐색 간격 (초)")).grid(row=2, column=0, sticky="w", **PAD)
+        ttk.Spinbox(tab, from_=5, to=600, textvariable=v["full_scan_sec"], width=6).grid(row=2, column=1, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("매트릭스가 잡히지 않으면 1초마다 마지막으로 찾은 위치를 다시 확인합니다. 그 위치에 없으면 위 간격마다 화면 전체를 "
+                               "훑어 다시 찾습니다 (화면 전체 읽기는 게임에 부담이 되므로 너무 짧게 하지 마세요)."),
+                  foreground="#666", wraplength=430, justify="left").grid(row=3, column=0, columnspan=3, sticky="w", padx=22, pady=(0, 6))
         ttk.Button(tab, text=tr("매트릭스 다시 찾기"), command=self.app.worker.research).grid(
-            row=2, column=0, sticky="w", **PAD)
+            row=4, column=0, sticky="w", **PAD)
 
     def pick_trans_color(self):
         cur = self.v["trans_color"].get().strip()
@@ -605,6 +668,8 @@ class OptionsWindow:
         sb.pack(side="right", fill="y")
         self.log_text.pack(side="left", fill="both", expand=True)
         self.log_text.tag_configure("warn", foreground="#b00020")
+        ttk.Checkbutton(tab, text=tr("번역 요청 전문(프롬프트 포함)을 로그에 기록 - 확인용. 켜 두면 로그가 빨리 커집니다"),
+                        variable=self.v["log_request"]).pack(anchor="w", padx=8, pady=(0, 2))
         bar = ttk.Frame(tab)
         bar.pack(anchor="w", padx=6, pady=(0, 2))
         ttk.Button(bar, text=tr("새로고침"), command=self.refresh_log).pack(side="left")
@@ -769,12 +834,30 @@ class OptionsWindow:
         mode = self._mode()
         self._set_enabled(self.openai_widgets, mode == "openai")
         self._set_enabled(self.google_widgets, mode == "google")
+        self._set_enabled(self.custom_widgets, mode == "custom")
         self._set_enabled(self.test_widgets, mode != "none")
         if mode != self._fold_mode:                    # a new translation method: fold away what it does not use
             self._fold_mode = mode
-            show = {"openai": ("openai", "prompt", "glossary"), "google": ("google", "glossary")}.get(mode, ())
+            show = {"openai": ("openai", "prompt", "glossary"), "google": ("google", "glossary"),
+                    "custom": ("custom", "glossary")}.get(mode, ())
             for key, fold in self.folds.items():
                 fold.set_open(key in show)
+
+    def apply_custom_preset(self):
+        v = self.v
+        name = v["custom_preset"].get()
+        p = translator.CUSTOM_PRESETS.get(name)
+        if not p:                                       # "manual": keep what is typed
+            v["custom_note"].set("")
+            return
+        url, headers, btype, body, path, note = p
+        v["custom_url"].set(url)
+        v["custom_headers"].set(headers)
+        v["custom_body_type"].set(btype)
+        self.custom_body.delete("1.0", "end")
+        self.custom_body.insert("1.0", body)
+        v["custom_path"].set(path)
+        v["custom_note"].set(tr(note) if note else "")
 
     def open_glossary(self):
         name = self.v["glossary_file"].get().strip() or glossary.DEFAULT_NAME
@@ -883,7 +966,19 @@ class OptionsWindow:
             translator.compile_skip_regex(skip_regex)
         except re.error as e:
             raise ValueError(tr("'번역 제외 패턴'이 올바른 정규식이 아닙니다: {err}", err=e)) from None
-        return {
+        preset = v["custom_preset"].get()
+        custom = {
+            "custom_preset": preset if preset in translator.CUSTOM_PRESETS else "",
+            "custom_key": v["custom_key"].get().strip(),
+            "custom_url": v["custom_url"].get().strip(),
+            "custom_headers": v["custom_headers"].get().strip() or "{}",
+            "custom_body_type": "form" if v["custom_body_type"].get() == "form" else "json",
+            "custom_body": self.custom_body.get("1.0", "end-1c").strip(),
+            "custom_path": v["custom_path"].get().strip(),
+        }
+        if self._mode() == "custom":
+            translator.custom_check(custom)             # ValueError with a message for the user
+        return dict(custom, **{
             "disable_reasoning": bool(v["disable_reasoning"].get()),
             "reasoning_off_body": v["reasoning_off_body"].get().strip() or translator.DEFAULT_REASONING_OFF,
             "translator": self._mode(),
@@ -893,6 +988,7 @@ class OptionsWindow:
             "api_key": v["api_key"].get(),
             "google_api_key": v["google_api_key"].get().strip(),
             "translate_test_start": bool(v["translate_test_start"].get()),
+            "log_request": bool(v["log_request"].get()),
             "temperature": max(0.0, min(2.0, temp)),
             "timeout": max(2.0, min(300.0, timeout)),
             "skip_same_lang": bool(v["skip_same_lang"].get()),
@@ -903,7 +999,7 @@ class OptionsWindow:
             "glossary_style": {tr(label): key for key, label in glossary.GLOSSARY_STYLES.items()}.get(
                 v["glossary_style"].get(), "paren"),
             "prompt": self.prompt.get("1.0", "end-1c").strip() or translator.DEFAULT_PROMPT,
-        }
+        })
 
     def _run_in_thread(self, fn, done):
         """Run fn() off the UI thread; done(result, error) is called back on the UI thread."""
@@ -962,6 +1058,7 @@ class OptionsWindow:
             new = self.collect_translation()
             font_size = max(8, min(32, int(v["font_size"].get())))
             poll_hz = max(5, min(60, int(v["poll_hz"].get())))
+            full_scan = max(5, min(600, int(v["full_scan_sec"].get())))
             max_lines = max(50, min(5000, int(v["max_lines"].get())))
             line_spacing = max(0, min(40, int(v["line_spacing"].get())))
             group_spacing = max(0, min(60, int(v["group_spacing"].get())))
@@ -1008,7 +1105,7 @@ class OptionsWindow:
                    send_prompt="" if sprompt == translator.DEFAULT_SEND_PROMPT.strip() else sprompt)
         cfg.update(check_updates=bool(v["check_updates"].get()))
         cfg.update(shadow_on=bool(v["shadow_on"].get()), shadow_color=shadow_color, shadow_dx=sdx, shadow_dy=sdy)
-        cfg.update(swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, max_lines=max_lines, manual_pos=manual,
+        cfg.update(swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, full_scan_sec=full_scan, max_lines=max_lines, manual_pos=manual,
                    line_spacing=line_spacing, group_spacing=group_spacing, trans_font_size=trans_size, trans_color=trans_color,
                    show_time=bool(v["show_time"].get()), channel_detail=bool(v["channel_detail"].get()),
                    class_colors=bool(v["class_colors"].get()))

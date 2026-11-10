@@ -1,12 +1,36 @@
 """Item-link markers inside chat text.
 
-The addon turns a link into  \\x02 <quality 0-8> [Item Name] \\x03  (quality = item rarity: 0 grey, 1 white,
-2 green, 3 blue, 4 purple, 5 orange, 6 artifact, 7 heirloom). The window colours the name; the translator
-gets the same text without the markers.
+The addon turns a link into  \\x02 <code> [Item Name] \\x03 . The code is one byte, the character chr(48 + n):
+  n 0-9    item quality: 0 grey, 1 white, 2 green, 3 blue, 4 purple, 5 orange, 6 artifact, 7 heirloom
+  n 10-19  other game links: 10 yellow (quest, achievement, map pin), 11 light blue (spell, talent, mount), 12 gold (profession), 13 transmog purple
+  n 20-29  reserved
+The window colours the name; the translator gets the same text without the markers. A code without a colour here is
+shown without colour.
 """
 import re
 
-_MARK = re.compile("\x02(\\d)(.*?)(?:\x03|$)", re.S)
+_MARK = re.compile("\x02([\x30-\x7e])(.*?)(?:\x03|$)", re.S)
+YELLOW, LIGHT_BLUE = 10, 11
+
+
+_GUILD = re.compile(r"<+[^<>\n]{1,40}>+")
+
+
+def split_guild(text):
+    """[(piece, is_guild)]: a <Guild Name> (the game writes guild names in angle brackets) is a piece of its own."""
+    out, pos = [], 0
+    for m in _GUILD.finditer(text):
+        if m.start() > pos:
+            out.append((text[pos:m.start()], False))
+        out.append((m.group(0), True))
+        pos = m.end()
+    if pos < len(text):
+        out.append((text[pos:], False))
+    return out or [(text, False)]
+
+
+def _code(m):
+    return ord(m.group(1)) - 48
 _STRAY = re.compile("[\x02\x03]")
 
 CLASS_COLORS = {          # speaker class letter (PROTOCOL.md) -> the game's class colour
@@ -15,8 +39,11 @@ CLASS_COLORS = {          # speaker class letter (PROTOCOL.md) -> the game's cla
 }
 QUALITY_COLORS = {
     0: "#9d9d9d", 1: "#ffffff", 2: "#1eff00", 3: "#0070dd", 4: "#a335ee",
-    5: "#ff8000", 6: "#e6cc80", 7: "#00ccff", 8: "#00ccff",
-    9: "#ffff00",             # 9 = quest link (yellow)
+    5: "#ff8000", 6: "#e6cc80", 7: "#00ccff",
+    10: "#ffff00",            # quest, achievement, profession, map pin
+    11: "#71d5ff",            # spell, talent, mount (the game's light blue)
+    12: "#ffd100",            # profession recipe (the game's gold)
+    13: "#e86bd0",            # the item name of "appearance added to your collection"
 }
 
 _QUEST_ID = re.compile(r"\s*\(\d+\)(\]?)$")
@@ -44,12 +71,12 @@ def resolve_josa(text):
 
 
 def _name(q, name):
-    return _QUEST_ID.sub(r"\1", name) if q == 9 else name        # a quest id some addon appended is not shown
+    return _QUEST_ID.sub(r"\1", name) if q == YELLOW else name        # a quest id some addon appended is not shown
 
 
 def plain(text):
     """Text without markers (what gets translated / copied)."""
-    return _STRAY.sub("", _MARK.sub(lambda m: _name(int(m.group(1)), m.group(2)), text))
+    return _STRAY.sub("", _MARK.sub(lambda m: _name(_code(m), m.group(2)), text))
 
 
 def mask_links(text):
@@ -60,7 +87,7 @@ def mask_links(text):
     names = []
 
     def rep(m):
-        names.append(_name(int(m.group(1)), m.group(2)))
+        names.append(_name(_code(m), m.group(2)))
         return "[L%d]" % len(names)
 
     masked = _STRAY.sub("", _MARK.sub(rep, text))
@@ -76,7 +103,7 @@ PLACEHOLDER = _PLACEHOLDER
 
 def link_qualities(text):
     """The quality digit of every link marker, in the order mask_links() numbers them ([L1] [L2] ...)."""
-    return [int(m.group(1)) for m in _MARK.finditer(text)]
+    return [_code(m) for m in _MARK.finditer(text)]
 
 
 def split_translation(text, names, quals):
@@ -94,6 +121,34 @@ def split_translation(text, names, quals):
     if pos < len(text):
         out.append((text[pos:], None))
     return [(p, q) for p, q in out if p]
+
+
+_BRACKETED = re.compile(r"\[[^\[\]]*\]")
+
+
+def color_brackets(text, quals):
+    """[(piece, quality or None)] of the translation of a line that is only links ("[Faction Banner]"): such a line is
+    translated as it is (no [L1] placeholders), so the translated names are found by their brackets and coloured with the
+    quality of the link at the same place. When the numbers of brackets and links differ, one common quality is used if
+    there is one, else nothing is coloured."""
+    spans = list(_BRACKETED.finditer(text))
+    if not spans or not quals:
+        return [(text, None)]
+    if len(spans) == len(quals):
+        qs = list(quals)
+    elif len(set(quals)) == 1:
+        qs = [quals[0]] * len(spans)
+    else:
+        return [(text, None)]
+    out, pos = [], 0
+    for m, q in zip(spans, qs):
+        if m.start() > pos:
+            out.append((text[pos:m.start()], None))
+        out.append((m.group(0), q))
+        pos = m.end()
+    if pos < len(text):
+        out.append((text[pos:], None))
+    return out
 
 
 def unmask_links(text, names):
@@ -122,7 +177,7 @@ def segments(text):
     for m in _MARK.finditer(text):
         if m.start() > pos:
             out.append((_STRAY.sub("", text[pos:m.start()]), None))
-        out.append((_name(int(m.group(1)), m.group(2)), int(m.group(1))))
+        out.append((_name(_code(m), m.group(2)), _code(m)))
         pos = m.end()
     if pos < len(text):
         out.append((_STRAY.sub("", text[pos:]), None))
