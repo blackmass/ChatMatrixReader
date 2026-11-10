@@ -1,4 +1,3 @@
-[한국어](./LM Studio.md) | [English](./LM Studio.en.md)
 
 # LM Studio
 <a href="https://lmstudio.ai/">(link)</a> 개인적으로 일반인들에게 추천하는 로컬AI를 구동하는 가장 보편적인 프로그램입니다.
