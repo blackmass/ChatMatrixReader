@@ -502,6 +502,23 @@ class WindowMixin:
                 self.root.after(ms, self._fix_order_if_covered)
             self._game_entered()
 
+    def _game_rect(self, g):
+        """The client area of the game window in screen pixels: (left, top, width, height), None when minimised.
+        (Only plain Win32 calls: it is read in the main thread and used by the capture thread.)"""
+        try:
+            u = _user32()
+            u.IsIconic.argtypes = [wintypes.HWND]
+            u.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+            u.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+            if u.IsIconic(g):
+                return None
+            r, p = wintypes.RECT(), wintypes.POINT(0, 0)
+            if not u.GetClientRect(g, ctypes.byref(r)) or not u.ClientToScreen(g, ctypes.byref(p)):
+                return None
+            return p.x, p.y, r.right - r.left, r.bottom - r.top
+        except Exception:
+            return None
+
     def _above_game(self, g):
         """Is our text window higher in the stacking order than the game window?"""
         u = _user32()

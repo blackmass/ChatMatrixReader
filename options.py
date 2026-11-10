@@ -81,7 +81,6 @@ class OptionsWindow:
         win.title(tr("옵션"))
         win.resizable(False, False)
 
-        mp = cfg.get("manual_pos")
         self.v = {
             "translator": tk.StringVar(value=tr(TRANSLATOR_LABELS.get(cfg["translator"], TRANSLATOR_LABELS["none"]))),
             "target_lang": tk.StringVar(value=cfg["target_lang"]),
@@ -143,8 +142,6 @@ class OptionsWindow:
             "send_autopaste": tk.BooleanVar(value=bool(cfg.get("send_autopaste", False))),
             "log_request": tk.BooleanVar(value=bool(cfg.get("log_request", False))),
             "send_show_log": tk.BooleanVar(value=bool(cfg.get("send_show_log", False))),
-            "pos_x": tk.StringVar(value=str(mp[0]) if mp else ""),
-            "pos_y": tk.StringVar(value=str(mp[1]) if mp else ""),
         }
         self.openai_widgets = []
         self.google_widgets = []
@@ -558,15 +555,13 @@ class OptionsWindow:
         tab = self._tab_frame(nb, tr("캡처"))
         ttk.Label(tab, text=tr("초당 읽기 횟수")).grid(row=0, column=0, sticky="w", **PAD)
         ttk.Spinbox(tab, from_=5, to=60, textvariable=v["poll_hz"], width=6).grid(row=0, column=1, sticky="w", **PAD)
-        ttk.Label(tab, text=tr("수동 좌표 X, Y (비우면 자동 탐색)")).grid(row=1, column=0, sticky="w", **PAD)
-        pos = ttk.Frame(tab)
-        pos.grid(row=1, column=1, sticky="w", **PAD)
-        ttk.Entry(pos, textvariable=v["pos_x"], width=7).pack(side="left")
-        ttk.Entry(pos, textvariable=v["pos_y"], width=7).pack(side="left", padx=(4, 0))
-        ttk.Label(tab, text=tr("전체 화면 탐색 간격 (초)")).grid(row=2, column=0, sticky="w", **PAD)
+        lp = self.app.cfg.get("last_pos")
+        ttk.Label(tab, text=(tr("마지막으로 찾은 위치: {x}, {y}", x=lp[0], y=lp[1]) if lp else tr("마지막으로 찾은 위치: 아직 없음"))
+                  ).grid(row=1, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("전체 탐색 간격 (초)")).grid(row=2, column=0, sticky="w", **PAD)
         ttk.Spinbox(tab, from_=5, to=600, textvariable=v["full_scan_sec"], width=6).grid(row=2, column=1, sticky="w", **PAD)
-        ttk.Label(tab, text=tr("매트릭스가 잡히지 않으면 1초마다 마지막으로 찾은 위치를 다시 확인합니다. 그 위치에 없으면 위 간격마다 화면 전체를 "
-                               "훑어 다시 찾습니다 (화면 전체 읽기는 게임에 부담이 되므로 너무 짧게 하지 마세요)."),
+        ttk.Label(tab, text=tr("매트릭스가 잡히지 않으면 1초마다 마지막으로 찾은 위치를 다시 확인합니다. 그 위치에 없으면 위 간격마다 게임 창 안을 "
+                               "훑어 다시 찾습니다 (게임 창을 찾지 못하면 모든 모니터를 훑습니다. 너무 짧게 하면 게임에 부담이 됩니다)."),
                   foreground="#666", wraplength=430, justify="left").grid(row=3, column=0, columnspan=3, sticky="w", padx=22, pady=(0, 6))
         ttk.Button(tab, text=tr("매트릭스 다시 찾기"), command=self.app.worker.research).grid(
             row=4, column=0, sticky="w", **PAD)
@@ -1088,14 +1083,6 @@ class OptionsWindow:
             messagebox.showerror(tr("옵션"), tr("숫자 값이 올바르지 않습니다."), parent=self.win)
             return
         sprompt = self.send_prompt_text.get("1.0", "end").strip()
-        px, py = v["pos_x"].get().strip(), v["pos_y"].get().strip()
-        manual = None
-        if px and py:
-            try:
-                manual = [int(px), int(py)]
-            except ValueError:
-                messagebox.showerror(tr("옵션"), tr("좌표는 정수여야 합니다."), parent=self.win)
-                return
         cfg.update(new)
         cfg.update(hover_clear=bool(v["hover_clear"].get()), blur_experiment=bool(v["blur_experiment"].get()),
                    blur_state=4 if v["blur_kind"].get() == tr("진하게 (아크릴)") else 3)
@@ -1105,7 +1092,7 @@ class OptionsWindow:
                    send_prompt="" if sprompt == translator.DEFAULT_SEND_PROMPT.strip() else sprompt)
         cfg.update(check_updates=bool(v["check_updates"].get()))
         cfg.update(shadow_on=bool(v["shadow_on"].get()), shadow_color=shadow_color, shadow_dx=sdx, shadow_dy=sdy)
-        cfg.update(swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, full_scan_sec=full_scan, max_lines=max_lines, manual_pos=manual,
+        cfg.update(swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, full_scan_sec=full_scan, max_lines=max_lines,
                    line_spacing=line_spacing, group_spacing=group_spacing, trans_font_size=trans_size, trans_color=trans_color,
                    show_time=bool(v["show_time"].get()), channel_detail=bool(v["channel_detail"].get()),
                    class_colors=bool(v["class_colors"].get()))

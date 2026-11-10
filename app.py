@@ -276,7 +276,8 @@ class App(WindowMixin):
         self.root.update_idletasks()
         self.apply_window_settings()
 
-        self.worker = CaptureWorker(self.q, lambda: self.cfg)
+        self._game_rect_cache = None                    # the game window on screen, refreshed once a second (main thread)
+        self.worker = CaptureWorker(self.q, lambda: self.cfg, lambda: self._game_rect_cache)
         self.worker.start()
         self.translations = translator.TranslationService(
             self.q, lambda: self.cfg, workers=max(1, min(8, int(self.cfg.get("max_parallel", 2)))))
@@ -417,6 +418,8 @@ class App(WindowMixin):
         self._conn_last = self._conn_key()
         self._conn_pending = None
         self.root.after(2000, self._warm_tick)
+        self._lost_since = None                                  # when the matrix went missing while the game is running
+        self.root.after(1000, self._lost_tick)
 
     def _build_back(self):
         """Background-only window used when background and text opacity differ."""
@@ -670,6 +673,41 @@ class App(WindowMixin):
         n = len(glossary.entries(self.cfg.get("glossary_file")))
         log.info("단어장 파일이 바뀜: %d개 항목", n)
         self.add_system("ℹ " + tr("단어장을 다시 읽었습니다: {n}개 항목", n=n), "system")
+
+    LOST_AFTER = 5.0           # seconds without a matrix before the hint shows (first start: at once)
+
+    def _lost_tick(self):
+        """The game runs but the matrix is not being read: say what to do. Shown at once if no position was ever found (first
+        start), else after a few seconds (a loading screen or a reload ends by itself). It is removed again as soon as the
+        matrix is read."""
+        try:
+            shown = bool(self.text.tag_ranges("lostnote"))
+            g = self._find_game()
+            self._game_rect_cache = self._game_rect(g) if g else None
+            if self._connected:
+                self._lost_since = None
+                if shown:
+                    r = self.text.tag_ranges("lostnote")
+                    self.text.delete(r[0], r[-1])
+            elif not shown:
+                if g is None:
+                    self._lost_since = None
+                else:
+                    now = time.monotonic()
+                    if self._lost_since is None:
+                        self._lost_since = now
+                    first = not self.cfg.get("last_pos")
+                    if first or now - self._lost_since >= self.LOST_AFTER:
+                        msg = "⚠ " + tr("매트릭스를 찾지 못했습니다. 게임에서 애드온이 켜져 있고 매트릭스가 화면에 보이는지 확인하세요. "
+                                       "로딩 중이거나 애드온을 리로드한 경우라면 매트릭스가 다시 보일 때 바로 감지하니 그냥 두셔도 됩니다. "
+                                       "처음 실행했거나 매트릭스 위치를 옮겼다면, 이 창 위쪽의 ⟳ 새로고침 아이콘을 한 번 눌러 주세요. 바로 다시 찾습니다.")
+                        if first:
+                            msg += " " + tr("왼쪽 아래가 아니어도 한 번 찾으면 위치를 기억합니다.")
+                        self._insert([(msg + "\n", "lostnote")], "system")
+        except Exception:
+            log.exception("매트릭스 안내 점검 실패")
+        finally:
+            self.root.after(1000, self._lost_tick)
 
     def _warm_tick(self):
         """After the prompt or the glossary changed, send the tiny test request once (if the start test is on): the AI

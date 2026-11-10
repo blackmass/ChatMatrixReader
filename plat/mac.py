@@ -371,6 +371,9 @@ class WindowMixin:
         area, pid, num, owner, name = max(pool)
         return pid, num, area, owner, name
 
+    def _game_rect(self, g):
+        return None                                  # (not used on macOS: every monitor is searched)
+
     def _find_game(self):
         now = time.monotonic()
         g = self._game_hwnd

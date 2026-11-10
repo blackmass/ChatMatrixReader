@@ -73,7 +73,6 @@ DEFAULTS = {
     "geometry": "560x420",
     # capture
     "poll_hz": 30,
-    "manual_pos": None,                   # [x, y] in screen pixels, or None = auto search
     "last_pos": None,                     # [x, y] where the matrix was found last time (looked at first, every second)
     "full_scan_sec": 30,                  # whole-screen search while the matrix is missing: at most this often (seconds)
 }
@@ -90,6 +89,12 @@ def load():
     except (FileNotFoundError, json.JSONDecodeError):
         pass
     cfg.pop("opacity", None)
+    mp = cfg.pop("manual_pos", None)                         # (removed option) an old manual position becomes the first guess
+    if mp and not cfg.get("last_pos"):
+        try:
+            cfg["last_pos"] = [int(mp[0]), int(mp[1])]
+        except (TypeError, ValueError, IndexError):
+            pass
     if cfg.get("prompt") in LEGACY_DEFAULT_PROMPTS:          # untouched old default -> take the new one (with {{Glossary.txt}})
         cfg["prompt"] = DEFAULT_PROMPT
     return cfg

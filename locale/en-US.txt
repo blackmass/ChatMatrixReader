@@ -93,7 +93,6 @@ Ctrl+Alt+O 단축키를 등록하지 못해서 켤 수 없습니다.\n(다시 �
 최대 보관 줄 수 = Max lines kept
 화면 지우기 = Clear screen
 초당 읽기 횟수 = Reads per second
-수동 좌표 X, Y (비우면 자동 탐색) = Manual position X, Y (empty = auto search)
 매트릭스 다시 찾기 = Search for the matrix again
 새로고침 = Refresh
 모두 복사 = Copy all
@@ -103,7 +102,6 @@ Ctrl+Alt+O 단축키를 등록하지 못해서 켤 수 없습니다.\n(다시 �
 언어를 바꾸면 옵션창이 다시 열립니다 (저장하지 않은 변경은 사라집니다). locale 폴더에 번역 파일(.txt)을 넣으면 목록에 나타납니다. = Changing the language reopens this window (unsaved changes are lost). Put a translation file (.txt) in the locale folder and it appears in the list.
 {file} 파일을 고치면 이 목록이 바뀝니다. = Edit {file} to change this list.
 숫자 값이 올바르지 않습니다. = A numeric value is not valid.
-좌표는 정수여야 합니다. = Coordinates must be integers.
 (비어 있음) = (empty)
 
 # --- translator.py
@@ -252,5 +250,9 @@ API Key 칸에 '아이디:시크릿' 으로 쓰세요. 원문 언어를 자동 �
 단어장이나 프롬프트를 바꾸면 AI 번역은 첫 번역이 느려질 수 있습니다 (서버가 새 내용을 읽는 시간). '시작할 때 번역 서버 연결 확인'이 켜져 있으면 바뀐 뒤 미리 한 번 보내 두어 줄여 줍니다. = After the prompt or the glossary changes, the first AI translation may be slow (the server reads the new content). If 'check the translation server at start' is on, one small request is sent right after the change to reduce this.
 단어장을 다시 읽었습니다: {n}개 항목 = Glossary reloaded: {n} entries
 바뀐 프롬프트/단어장을 번역 서버에 미리 보내 두었습니다 ({ms}ms) = Sent the changed prompt/glossary to the translation server in advance ({ms}ms)
-전체 화면 탐색 간격 (초) = Full-screen search interval (seconds)
-매트릭스가 잡히지 않으면 1초마다 마지막으로 찾은 위치를 다시 확인합니다. 그 위치에 없으면 위 간격마다 화면 전체를 훑어 다시 찾습니다 (화면 전체 읽기는 게임에 부담이 되므로 너무 짧게 하지 마세요). = While the matrix is not found, the last known position is checked again every second. If it is not there, the whole screen is searched at the interval above (reading the whole screen is a load on the game, so do not set it too short).
+매트릭스를 찾지 못했습니다. 게임에서 애드온이 켜져 있고 매트릭스가 화면에 보이는지 확인하세요. 로딩 중이거나 애드온을 리로드한 경우라면 매트릭스가 다시 보일 때 바로 감지하니 그냥 두셔도 됩니다. 처음 실행했거나 매트릭스 위치를 옮겼다면, 이 창 위쪽의 ⟳ 새로고침 아이콘을 한 번 눌러 주세요. 바로 다시 찾습니다. = The matrix was not found. Check that the addon is on in the game and the matrix is visible on screen. During a loading screen or after an addon reload you can just leave it: it is picked up again as soon as the matrix is visible. If this is the first start or you moved the matrix, click the ⟳ refresh icon at the top of this window once; it is searched for again at once.
+왼쪽 아래가 아니어도 한 번 찾으면 위치를 기억합니다. = Even if it is not at the bottom left, the position is remembered once found.
+마지막으로 찾은 위치: {x}, {y} = Last position found: {x}, {y}
+마지막으로 찾은 위치: 아직 없음 = Last position found: none yet
+전체 탐색 간격 (초) = Full search interval (seconds)
+매트릭스가 잡히지 않으면 1초마다 마지막으로 찾은 위치를 다시 확인합니다. 그 위치에 없으면 위 간격마다 게임 창 안을 훑어 다시 찾습니다 (게임 창을 찾지 못하면 모든 모니터를 훑습니다. 너무 짧게 하면 게임에 부담이 됩니다). = While the matrix is not found, the last known position is checked again every second. If it is not there, the game window is searched at the interval above (every monitor if the game window is not found; a very short interval is a load on the game).

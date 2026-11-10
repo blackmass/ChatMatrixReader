@@ -41,10 +41,12 @@ class CaptureWorker(threading.Thread):
          ("lines", [decoder.Line, ...])     # only lines not seen before
     """
 
-    def __init__(self, out_queue, get_cfg):
+    def __init__(self, out_queue, get_cfg, get_game_rect=None):
         super().__init__(daemon=True)
         self.out = out_queue
         self.get_cfg = get_cfg           # callable returning the current config dict
+        self.get_game_rect = get_game_rect or (lambda: None)     # (left, top, width, height) of the game window on screen, or None
+        self._full_n = 0
         self._stop_evt = threading.Event()
         self._research = threading.Event()
         self._seen = deque(maxlen=2000)       # keys of lines already passed on: (id, channel, sender, text)
@@ -78,30 +80,37 @@ class CaptureWorker(threading.Thread):
         return np.frombuffer(shot.bgra, dtype=np.uint8).reshape(shot.height, shot.width, 4)
 
     # Screen grabs of a running game are not free (every full-screen BitBlt has to be read back from the GPU), so the
-    # search first looks only at the bottom-left corner of each monitor - where the addon puts the matrix by default -
-    # and scans whole monitors only rarely.
-    CORNER_W, CORNER_H = 900, 260
+    # whole-window search is done only now and then ("full_scan_sec"); in between only the last known position is read.
 
-    def _search(self, sct, full):
-        for mon in sct.monitors[1:]:
-            if full:
-                area, dx, dy = mon, 0, 0
-            else:
-                w, h = min(mon["width"], self.CORNER_W), min(mon["height"], self.CORNER_H)
-                area = {"left": mon["left"], "top": mon["top"] + mon["height"] - h, "width": w, "height": h}
-                dx, dy = 0, mon["height"] - h
-            arr = self._grab_array(sct, area)
+    def _regions(self, sct):
+        """[(area, left, top)] to look at. The game window when it is known (the matrix can only be inside it: on a
+        computer with four monitors that is a quarter of the work); else every monitor. A search of the whole window that
+        found nothing is, now and then, followed by the monitors, so a wrong window rectangle can never blind it for good."""
+        rect = self.get_game_rect()
+        if rect and rect[2] >= 200 and rect[3] >= 100:
+            self._full_n += 1
+            if self._full_n % 4:
+                l, t, w, h = rect
+                return [({"left": l, "top": t, "width": w, "height": h}, l, t)]
+        return [(mon, mon["left"], mon["top"]) for mon in sct.monitors[1:]]
+
+    def _search(self, sct):
+        for area, ox, oy in self._regions(sct):
+            try:
+                arr = self._grab_array(sct, area)
+            except Exception:
+                continue                                        # (e.g. a window partly outside the screen)
             pos = decoder.find_matrix(arr)                      # protocol v1 first: exact colours, cheap
             if pos:
-                return mon["left"] + dx + pos[0], mon["top"] + dy + pos[1], "v1", 0, None
+                return ox + pos[0], oy + pos[1], "v1", 0, None
             hit = proto2.find_and_decode(arr)                   # then v2 (colour-change tolerant)
             if hit:
                 x, y, frame = hit
-                return mon["left"] + dx + x, mon["top"] + dy + y, "v2", frame.rows, None
+                return ox + x, oy + y, "v2", frame.rows, None
             hit = scaled.find(arr)                              # v2 with cells of another size / mixed colours (macOS)
             if hit:
                 x, y, pitch, frame = hit
-                gx, gy = mon["left"] + dx + x, mon["top"] + dy + y
+                gx, gy = ox + x, oy + y
                 left, top = int(math.floor(gx)) - 3, int(math.floor(gy)) - 3
                 geom = {"pitch": pitch, "ox": gx - left, "oy": gy - top, "rows": frame.rows,
                         "w": int(math.ceil(32 * pitch + gx - left + 4)), "h": int(math.ceil(frame.rows * pitch + gy - top + 4))}
@@ -123,20 +132,6 @@ class CaptureWorker(threading.Thread):
             pass
         return None
 
-    def _probe(self, sct, pos):
-        """Which protocol is at a manually given position? -> (mode, rows)"""
-        try:
-            arr = self._grab_array(sct, {"left": pos[0], "top": pos[1], "width": decoder.WIDTH, "height": decoder.HEIGHT})
-            if decoder.decode_region(arr)[0] is not None:
-                return "v1", 0
-            arr = self._grab_array(sct, {"left": pos[0], "top": pos[1], "width": proto2.WIDTH, "height": 24 * proto2.CELL})
-            frame, _ = proto2.decode(arr, 0, 0)
-            if frame is not None:
-                return "v2", frame.rows
-        except Exception as e:
-            log.info("수동 좌표 프로토콜 확인 실패: %r", e)
-        return "v1", 0
-
     # ------------------------------------------------------------------
     def run(self):
         try:
@@ -153,6 +148,7 @@ class CaptureWorker(threading.Thread):
         mode, rows = "v1", 0               # protocol of the matrix at `pos` (v2 matrices are `rows` cell rows tall)
         geom = None                        # mode "v2s": cell size and sub-pixel position of a scaled matrix
         fails = 0
+        last_ok = time.time()             # when a frame was last read
         last_warn = 0.0
         last_search = 0.0
         last_full = 0.0                   # last whole-monitor scan
@@ -177,12 +173,7 @@ class CaptureWorker(threading.Thread):
                 last_search = 0.0
 
             if pos is None:
-                manual = cfg.get("manual_pos")
-                if manual:
-                    pos = (int(manual[0]), int(manual[1]))
-                    mode, rows = self._probe(sct, pos)
-                    geom = None
-                elif time.time() - last_search >= 1.0:
+                if time.time() - last_search >= 1.0:
                     last_search = time.time()
                     try:
                         every = max(5.0, min(600.0, float(cfg.get("full_scan_sec", 30))))
@@ -197,11 +188,12 @@ class CaptureWorker(threading.Thread):
                         pm = self._probe_last(sct, remembered)
                         if pm:
                             hit, how = (remembered[0], remembered[1], pm[0], pm[1], None), " (마지막 위치)"
-                    if not hit:
-                        hit = self._search(sct, full)
+                    if not hit and full:                            # (between the whole-window searches: only the last position)
+                        hit = self._search(sct)
                     if hit:
                         pos, mode, rows, geom = (hit[0], hit[1]), hit[2], hit[3], hit[4]
                         fails = 0
+                        last_ok = time.time()
                         log.info("매트릭스 발견 @ %d,%d | 프로토콜 %s%s%s", pos[0], pos[1], mode,
                                  ((" (%d줄)" % rows) if mode != "v1" else "")
                                  + ((" 셀 %.2fpx" % geom["pitch"]) if geom else ""), how)
@@ -237,13 +229,17 @@ class CaptureWorker(threading.Thread):
 
             if frame is None:
                 fails += 1
-                # a few bad frames are normal (redraw while reading); many in a row = lost
-                if fails >= 90:
+                # a few bad frames are normal (redraw while reading); many in a row = lost. Judged by time as well as by the
+                # count: grabbing a game that draws slowly (loading, character selection) can take 100 ms or more per frame,
+                # and 90 of those are 10+ seconds.
+                if fails >= 10 and time.time() - last_ok >= 2.5:
+                    log.info("매트릭스를 잃어버림: 연속 %d프레임 실패, 마지막 성공 %.1f초 전 (%s)", fails, time.time() - last_ok, reason)
                     self._status(tr("매트릭스를 잃어버림 ({reason}) - 다시 찾는 중", reason=reason))
                     pos = None
                     fails = 0
             else:
                 fails = 0
+                last_ok = time.time()
                 if frame.seq != self._last_seq:
                     if self._last_seq is not None and frame.seq < self._last_seq:
                         # addon was reloaded (seq and line ids restart) -> forget old ids
