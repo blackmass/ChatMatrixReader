@@ -4,11 +4,10 @@
 <a href="https://lmstudio.ai/">(link)</a> 개인적으로 일반인들에게 추천하는 로컬AI를 구동하는 가장 보편적인 프로그램입니다.
 
 
-
+---
 <img width="1288" height="591" alt="Image" src="https://github.com/user-attachments/assets/cc1056d8-3a9c-4f8f-a241-1a9dee9dd7d8" />
 
 # 모델 선정
-<이미지>
 - 설치후 좌측의 'Model Search'로 들어가서, 받으실 AI 모델을 검색합니다. 한국인이라면 'Gemma-4'를 무조건 추천합니다. 위쪽에 검색되는것이 LM Studio의 공식 모델 버전이고, 그 아래에 스마일 표시의 아이콘들의 모델들이 허깅스페이스의 다른 모델들입니다. 공식의 것을 써도 좋고, 다른 것은 unsloth 분이 다듬은 것들이 아무래도 괜찮은게 많습니다. 상단에 정렬을 바꾸어 원하시는 것을 찾아야합니다. 그리고 찾을 때 가장 중요한 것은 내 컴퓨터 환경에서 무엇을 써야하느냐 하는 것이겠지요.
 - 우선 Gemma-4를 예를들어 봅시다. E2B < E4B < 12B < 26B 순서로 용량이 커집니다. E2B의 경우에도 기본적으로 6Gb 정도의 규모입니다. 기본적으로 AI가 모든 성능을 발휘 하기 위해서는 Vram에 AI 모델이 전부 다 들어갈 수 있을 여유가 있어야합니다. 하지만 우리는 오로지 번역만 할것이기 때문에 아주 뛰어난 성능이 필요없어서, 어느정도 타협을 할 수 있습니다.
 
@@ -19,7 +18,7 @@
 - 다른 타협의 선택지는 있지만 딱히 권장하진 않습니다. 거기서부터는 스스로 해쳐나가야할 길입니다.
 
 
-
+---
 <img width="749" height="332" alt="Image" src="https://github.com/user-attachments/assets/8c716604-cd6e-4bac-a3e3-460dbea0ad37" />
 
 # 모델 로드
@@ -30,14 +29,14 @@
 - 예를들어 위 화면 처럼 제 환경에서는 Gemma-4 E2B 를 GPU 오프로딩을 절반 정도만 할당하고, 컨텍스트를 6k만 줘도, 기본 구글 번역 보다 더 빠르게 번역이 됩니다. 이 세팅의 경우 2~3 gb 정도 Vram에게 부담을 줍니다. 나머지는 시스템램이 추가로 부담을 하죠.
 
 
-
+---
 <img width="1212" height="481" alt="Image" src="https://github.com/user-attachments/assets/5245ab66-6e3f-43d2-a3c9-d11de411aea3" />
 
 # 서버 호스팅 설정
 - 솔직히 처음 기본 설정 값은 기억에서 잊혀져서 모르겠지만, 사실 아무것도 건들지 않고 기본 값으로 써도 문제는 없을 겁니다. 다만 'Status: Running' 만 켜져 있는지 확인하시고, 오른쪽 'Reachable at:' 뒤의 주소를 기억하세요.
 
 
-
+---
 <img width="1181" height="337" alt="Image" src="https://github.com/user-attachments/assets/4965538a-afbe-41b2-a26f-7a5055e1bcab" />
 
 # 리더에서의 설정
@@ -47,4 +46,5 @@
 - API Key는 LM Studio 에서 굳이 설정하지 않았다면 비워두어도 됩니다.
 - 온도, 시간 제한, 추론 끄기, Json 요청 등은 수정하지 않아도 됩니다.
 
+---
 # 개인적인 추천 모델
