@@ -2,15 +2,16 @@
 
 The addon turns a link into  \\x02 <code> [Item Name] \\x03 . The code is one byte, the character chr(48 + n):
   n 0-9    item quality: 0 grey, 1 white, 2 green, 3 blue, 4 purple, 5 orange, 6 artifact, 7 heirloom
-  n 10-19  other game links: 10 yellow (quest, achievement, map pin), 11 light blue (spell, talent, mount), 12 gold (profession), 13 transmog purple
-  n 20-29  reserved
+  n 10-19  other game links and money: 10 yellow (quest, achievement, map pin), 11 light blue (spell, talent, mount), 12 gold (profession, gold coins), 13 transmog purple, 14 silver coins, 15 copper coins
+  n 20     a whole message that is gibberish to the player's character (a language it does not know): not translated, shown dim
+  n 21-29  reserved
 The window colours the name; the translator gets the same text without the markers. A code without a colour here is
 shown without colour.
 """
 import re
 
 _MARK = re.compile("\x02([\x30-\x7e])(.*?)(?:\x03|$)", re.S)
-YELLOW, LIGHT_BLUE = 10, 11
+YELLOW, LIGHT_BLUE, UNINTELLIGIBLE = 10, 11, 20
 
 
 _GUILD = re.compile(r"<+[^<>\n]{1,40}>+")
@@ -44,6 +45,51 @@ QUALITY_COLORS = {
     11: "#71d5ff",            # spell, talent, mount (the game's light blue)
     12: "#ffd100",            # profession recipe (the game's gold)
     13: "#e86bd0",            # the item name of "appearance added to your collection"
+    14: "#c7c7cf",            # silver coins (money lines: "1g 20s 97c")
+    15: "#eda55f",            # copper coins
+    20: "#8c8c8c",            # unintelligible message (see UNINTELLIGIBLE)
+    30: "#c41e3a",            # class colour: Death Knight
+    31: "#a330c9",            # class colour: Demon Hunter
+    32: "#ff7c0a",            # class colour: Druid
+    33: "#33937f",            # class colour: Evoker
+    34: "#aad372",            # class colour: Hunter
+    35: "#3fc7eb",            # class colour: Mage
+    36: "#00ff98",            # class colour: Monk
+    37: "#f48cba",            # class colour: Paladin
+    38: "#ffffff",            # class colour: Priest
+    39: "#fff468",            # class colour: Rogue
+    40: "#0070dd",            # class colour: Shaman
+    41: "#8788ee",            # class colour: Warlock
+    42: "#c69b6d",            # class colour: Warrior
+    50: "#0000ff",            # resource colour: Mana
+    51: "#ff0000",            # resource colour: Rage
+    52: "#ff8040",            # resource colour: Focus
+    53: "#ffff00",            # resource colour: Energy
+    54: "#fff569",            # resource colour: Combo Points
+    55: "#808080",            # resource colour: Runes
+    56: "#00d1ff",            # resource colour: Runic Power
+    57: "#80528c",            # resource colour: Soul Shards
+    58: "#4d85e6",            # resource colour: Astral Power
+    59: "#f2e699",            # resource colour: Holy Power
+    60: "#0080ff",            # resource colour: Maelstrom
+    61: "#6600cc",            # resource colour: Insanity
+    62: "#b5ffeb",            # resource colour: Chi
+    63: "#1a1afa",            # resource colour: Arcane Charges
+    64: "#c942fd",            # resource colour: Fury
+    65: "#ff9c00",            # resource colour: Pain
+    66: "#cc9900",            # resource colour: Ammo
+    67: "#008c80",            # resource colour: Fuel
+    68: "#85ff85",            # resource colour: Stagger light
+    69: "#fffab8",            # resource colour: Stagger medium
+    70: "#ff6b6b",            # resource colour: Stagger heavy
+    71: "#40ff40",            # chat colour: guild
+    72: "#40bf40",            # chat colour: officer
+    73: "#aaaaff",            # chat colour: party
+    74: "#75c7ff",            # chat colour: party leader
+    75: "#ff80ff",            # chat colour: whisper
+    76: "#ff4040",            # chat colour: yell
+    77: "#ffc0c0",            # chat colour: numbered channel
+    78: "#ff480a",            # chat colour: raid leader
 }
 
 _QUEST_ID = re.compile(r"\s*\(\d+\)(\]?)$")
@@ -101,9 +147,24 @@ _PLACEHOLDER = re.compile(r"[\[\uff3b\u3010(\uff08]\s*[Ll]\s*(\d+)\s*[\]\uff3d\u
 PLACEHOLDER = _PLACEHOLDER
 
 
+def is_unintelligible(text):
+    """Is the message marked by the addon as gibberish (a language this character does not know)?"""
+    return any(_code(m) == UNINTELLIGIBLE for m in _MARK.finditer(text))
+
+
 def link_qualities(text):
     """The quality digit of every link marker, in the order mask_links() numbers them ([L1] [L2] ...)."""
     return [_code(m) for m in _MARK.finditer(text)]
+
+
+def ensure_links(text, names):
+    """(text, [numbers of the links the translator lost]): a placeholder [Ln] missing from the translation is put back at
+    the end, so the item name is not lost (its place in the sentence is not known)."""
+    present = {int(m.group(1)) for m in _PLACEHOLDER.finditer(text)}
+    missing = [i for i, n in enumerate(names, 1) if n and i not in present]
+    if missing:
+        text = text.rstrip() + " " + " ".join("[L%d]" % i for i in missing)
+    return text, missing
 
 
 def split_translation(text, names, quals):
@@ -124,6 +185,26 @@ def split_translation(text, names, quals):
 
 
 _BRACKETED = re.compile(r"\[[^\[\]]*\]")
+
+
+_PROTECTED = re.compile(r"\|K[^|]*\|k")
+
+
+def hide_protected(text: str):
+    """The game hands an addon some texts as a protected token  |Kx2|k  (the game's own chat window shows the real text, an addon
+    never gets it). Returns (text, whole): a message that is only such a token comes back empty with whole=True (the caller shows
+    a notice); a token inside a longer text becomes "???" like in the game's own fallback."""
+    if _PROTECTED.fullmatch(text.strip()):
+        return "", True
+    return _PROTECTED.sub("???", text), False
+
+
+COMMAND_PREFIX = "@"
+
+
+def is_command(channel: str) -> bool:
+    """A line whose channel code starts with "@" is an instruction from the addon to the reader, never text to show."""
+    return channel.startswith(COMMAND_PREFIX)
 
 
 def color_brackets(text, quals):

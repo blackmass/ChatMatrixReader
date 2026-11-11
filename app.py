@@ -64,11 +64,12 @@ SB_W = 10
 GRIP = 14
 
 TAG_COLORS = {
-    "say": "#e8e8e8", "party": "#a8b8ff", "raid": "#ffa040", "guild": "#50e050",
-    "officer": "#40c040", "whisper": "#ff80ff", "channel": "#ffc8c8",
+    "say": "#ffffff", "party": "#aaaaff", "raid": "#ff8000", "guild": "#40ff40",
+    "officer": "#40bf40", "whisper": "#ff80ff", "channel": "#ffc0c0",
     "community": "#80d0d0", "other": "#aaaaaa", "restricted": "#777777", "system": DIM,
     "trans": "#7fd6b0", "error": "#d67f7f",
     "yell": "#ff4040", "emote": "#ff8040", "raidwarning": "#ff4800", "bnet": "#00fff6",
+    "partyleader": "#75c7ff", "raidleader": "#ff480a",
 }
 # "Other" messages (line codes starting with "!"): the game's default chat colours, approximately. The addon does not send
 # colours; a code that is not listed here is shown with the "other" colour.
@@ -77,7 +78,7 @@ OTHER_COLORS = {
     "!LT": "#00aa00", "!CY": "#00aa00", "!MN": "#ffff00", "!CI": "#8080ff", "!AC": "#ffff00", "!GA": "#40ff40",
     "!BH": "#ff4040", "!BA": "#4090ff", "!BN": "#ffa040",
     "!MS": "#ffff9e", "!MY": "#ff4040", "!ME": "#ff8040", "!MW": "#ffb5f0", "!MP": "#aaaaff",
-    "!BE": "#ffdd00", "!BW": "#ffdd00",
+    "!BE": "#ffdd00", "!BW": "#ffdd00", "!UN": "#b8b8b8", "!AD": "#ffffff", "!CL": "#bf8080",
     "!PG": "#ff5050",                                  # pings: stand out like a yell
     "!BI": "#66ccff",                                  # Battle.net friend online / offline (light blue like the game)
     "!CN": "#ffc0c0",                                  # channel notices ("Changed Channel: [...]"): the channel chat colour
@@ -106,8 +107,12 @@ def channel_tag(ch: str) -> str:
         return "say"
     if ch == "P":
         return "party"
+    if ch == "PL":
+        return "partyleader"
     if ch in ("R", "I"):
         return "raid"
+    if ch in ("RL", "IL"):
+        return "raidleader"
     if ch == "G":
         return "guild"
     if ch == "O":
@@ -315,8 +320,12 @@ class App(WindowMixin):
         for name, color in TAG_COLORS.items():
             self.text.tag_configure(name, foreground=color)
         self._configure_layout_tags(self.text)
+        self._type_colors = {}                                    # channel code -> the colour its lines have now (see _type_tag)
+        for q, color in chattext.QUALITY_COLORS.items():          # per-line base colour (lines that are not a chat type: !AD, !UN): above the channel tags, below the link colours
+            self.text.tag_configure(f"bc{q}", foreground=color)
         for q, color in chattext.QUALITY_COLORS.items():          # created after the channel tags -> they win
             self.text.tag_configure(f"q{q}", foreground=color)
+        self.text.tag_configure("protmark", foreground=chattext.QUALITY_COLORS[51])      # the ⚠ of a protected message: red
         self.text.tag_configure("guild", foreground=chattext.QUALITY_COLORS[2])      # <Guild Name>: item-green
         for letter, color in chattext.CLASS_COLORS.items():
             self.text.tag_configure(f"cls_{letter}", foreground=color)
@@ -406,7 +415,7 @@ class App(WindowMixin):
         for seq in plat.RIGHT_CLICKS:
             self.root.bind(seq, lambda e: self.open_options())
 
-        self.add_system(tr("제목줄/스크롤은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | Ctrl+Alt+O: 옵션 | 클릭 통과 중에는 Shift를 누른 채로 조작").replace("Ctrl+Alt+O", plat.OPTIONS_KEY))
+        self.add_system(tr("제목줄/스크롤은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | Ctrl+Alt+O: 옵션 | 클릭 통과 중에는 {key}를 누른 채로 조작", key=self.interact_label()).replace("Ctrl+Alt+O", plat.OPTIONS_KEY))
         if self.cfg.get("check_updates", True):
             self.check_update(self._on_start_update)
         if self.cfg.get("translate_test_start", True) and self.cfg.get("translator", "none") != "none":
@@ -492,7 +501,7 @@ class App(WindowMixin):
             if ct:
                 # Shift + mouse over the window = behave like a normal window; a started drag/selection is finished first
                 keep = self._interactive and (self.dragging or self._key_down(0x01))      # 0x01 = left button
-                interactive = (self._key_down(0x10) and inside) or keep                   # 0x10 = Shift
+                interactive = (self._interact_down() and inside) or keep
                 if self._interactive and not interactive and self._shift_grace > 0:      # macOS: key state may flicker
                     self._shift_grace -= 1
                     interactive = True
@@ -539,6 +548,19 @@ class App(WindowMixin):
                 plat.set_blur(self.back, True, BG_SOLID, bg, int(self.cfg.get("blur_state", 3)))
         except tk.TclError:
             pass
+
+    INTERACT_VK = {"Shift": 0x10, "Ctrl": 0x11, "Alt": 0x12}
+
+    def interact_keys(self):
+        """The keys that lift click-through (all of them must be held): Shift / Ctrl / Alt. macOS: Shift only."""
+        keys = [k for k in ("Ctrl", "Alt", "Shift") if k in (self.cfg.get("interact_keys") or ["Shift"])]
+        return keys if keys and sys.platform == "win32" else ["Shift"]
+
+    def interact_label(self):
+        return "+".join(self.interact_keys())
+
+    def _interact_down(self):
+        return all(self._key_down(self.INTERACT_VK[k]) for k in self.interact_keys())
 
     def _set_hover_clear(self, on):
         """The mouse is over the (click-through) window and Shift is not held: make everything fully transparent so the
@@ -625,7 +647,7 @@ class App(WindowMixin):
             extra = (cfg.get("custom_url"), cfg.get("custom_body"))
         else:
             return None
-        return (mode, cfg.get("prompt"), glossary.cache_key(cfg), extra)
+        return (mode, cfg.get("prompt"), (cfg.get("extra_prompt") or "").strip(), glossary.cache_key(cfg), extra)
 
     def _conn_key(self):
         """The settings that decide which server answers (changed in the options while the program runs)."""
@@ -1174,6 +1196,9 @@ class App(WindowMixin):
     # ------------------------------------------------------------------ data flow
     def on_new_line(self, line):
         """A chat line that has not been seen before: show it, and ask for a translation."""
+        if chattext.is_command(line.channel):                     # an instruction for the reader, not a message
+            self._command(line)
+            return
         if self.cfg.get("skip_regex_hide") and line.text != "[restricted]" \
                 and translator.matches_skip_regex(chattext.check_text(line.text), self.cfg):
             return                                                # the user's pattern matches: leave the line out
@@ -1187,11 +1212,19 @@ class App(WindowMixin):
             self._insert(f"{ts}{tr('✓ 채팅 제한이 해제되었습니다')}\n", "restricted")
             return
         self._restr_n = 0                                         # a normal line ends a run of restricted ones
-        tag = channel_tag(line.channel)
+        if line.channel in ("!AD", "!UN"):                        # the colour belongs to this line (an addon wrote it)
+            tag = f"bc{line.base}" if line.base in chattext.QUALITY_COLORS else channel_tag(line.channel)
+        else:                                                     # the colour belongs to the chat type: all its lines change together
+            tag = self._type_tag(line.channel, line.base)
         sender, body = line.sender, line.text
-        if not sender and line.channel.startswith("C") and line.channel != "CM":
+        if not sender and line.channel.startswith("C") and line.channel != "CM" and line.base not in chattext.QUALITY_COLORS:
             tag = "!SY"                                           # nobody speaks (server announcement in a channel): yellow like system text
+        protected = False
         if not restricted:
+            body, protected = chattext.hide_protected(body)       # |Kx2|k: text the game does not give to addons
+            if protected:                                         # the mark is red, the rest has the colour of the chat type
+                body = tr("⚠ 길드관리자 메시지는 보호되어 있어 읽을 수 없습니다. 게임에서 직접 확인하세요.") if line.channel == "O" \
+                    else tr("⚠ 보호된 메시지 (게임이 내용을 알려주지 않아 읽을 수 없음)")
             body = chattext.resolve_josa(body)                    # the Korean client leaves  |1이;가;  in event texts
             if line.channel.startswith("!") and "%s" in body and sender:
                 body, sender = body.replace("%s", sender), ""     # NPC emotes: "%s waves." -> the name goes into the text
@@ -1201,6 +1234,8 @@ class App(WindowMixin):
         else:
             parts = [(f"{ts}{self._code_prefix(line.channel)}", None)]
         pieces = [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(body)]
+        if protected:
+            pieces = [(body[:1], "protmark"), (body[1:], None)]
         if any(e == "q10" for _, e in pieces) and not line.channel.startswith("!"):
             log.info("노란 링크(10) 표시: %s", [(p[:30], e) for p, e in pieces])
         if line.channel == "!PG" and pieces and pieces[0][0][:1] in PING_COLORS and pieces[0][1] is None:
@@ -1208,7 +1243,8 @@ class App(WindowMixin):
             pieces[0:1] = [(first[0], f"pg{ord(first[0])}"), (first[1:], extra)]
         pieces = self._guild(pieces)
         text = chattext.plain(body)                               # item-link markers removed
-        translatable = not (line.channel.startswith("!") and line.channel not in SPEECH_CODES) \
+        translatable = not protected and not (line.channel.startswith("!") and line.channel not in SPEECH_CODES) \
+            and not chattext.is_unintelligible(body) \
             and translator.should_translate(text, self.cfg, chattext.check_text(body))
         if self.cfg.get("swap_trans") and translatable:
             self._show_swapped(parts, pieces, tag, body)
@@ -1300,6 +1336,39 @@ class App(WindowMixin):
 
     _restr_n = 0
 
+    def _type_tag(self, code, base):
+        """The text tag of a chat type (the line's channel code): every line of the type carries it, so a change of the
+        type's colour in the game (the base colour that comes with a line) recolours the earlier lines of that type too,
+        like the game does. `base` = palette code of the colour the user chose, -1 = the game's default colour."""
+        name = "t_" + code
+        default = TAG_COLORS.get(channel_tag(code), TAG_COLORS["other"])
+        color = chattext.QUALITY_COLORS.get(base, default) if base >= 0 else default
+        if self._type_colors.get(code) != color:
+            first = code not in self._type_colors
+            self._type_colors[code] = color
+            self.text.tag_configure(name, foreground=color)
+            if first:
+                try:
+                    self.text.tag_lower(name, "q0")               # below the link / class colours, above the old channel tags
+                except tk.TclError:
+                    pass
+        return name
+
+    # instructions from the addon ("@" lines, see PROTOCOL.md "Command lines"): code -> handler(self, line); none exist yet
+    COMMANDS = {}
+    _unknown_commands = set()
+
+    def _command(self, line):
+        handler = self.COMMANDS.get(line.channel[1:])
+        if handler:
+            try:
+                handler(self, line)
+            except Exception:
+                log.exception("명령 처리 오류: %s", line.channel)
+        elif line.channel not in self._unknown_commands:
+            self._unknown_commands.add(line.channel)
+            log.info("알 수 없는 명령 줄을 무시합니다: %s (새 버전의 애드온일 수 있음)", line.channel)
+
     def _code_prefix(self, ch):
         """What stands in front of a line: nothing, like the game's chat, except "(1)" for numbered channels and an arrow
         for a whisper you sent. The option "show channel codes in detail" brings back  (S) (W→) (C1) (!LT)."""
@@ -1342,6 +1411,10 @@ class App(WindowMixin):
         mark = self.marks.get(token)
         if mark is None:
             return
+        if result and not err and names:                         # a link the translator dropped is added at the end
+            result, lost = chattext.ensure_links(result, names)
+            if lost:
+                log.warning("번역에서 링크 자리표시자가 빠짐: %s -> 끝에 붙임", ", ".join("[L%d]" % i for i in lost))
         if token in self.swapinfo:                               # "translation above" mode
             filled = False
             if result and not err:

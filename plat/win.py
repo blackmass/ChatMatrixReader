@@ -64,6 +64,12 @@ WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE = 0x80000, 
 WS_EX_APPWINDOW = 0x40000
 
 
+# programs whose windows can carry the game's title without being the game (an Explorer folder named
+# "World of Warcraft", a browser tab, an editor): never taken for the game by title
+NOT_GAME_EXES = {"explorer.exe", "chrome.exe", "msedge.exe", "firefox.exe", "notepad.exe", "code.exe", "notepad++.exe",
+                 "cmd.exe", "powershell.exe", "windowsterminal.exe", "pythonw.exe", "python.exe"}
+
+
 class Hotkey(threading.Thread):
     """Global hotkey Ctrl+Alt+O -> reopen the options window (needed when click-through is on)."""
 
@@ -439,7 +445,7 @@ class WindowMixin:
             exe = self._exe_of(h)
             if exe.startswith("wow") and exe.endswith(".exe"):
                 by_exe.append((area, h, text, exe))
-            elif title and text.strip().lower() == title:
+            elif title and text.strip().lower() == title and exe not in NOT_GAME_EXES:
                 by_title.append((area, h, text, exe))
             return True
 
@@ -675,6 +681,9 @@ class WindowMixin:
         if not g:
             self._recover_without_game()
             return
+        self._game_seen, self._gone_since = True, None
+        if self._nogame_top:
+            self._leave_nogame_top()
         if self._fg_last != g:                                  # another program has the focus
             self._ensure_above_game()
             return
@@ -708,12 +717,60 @@ class WindowMixin:
         self._fix_order_if_covered(late=True)
 
     _nogame_logged = 0.0
+    _game_seen = False                    # the game window has been seen at least once since this program started
+    _gone_since = None                    # since when the game window has been missing
+    _nogame_top = False                   # the windows were put on top because there is no game
+
+    EXIT_AFTER = 10.0                     # option "quit when the game is closed": seconds
+
+    def _nogame_raise(self):
+        """Without the game there is nothing to stack above: all our windows go to the top and stay visible."""
+        u = _user32()
+        u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        chain = [_hwnd(self.root)] + list(self._below_hwnds())
+        if all(u.GetWindowLongW(h, -20) & 0x8 for h in chain) and self._nogame_top:
+            return
+        for h in reversed(chain):                                  # the text window last: it ends up on top
+            u.SetWindowPos(h, -1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)
+        for w in (self.root, getattr(self, "back", None)):
+            try:
+                if w is not None:
+                    w.attributes("-topmost", True)
+            except Exception:
+                pass
+        self._nogame_top = True
+
+    def _leave_nogame_top(self):
+        """The game is back: the settings decide again (the follow loop places the windows)."""
+        self._nogame_top = False
+        top = bool(self.cfg.get("topmost") and not self.cfg.get("topmost_wow_only"))
+        try:
+            for w in (self.root, getattr(self, "back", None)):
+                if w is not None:
+                    w.attributes("-topmost", top)
+            if not top:
+                u = _user32()
+                for h in [_hwnd(self.root)] + list(self._below_hwnds()):
+                    u.SetWindowPos(h, -2, 0, 0, 0, 0, 0x1 | 0x2 | 0x10)
+        except Exception:
+            log.exception("항상 위 상태 되돌리기 실패")
+        self._placed_for = None
+        self._stack_back()
 
     def _recover_without_game(self):
         """No game window (the game was closed, or has not started): nothing to stack above, so the window must simply
         behave like any normal window - never hidden, minimized or outside every monitor (the display mode of an
         exclusive-fullscreen game can move windows away when it ends)."""
         try:
+            if self.cfg.get("exit_with_game") and self._game_seen:           # option: the game was closed -> quit too
+                now = time.monotonic()
+                if self._gone_since is None:
+                    self._gone_since = now
+                elif now - self._gone_since >= self.EXIT_AFTER:
+                    log.info("와우가 종료되어 함께 종료합니다 (%d초 경과)", self.EXIT_AFTER)
+                    self.on_close()
+                    return
+            self._nogame_raise()
             u = _user32()
             u.IsWindowVisible.argtypes = [wintypes.HWND]
             u.IsIconic.argtypes = [wintypes.HWND]

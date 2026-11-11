@@ -26,6 +26,7 @@ class Line:
     sender: str
     text: str
     cls: str = ""          # speaker's class letter A-M (optional 5th field, see PROTOCOL.md); "" = unknown
+    base: int = -1         # palette code of the base colour the user chose for this chat type (optional 6th field); -1 = default
 
 
 @dataclass
@@ -48,16 +49,17 @@ def parse_payload(payload: bytes) -> list:
     if not text:
         return lines
     for raw in text.split("\n"):
-        parts = raw.split(FS, 4)
+        parts = raw.split(FS, 5)
         if len(parts) < 4:
             continue            # truncated / damaged line
         ch, id_str, sender, msg = parts[:4]
-        cls = parts[4][:1] if len(parts) == 5 else ""
+        cls = parts[4][:1] if len(parts) >= 5 else ""
+        base = (ord(parts[5][0]) - 48) if len(parts) == 6 and parts[5] else -1
         try:
             line_id = int(id_str)
         except ValueError:
             continue
-        lines.append(Line(ch, line_id, sender, msg, cls))
+        lines.append(Line(ch, line_id, sender, msg, cls, base))
     return lines
 
 

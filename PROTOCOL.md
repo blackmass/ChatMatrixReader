@@ -27,11 +27,14 @@ Payload: UTF-8, lines separated by `\n`. Each line has four fields separated by 
 <channel> \x1F <id> \x1F <sender> \x1F <text>
 ```
 
-- channel: S say, Y yell, E emote, P party, R raid, RW raid warning, I instance, G guild, O officer, W whisper, B bnet whisper, WT whisper you sent (the name is the receiver), BT bnet whisper you sent, C<n> numbered channel n, CM community channel
+- channel: S say, Y yell, E emote, P party, PL party leader, R raid, RL raid leader, RW raid warning, I instance, IL instance leader, G guild, O officer, W whisper, B bnet whisper, WT whisper you sent (the name is the receiver), BT bnet whisper you sent, C<n> numbered channel n, CM community channel
 - "other" messages (the chat window's "Other" settings) use codes that start with `!`: `!SY` system, `!XP` experience, `!HN` honor,
   `!RP` reputation, `!SK` skill, `!LT` loot, `!CY` currency, `!MN` money, `!TS` trade skills, `!OP` opening, `!PI` pet info,
   `!CI` misc. combat info, `!AC` / `!GA` achievements, `!BH` / `!BA` / `!BN` battleground, `!IG` ignored, `!TI` target icons,
-  `!MS` `!MY` `!ME` `!MW` `!MP` NPC say / yell / emote / whisper / party, `!BE` `!BW` raid boss emote / whisper.
+  `!MS` `!MY` `!ME` `!MW` `!MP` NPC say / yell / emote / whisper / party, `!BE` `!BW` raid boss emote / whisper, `!CL` channel member list (`/chatlist`: `[5. kor] Name1, Name2`; dark red `#bf8080`).
+  Lines the chat window showed that no captured event produced are sent as plain, never translated text: `!AD` when no chat event came
+  with the line at all (an addon or the game wrote it directly; shown white), `!UN` when the line came with a chat event this addon does not
+  capture (shown grey; the event name is printed by `/cm raw`).
   Except for the NPC / boss speech the sender field is empty (the text already contains the names). A reader that does
   not know a `!` code can show the line like any other; the codes never start with `C`, so they cannot be mistaken for channels.
 
@@ -64,8 +67,12 @@ The code is the single character `chr(48 + n)` (n = 0..78, i.e. the bytes 0x30 .
 | n | meaning |
 |---|---------|
 | 0-9 | item quality: 0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary, 6 artifact, 7 heirloom (8, 9 free). Battle pet and currency links use the quality of their link colour the same way |
-| 10-19 | colours of other game links: 10 yellow (quest, achievement, map pin), 11 light blue `#71d5ff` (spell, talent, mount), 12 gold `#ffd100` (profession recipe), 13 transmog purple `#e86bd0` (item name of "appearance added") |
-| 20-29 | reserved |
+| 10-19 | colours of other game links: 10 yellow (quest, achievement, map pin), 11 light blue `#71d5ff` (spell, talent, mount), 12 gold `#ffd100` (profession recipe; also the gold coins of a money line `1g`), 13 transmog purple `#e86bd0` (item name of "appearance added"), 14 silver coins `#c7c7cf` (`20s`), 15 copper coins `#eda55f` (`97c`) |
+| 20 | a whole message that is gibberish to this character (spoken in a language it does not know, e.g. Orcish seen by the Alliance, Demonic): the reader does not translate it and shows it dim |
+| 21-29 | reserved |
+| 30-49 | class colours (`RAID_CLASS_COLORS`), 30-42 used: 30 Death Knight `#c41e3a`, 31 Demon Hunter `#a330c9`, 32 Druid `#ff7c0a`, 33 Evoker `#33937f`, 34 Hunter `#aad372`, 35 Mage `#3fc7eb`, 36 Monk `#00ff98`, 37 Paladin `#f48cba`, 38 Priest `#ffffff`, 39 Rogue `#fff468`, 40 Shaman `#0070dd`, 41 Warlock `#8788ee`, 42 Warrior `#c69b6d`. 43-49 free (new classes) |
+| 50-70 | resource (power) colours: 50 Mana `#0000ff`, 51 Rage `#ff0000`, 52 Focus `#ff8040`, 53 Energy `#ffff00`, 54 Combo Points `#fff569`, 55 Runes `#808080`, 56 Runic Power `#00d1ff`, 57 Soul Shards `#80528c`, 58 Astral Power `#4d85e6`, 59 Holy Power `#f2e699`, 60 Maelstrom `#0080ff`, 61 Insanity `#6600cc`, 62 Chi `#b5ffeb`, 63 Arcane Charges `#1a1afa`, 64 Fury `#c942fd`, 65 Pain `#ff9c00`, 66 Ammo `#cc9900`, 67 Fuel `#008c80`, 68 Stagger light `#85ff85`, 69 Stagger medium `#fffab8`, 70 Stagger heavy `#ff6b6b` |
+| 71-78 | the game's default chat colours that the rest of the palette lacks: 71 guild `#40ff40`, 72 officer `#40bf40`, 73 party `#aaaaff`, 74 party leader `#75c7ff`, 75 whisper `#ff80ff`, 76 yell `#ff4040`, 77 numbered channel `#ffc0c0`, 78 raid leader `#ff480a`. (say `#ffffff` = 1, emote `#ff8040` = 52, raid and instance `#ff8000` = 5, system and money `#ffff00` = 10) |
 
 (The digits `0`-`9` are therefore the old item-quality codes; 10 is written as `:` and 11 as `;`. Earlier versions used the digit `9`
 for yellow and `8` for light blue: addon and reader must be updated together.)
@@ -98,6 +105,31 @@ the same screen colour and the information is gone for good. v2 therefore uses o
 levels** per channel and puts a **ramp of those levels into every frame**, so a reader can measure how the screen shows
 them. Anything that keeps the levels in order (brightness, gamma, contrast, per-channel gains, black lift) is harmless.
 The addon lets the user pick L; fewer levels = sturdier but bigger. v1 (256 levels) stays the default and is unchanged.
+
+## Command lines (channel code starting with `@`)
+
+A channel code that starts with `@` is an instruction from the addon to the reader, not a message: the reader never shows it,
+whatever follows. `!` codes are lines that are shown (system, loot ...); `@` codes are acted on. The reader looks only at the
+first character to tell them apart, and ignores every `@` code it does not know (an older reader meets newer commands).
+No command is defined yet. Rules for the ones to come:
+- a command carries the **whole state** it is about (`@CC` + every colour that changed, not "colour X changed"), so that it can be
+  repeated or lost without harm: lines are dropped when the queue is full, and a reader started later never saw earlier ones;
+- what matters is also carried by the lines themselves (like the base colour); a command only makes the reader react at once;
+- a command only changes what the reader's own window shows (colours, clearing); it never touches files or other programs.
+Candidates: `@CC` a chat type's colour changed (recolour the earlier lines), `@CL` the chat window was cleared.
+
+The reader keeps the channel code of every line it shows (a hidden text tag `t_<code>` that also carries the colour), so that
+an instruction can address all lines of one chat type.
+
+## Base colour (optional 6th field)
+
+A line may carry a sixth field after the class: `<channel> \x1F <id> \x1F <sender> \x1F <text> \x1F <class> \x1F <colour>`
+(`class` is empty when the line has no class but a colour). `colour` is one character, `chr(48 + n)`, a code of the colour
+palette below: the colour the user gave this kind of message in the game's chat settings (`ChatTypeInfo`; every numbered channel
+has its own). The addon sends it only when the user's colour differs from the game's default colour, as the nearest palette colour
+(no distance limit: the user chose it on purpose); without the field the reader uses its default colour for the channel code. For
+lines no captured event produced (`!AD`, `!UN`) it is the colour the chat window drew the line in, when that is not white.
+Colours inside the text (links) are drawn over the base colour. Old readers ignore the sixth field.
 
 ## Geometry
 
@@ -151,3 +183,15 @@ symbol of R, the next of G, the last of B. Unused bits / cells are zero (symbol 
 
 `proto2.py` (reader) is the reference implementation of encoder and decoder; `test_proto2.py` shows how it behaves under
 colour damage.
+
+## Colour palette
+
+Only colours the game itself uses are in the table above; the reader draws a code with the colour listed there.
+Sources: item quality - https://warcraft.wiki.gg/wiki/Item_Quality (8 WoW Token = `#00ccff`, the same as 7 heirloom, has no code of its own);
+class colours - https://warcraft.wiki.gg/wiki/Class_colors (priest white and shaman `#0070dd` equal item qualities 1 and 3);
+resource colours - https://warcraft.wiki.gg/wiki/Power_colors; chat colours (71-78) - the game's default chat settings, from memory and the in-game colour swatches, not from a published list; link and coin colours (10-15) are the game's own link colours.
+The font colours of the interface (gold `#ffd100`, ...) are in the game's `GlobalColor` table; they are not copied here yet.
+
+A line that no captured event produced (`!AD`, `!UN`) may contain `|cAARRGGBB...|r` colour spans written by an addon. The addon
+replaces each span by the nearest palette code (weighted RGB distance, redmean formula; a colour farther than 60 from every palette
+colour is dropped). The reader therefore never receives an arbitrary colour. `|cnNAME:` (named colours) are dropped.

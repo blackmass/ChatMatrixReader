@@ -104,6 +104,7 @@ class OptionsWindow:
             "skip_regex_hide": tk.BooleanVar(value=bool(cfg.get("skip_regex_hide", False))),
             "glossary_file": tk.StringVar(value=cfg["glossary_file"]),
             "glossary_google": tk.BooleanVar(value=bool(cfg["glossary_google"])),
+            "glossary_mode": tk.StringVar(value=glossary.mode(cfg)),
             "glossary_style": tk.StringVar(value=tr(glossary.GLOSSARY_STYLES.get(cfg["glossary_style"], glossary.GLOSSARY_STYLES["paren"]))),
             "glossary_info": tk.StringVar(value=""),
             "test_text": tk.StringVar(value="LFM M+ 12 need tank and healer, inv pls"),
@@ -113,6 +114,7 @@ class OptionsWindow:
             "topmost": tk.BooleanVar(value=bool(cfg["topmost"])),
             "topmost_wow_only": tk.BooleanVar(value=bool(cfg.get("topmost_wow_only"))),
             "click_through": tk.BooleanVar(value=bool(cfg["click_through"])),
+            "exit_with_game": tk.BooleanVar(value=bool(cfg.get("exit_with_game"))),
             "hover_clear": tk.BooleanVar(value=bool(cfg.get("hover_clear", False))),
             "blur_experiment": tk.BooleanVar(value=bool(cfg.get("blur_experiment", False))),
             "blur_kind": tk.StringVar(value=tr("진하게 (아크릴)") if int(cfg.get("blur_state", 3)) == 4 else tr("가볍게")),
@@ -346,6 +348,16 @@ class OptionsWindow:
                           state="readonly", width=34)
         gs.grid(row=2, column=1, sticky="w", **PAD)
         ttk.Label(gg, textvariable=v["glossary_info"], foreground="#666").grid(row=3, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(gg, text=tr("AI에 단어장을 보내는 방식")).grid(row=6, column=0, columnspan=3, sticky="w", **PAD)
+        for r, (mode, label) in enumerate((
+                ("full", tr("전체: 단어장 전체를 프롬프트에 넣기 (기본)")),
+                ("list", tr("선별: 문장에 나온 단어의 항목만 골라 앞에 붙이기 (큰 단어장·작은 모델에 유리)")),
+                ("mixed", tr("복합: 뜻이 하나면 단어 뒤 괄호에, 뜻이 여럿이거나 메모가 있으면 앞에 목록으로 (실험)")))):
+            ttk.Radiobutton(gg, text=label, value=mode, variable=v["glossary_mode"]).grid(
+                row=7 + r, column=0, columnspan=3, sticky="w", padx=(18, 8), pady=1)
+        ttk.Label(gg, text=tr("'선별'이나 '복합'을 고르면 프롬프트의 {{Glossary.txt}} 자리에는 내 단어장 대신 짧은 안내가 들어갑니다. "
+                              "같은 약어에 뜻이 여럿이면 단어장에 같은 단어를 여러 줄 적으면 됩니다 (예: ATM=현금입출기 / ATM=지금 이 순간)."),
+                  foreground="#666", wraplength=420, justify="left").grid(row=10, column=0, columnspan=3, sticky="w", **PAD)
         ttk.Label(gg, text=tr("AI(OpenAI 호환)에는 프롬프트의 {{Glossary.txt}} 자리에 파일 내용이 들어갑니다. 파일은 저장하면 바로 반영됩니다."),
                   foreground="#666").grid(row=4, column=0, columnspan=3, sticky="w", **PAD)
         ttk.Label(gg, text=tr("단어장이나 프롬프트를 바꾸면 AI 번역은 첫 번역이 느려질 수 있습니다 (서버가 새 내용을 읽는 시간). "
@@ -369,7 +381,34 @@ class OptionsWindow:
         b2 = ttk.Button(br, text=tr("기본 프롬프트로 되돌리기"), command=self.reset_prompt)
         b2.pack(side="left")
         ttk.Label(br, text=tr("약어 설명은 Glossary 아래에 한 줄씩 추가하세요."), foreground="#666").pack(side="left", padx=8)
+        self.prompt_note = ttk.Label(g3, foreground="#b45f00", wraplength=420, justify="left")
+        self.prompt_note.pack(anchor="w", padx=6, pady=(0, 4))
+        self.prompt.bind("<KeyRelease>", lambda e: self._prompt_note_update(), add="+")
+        self._prompt_note_update()
         self.openai_widgets += [self.prompt, b2]
+
+        # --- the user's own additional instructions (kept when the default prompt is updated)
+        ttk.Separator(g3).pack(fill="x", padx=6, pady=(2, 4))
+        ttk.Label(g3, text=tr("추가 지시 (말투·스타일 등. 비워 두면 사용하지 않습니다)"),
+                  font=("Malgun Gothic", 9, "bold")).pack(anchor="w", padx=6)
+        ttk.Label(g3, text=tr("위의 기본 프롬프트는 그대로 두고, 여기에 적은 내용만 프롬프트 맨 끝에 덧붙입니다. 기본 프롬프트가 업데이트되어도 "
+                              "이 칸은 그대로 남습니다. 모델이 더 잘 따르도록 영어로 쓰는 것을 권합니다. 번역이 이상해지면 이 칸을 비워 보세요."),
+                  foreground="#666", wraplength=420, justify="left").pack(anchor="w", padx=6, pady=(0, 2))
+        self.extra_prompt = tk.Text(g3, width=54, height=3, wrap="word", font=("Malgun Gothic", 9), undo=True)
+        self.extra_prompt.pack(fill="x", padx=6, pady=(0, 2))
+        self.extra_prompt.insert("1.0", self.app.cfg.get("extra_prompt") or "")
+        ttk.Label(g3, text=tr("예시 (영어 문장을 복사해서 위 칸에 붙여 넣으세요):"), foreground="#666").pack(anchor="w", padx=6)
+        for desc, english in ((tr("해적 말투로"), "Always write the translated dialogue in the style of a pirate."),
+                              (tr("반말로 짧게"), "Use a casual, informal tone and keep sentences short."),
+                              (tr("존댓말로"), "Always use polite, formal speech.")):
+            row = ttk.Frame(g3)
+            row.pack(fill="x", padx=6, pady=1)
+            ttk.Label(row, text=desc, foreground="#666", width=12).pack(side="left")
+            ex_e = ttk.Entry(row, width=48)                    # read-only: the text can be selected and copied
+            ex_e.insert(0, english)
+            ex_e.configure(state="readonly")
+            ex_e.pack(side="left", fill="x", expand=True)
+        self.openai_widgets += [self.extra_prompt]
 
         # --- common
         ttk.Checkbutton(left, text=tr("목표 언어와 같은 문장은 번역 생략 (한국어 등 글자로 판별 가능한 경우)"),
@@ -407,9 +446,18 @@ class OptionsWindow:
     def _tab_window(self, nb):
         v, cfg, app = self.v, self.app.cfg, self.app
         tab = self._tab_frame(nb, tr("창"))
+        # two columns: left = what the window does (behaviour, what is shown), right = how it looks
+        left = ttk.Frame(tab)
+        left.grid(row=0, column=0, sticky="nsew")
+        ttk.Separator(tab, orient="vertical").grid(row=0, column=1, sticky="ns", padx=6, pady=10)
+        right = ttk.Frame(tab)
+        right.grid(row=0, column=2, sticky="nsew")
+        tab.columnconfigure(0, weight=1)
+        tab.columnconfigure(2, weight=1)
 
-        ttk.Label(tab, text=tr("투명도")).grid(row=0, column=0, sticky="nw", **PAD)
-        sl = ttk.Frame(tab)
+        # ---------------- right: look
+        ttk.Label(right, text=tr("투명도")).grid(row=0, column=0, sticky="nw", **PAD)
+        sl = ttk.Frame(right)
         sl.grid(row=0, column=1, sticky="w", **PAD)
 
         def on_opacity(_=None):
@@ -426,6 +474,70 @@ class OptionsWindow:
         ttk.Label(sl, text=tr("두 값이 다르면 창 2개로 합성합니다."), foreground="#666").grid(
             row=2, column=0, columnspan=2, sticky="w")
 
+
+        ttk.Label(right, text=tr("글꼴")).grid(row=1, column=0, sticky="w", **PAD)
+        fam = ttk.Frame(right)
+        fam.grid(row=1, column=1, sticky="w", **PAD)
+        ttk.Combobox(fam, textvariable=v["font_family"], values=[tr("기본 글꼴 (맑은 고딕)")] + app.custom_fonts,
+                     width=22, state="readonly").pack(side="left")
+        if not app.custom_fonts:
+            ttk.Label(right, text=tr("fonts 폴더에 ttf/otf 파일을 넣으면 선택할 수 있습니다"), foreground="#666").grid(
+                row=2, column=0, columnspan=2, sticky="w", padx=6)
+        ttk.Label(right, text=tr("글자 크기")).grid(row=3, column=0, sticky="w", **PAD)
+        ttk.Spinbox(right, from_=8, to=32, textvariable=v["font_size"], width=6).grid(row=3, column=1, sticky="w", **PAD)
+        sp = ttk.Frame(right)                               # both gaps in one row
+        sp.grid(row=4, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(sp, text=tr("줄 간격 (원문-번역, 픽셀)")).pack(side="left")
+        ttk.Spinbox(sp, from_=0, to=40, textvariable=v["line_spacing"], width=5).pack(side="left", padx=(4, 12))
+        sp2 = ttk.Frame(right)
+        sp2.grid(row=5, column=0, columnspan=2, sticky="w", **PAD)
+        ttk.Label(sp2, text=tr("묶음 간격 (묶음 사이, 픽셀)")).pack(side="left")
+        ttk.Spinbox(sp2, from_=0, to=60, textvariable=v["group_spacing"], width=5).pack(side="left", padx=4)
+        sh = ttk.LabelFrame(right, text=tr("글자 그림자"))
+        sh.grid(row=6, column=0, columnspan=2, sticky="we", padx=6, pady=(8, 3))
+        ttk.Checkbutton(sh, text=tr("글자 그림자 사용 (배경이 투명할 때 글자가 잘 보이게)"), variable=v["shadow_on"]).grid(
+            row=0, column=0, columnspan=6, sticky="w", **PAD)
+        ttk.Label(sh, text=tr("색")).grid(row=1, column=0, sticky="w", **PAD)
+        ttk.Entry(sh, textvariable=v["shadow_color"], width=9).grid(row=1, column=1, sticky="w", **PAD)
+        ttk.Button(sh, text=tr("색 선택"), command=self.pick_shadow_color).grid(row=1, column=2, sticky="w", **PAD)
+        ttk.Label(sh, text="X").grid(row=1, column=3, sticky="e", padx=(14, 2))
+        ttk.Spinbox(sh, from_=-5, to=5, textvariable=v["shadow_dx"], width=4).grid(row=1, column=4, **PAD)
+        ttk.Label(sh, text="Y").grid(row=1, column=5, sticky="e", padx=(8, 2))
+        ttk.Spinbox(sh, from_=-5, to=5, textvariable=v["shadow_dy"], width=4).grid(row=1, column=6, **PAD)
+        ttk.Label(sh, text=tr("켜면 창이 하나 더 쓰입니다. 문제가 있으면 끄세요."), foreground="#666").grid(
+            row=2, column=0, columnspan=7, sticky="w", padx=6)
+
+        ov = ttk.LabelFrame(right, text=tr("게임 채팅창 위에 겹쳐 쓰기"))
+        ov.grid(row=7, column=0, columnspan=2, sticky="we", padx=6, pady=(8, 3))
+
+        def on_overlay():
+            cfg["hover_clear"] = bool(v["hover_clear"].get())
+            cfg["blur_experiment"] = bool(v["blur_experiment"].get())
+            app.apply_opacity()
+
+        ttk.Checkbutton(ov, text=tr("마우스를 올리면 창을 완전히 투명하게 (클릭 통과를 켠 경우만. 조작 키를 누르면 다시 보임)"),
+                        variable=v["hover_clear"], command=on_overlay).grid(row=0, column=0, sticky="w", **PAD)
+        if sys.platform == "win32":                       # the blur is not implemented on macOS
+            bl = ttk.Frame(ov)
+            bl.grid(row=1, column=0, sticky="w")
+            ttk.Checkbutton(bl, text=tr("배경 블러 (Windows)"), variable=v["blur_experiment"],
+                            command=on_overlay).pack(side="left", padx=6, pady=3)
+
+            def on_blur_kind(_e=None):
+                cfg["blur_state"] = 4 if v["blur_kind"].get() == tr("진하게 (아크릴)") else 3
+                if cfg.get("blur_experiment"):
+                    app.apply_opacity()
+
+            kind = ttk.Combobox(bl, textvariable=v["blur_kind"], values=[tr("가볍게"), tr("진하게 (아크릴)")], width=16,
+                                state="readonly")
+            kind.pack(side="left", padx=6)
+            kind.bind("<<ComboboxSelected>>", on_blur_kind)
+            ttk.Label(ov, text=tr("흐림 정도는 시스템이 정해서 바꿀 수 없습니다. '진하게'는 위의 '배경' 투명도로 색 농도를 정하고, "
+                                  "'가볍게'는 배경 투명도의 영향을 받지 않습니다. 창을 움직이는 동안은 블러가 잠시 꺼집니다."),
+                      foreground="#666", wraplength=440, justify="left").grid(row=2, column=0, sticky="w", padx=6)
+
+
+        # ---------------- left: behaviour and what is shown
         def on_topmost():
             if v["topmost"].get():
                 v["topmost_wow_only"].set(False)                  # the two modes exclude each other
@@ -447,11 +559,10 @@ class OptionsWindow:
                 app._placed_for = None
             config.save(cfg)
 
-        ttk.Checkbutton(tab, text=tr("항상 위에 표시"), variable=v["topmost"],
-                        command=on_topmost).grid(row=1, column=0, columnspan=2, sticky="w", **PAD)
-        ttk.Checkbutton(tab, text=tr("와우 창 위에만 표시 (다른 프로그램 창에는 가려짐)"), variable=v["topmost_wow_only"],
-                        command=on_wow_only).grid(row=6, column=0, columnspan=2, sticky="w", **PAD)
-
+        ttk.Checkbutton(left, text=tr("항상 위에 표시"), variable=v["topmost"],
+                        command=on_topmost).grid(row=0, column=0, sticky="w", **PAD)
+        ttk.Checkbutton(left, text=tr("와우 창 위에만 표시 (다른 창에는 가려짐)"), variable=v["topmost_wow_only"],
+                        command=on_wow_only).grid(row=1, column=0, sticky="w", **PAD)
         def on_click_through():
             if v["click_through"].get():
                 if not app.hotkey.ok:
@@ -462,93 +573,58 @@ class OptionsWindow:
                 if not messagebox.askyesno(
                         tr("클릭 통과"),
                         tr("켜면 평소에는 이 창이 마우스 입력을 받지 않습니다.\n"
-                           "Shift를 누른 채로 창 위에 마우스를 올리면 클릭, 드래그 선택(선택하면 자동 복사), 스크롤, 창 이동이 됩니다.\n"
-                           "옵션은 Ctrl+Alt+O 로도 열 수 있습니다.\n\n계속할까요?").replace("Ctrl+Alt+O", plat.OPTIONS_KEY), parent=self.win):
+                           "{key}를 누른 채로 창 위에 마우스를 올리면 클릭, 드래그 선택(선택하면 자동 복사), 스크롤, 창 이동이 됩니다.\n"
+                           "옵션은 Ctrl+Alt+O 로도 열 수 있습니다.\n\n계속할까요?", key=app.interact_label()).replace("Ctrl+Alt+O", plat.OPTIONS_KEY), parent=self.win):
                     v["click_through"].set(False)
                     return
             cfg["click_through"] = bool(v["click_through"].get())
             app.set_click_through(cfg["click_through"])
             config.save(cfg)
 
-        ttk.Checkbutton(tab, text=tr("클릭 통과 (마우스 입력이 창 뒤로 전달됨. Shift를 누르고 있는 동안만 조작 가능)"), variable=v["click_through"],
-                        command=on_click_through).grid(row=2, column=0, columnspan=2, sticky="w", **PAD)
-        ttk.Label(tab, text=tr("글자 크기")).grid(row=3, column=0, sticky="w", **PAD)
-        ttk.Spinbox(tab, from_=8, to=32, textvariable=v["font_size"], width=6).grid(row=3, column=1, sticky="w", **PAD)
-        ttk.Label(tab, text=tr("최대 보관 줄 수")).grid(row=4, column=0, sticky="w", **PAD)
-        ttk.Spinbox(tab, from_=50, to=5000, increment=50, textvariable=v["max_lines"],
-                    width=6).grid(row=4, column=1, sticky="w", **PAD)
-        ttk.Button(tab, text=tr("화면 지우기"), command=app.clear_text).grid(row=5, column=0, sticky="w", **PAD)
-        sp = ttk.Frame(tab)                               # both gaps in one row
-        sp.grid(row=7, column=0, columnspan=2, sticky="w", **PAD)
-        ttk.Label(sp, text=tr("줄 간격 (원문-번역, 픽셀)")).pack(side="left")
-        ttk.Spinbox(sp, from_=0, to=40, textvariable=v["line_spacing"], width=5).pack(side="left", padx=(4, 16))
-        ttk.Label(sp, text=tr("묶음 간격 (묶음 사이, 픽셀)")).pack(side="left")
-        ttk.Spinbox(sp, from_=0, to=60, textvariable=v["group_spacing"], width=5).pack(side="left", padx=4)
-        ttk.Checkbutton(tab, text=tr("번역을 위에, 원문을 아래에 표시 (원문 번역 교체)"), variable=v["swap_trans"]).grid(
-            row=16, column=0, columnspan=2, sticky="w", **PAD)
-        ttk.Label(tab, text=tr("아래 줄 글자 크기 (0: 위 줄과 같게)")).grid(row=14, column=0, sticky="w", **PAD)
-        ttk.Spinbox(tab, from_=0, to=32, textvariable=v["trans_font_size"], width=6).grid(row=14, column=1, sticky="w", **PAD)
-        ttk.Label(tab, text=tr("아래 줄 글자 색 (비우면 기본)")).grid(row=15, column=0, sticky="w", **PAD)
-        tc = ttk.Frame(tab)
-        tc.grid(row=15, column=1, sticky="w", **PAD)
+        ttk.Checkbutton(left, text=tr("클릭 통과 (조작 키를 누르는 동안만 조작)"), variable=v["click_through"],
+                        command=on_click_through, ).grid(row=2, column=0, sticky="w", **PAD)
+        ik = ttk.Frame(left)                              # the keys that lift click-through (macOS: always Shift)
+        ik.grid(row=3, column=0, sticky="w", padx=26)
+        if sys.platform == "win32":
+            ttk.Label(ik, text=tr("조작 키 (모두 누르고 있을 때)")).pack(side="left")
+
+            def on_keys():
+                chosen = [k for k in ("Ctrl", "Alt", "Shift") if v["ik_" + k].get()]
+                if not chosen:
+                    v["ik_Shift"].set(True)                  # at least one: else the window could never be used
+                    chosen = ["Shift"]
+                    messagebox.showinfo(tr("조작 키"), tr("조작 키는 하나 이상 선택해야 합니다."), parent=self.win)
+                cfg["interact_keys"] = chosen
+                config.save(cfg)
+
+            for k in ("Shift", "Ctrl", "Alt"):
+                v["ik_" + k] = tk.BooleanVar(value=k in app.interact_keys())
+                ttk.Checkbutton(ik, text=k, variable=v["ik_" + k], command=on_keys).pack(side="left", padx=(8, 0))
+        if sys.platform == "win32":                       # (not built for macOS)
+            ttk.Checkbutton(left, text=tr("와우가 종료되면 번역창도 종료 (10초 뒤)"), variable=v["exit_with_game"]).grid(
+                row=4, column=0, sticky="w", **PAD)
+            ttk.Label(left, text=tr("와우가 실행 중이 아닐 때는 번역창이 항상 맨 위에 보입니다."), foreground="#666").grid(
+                row=5, column=0, sticky="w", padx=26)
+        ml = ttk.Frame(left)
+        ml.grid(row=6, column=0, sticky="w", **PAD)
+        ttk.Label(ml, text=tr("최대 보관 줄 수")).pack(side="left")
+        ttk.Spinbox(ml, from_=50, to=5000, increment=50, textvariable=v["max_lines"], width=6).pack(side="left", padx=6)
+        ttk.Button(ml, text=tr("화면 지우기"), command=app.clear_text).pack(side="left", padx=6)
+        ttk.Checkbutton(left, text=tr("채팅 시간 표시"), variable=v["show_time"]).grid(row=7, column=0, sticky="w", **PAD)
+        ttk.Checkbutton(left, text=tr("직업 색상으로 이름 표시"), variable=v["class_colors"]).grid(row=8, column=0, sticky="w", **PAD)
+        ttk.Checkbutton(left, text=tr("채널 코드 자세히 표시 (문제 확인용)"), variable=v["channel_detail"]).grid(
+            row=9, column=0, sticky="w", **PAD)
+        ttk.Checkbutton(left, text=tr("번역을 위에, 원문을 아래에 표시"), variable=v["swap_trans"]).grid(
+            row=10, column=0, sticky="w", **PAD)
+        sw = ttk.Frame(left)
+        sw.grid(row=11, column=0, sticky="w", padx=26)
+        ttk.Label(sw, text=tr("아래 줄 글자 크기 (0: 위 줄과 같게)")).grid(row=0, column=0, sticky="w", pady=2)
+        ttk.Spinbox(sw, from_=0, to=32, textvariable=v["trans_font_size"], width=6).grid(row=0, column=1, sticky="w", padx=6)
+        ttk.Label(sw, text=tr("아래 줄 글자 색 (비우면 기본)")).grid(row=1, column=0, sticky="w", pady=2)
+        tc = ttk.Frame(sw)
+        tc.grid(row=1, column=1, sticky="w", padx=6)
         ttk.Entry(tc, textvariable=v["trans_color"], width=9).pack(side="left")
         ttk.Button(tc, text=tr("색 선택"), command=self.pick_trans_color).pack(side="left", padx=4)
-        ttk.Checkbutton(tab, text=tr("채팅 시간 표시"), variable=v["show_time"]).grid(
-            row=8, column=0, columnspan=2, sticky="w", **PAD)
-        ttk.Checkbutton(tab, text=tr("직업 색상으로 이름 표시"), variable=v["class_colors"]).grid(
-            row=11, column=0, columnspan=2, sticky="w", **PAD)
-        ttk.Checkbutton(tab, text=tr("채널 코드를 자세히 표시 (문제 확인용)"), variable=v["channel_detail"]).grid(
-            row=13, column=0, columnspan=2, sticky="w", **PAD)
-        ttk.Label(tab, text=tr("글꼴")).grid(row=9, column=0, sticky="w", **PAD)
-        fam = ttk.Frame(tab)
-        fam.grid(row=9, column=1, sticky="w", **PAD)
-        ttk.Combobox(fam, textvariable=v["font_family"], values=[tr("기본 글꼴 (맑은 고딕)")] + app.custom_fonts,
-                     width=26, state="readonly").pack(side="left")
-        if not app.custom_fonts:
-            ttk.Label(fam, text=tr("fonts 폴더에 ttf/otf 파일을 넣으면 선택할 수 있습니다"), foreground="#666").pack(
-                side="left", padx=6)
-        sh = ttk.LabelFrame(tab, text=tr("글자 그림자"))
-        sh.grid(row=10, column=0, columnspan=2, sticky="we", padx=6, pady=(8, 3))
-        ttk.Checkbutton(sh, text=tr("글자 그림자 사용 (배경이 투명할 때 글자가 잘 보이게)"), variable=v["shadow_on"]).grid(
-            row=0, column=0, columnspan=6, sticky="w", **PAD)
-        ttk.Label(sh, text=tr("색")).grid(row=1, column=0, sticky="w", **PAD)
-        ttk.Entry(sh, textvariable=v["shadow_color"], width=9).grid(row=1, column=1, sticky="w", **PAD)
-        ttk.Button(sh, text=tr("색 선택"), command=self.pick_shadow_color).grid(row=1, column=2, sticky="w", **PAD)
-        ttk.Label(sh, text="X").grid(row=1, column=3, sticky="e", padx=(14, 2))
-        ttk.Spinbox(sh, from_=-5, to=5, textvariable=v["shadow_dx"], width=4).grid(row=1, column=4, **PAD)
-        ttk.Label(sh, text="Y").grid(row=1, column=5, sticky="e", padx=(8, 2))
-        ttk.Spinbox(sh, from_=-5, to=5, textvariable=v["shadow_dy"], width=4).grid(row=1, column=6, **PAD)
-        ttk.Label(sh, text=tr("켜면 창이 하나 더 쓰입니다. 문제가 있으면 끄세요."), foreground="#666").grid(
-            row=2, column=0, columnspan=7, sticky="w", padx=6)
-
-        ov = ttk.LabelFrame(tab, text=tr("게임 채팅창 위에 겹쳐 쓰기"))
-        ov.grid(row=12, column=0, columnspan=2, sticky="we", padx=6, pady=(8, 3))
-
-        def on_overlay():
-            cfg["hover_clear"] = bool(v["hover_clear"].get())
-            cfg["blur_experiment"] = bool(v["blur_experiment"].get())
-            app.apply_opacity()
-
-        ttk.Checkbutton(ov, text=tr("마우스를 올리면 창을 완전히 투명하게 (클릭 통과를 켠 경우만. Shift를 누르면 다시 보임)"),
-                        variable=v["hover_clear"], command=on_overlay).grid(row=0, column=0, sticky="w", **PAD)
-        if sys.platform == "win32":                       # the blur is not implemented on macOS
-            bl = ttk.Frame(ov)
-            bl.grid(row=1, column=0, sticky="w")
-            ttk.Checkbutton(bl, text=tr("배경 블러 (Windows)"), variable=v["blur_experiment"],
-                            command=on_overlay).pack(side="left", padx=6, pady=3)
-
-            def on_blur_kind(_e=None):
-                cfg["blur_state"] = 4 if v["blur_kind"].get() == tr("진하게 (아크릴)") else 3
-                if cfg.get("blur_experiment"):
-                    app.apply_opacity()
-
-            kind = ttk.Combobox(bl, textvariable=v["blur_kind"], values=[tr("가볍게"), tr("진하게 (아크릴)")], width=16,
-                                state="readonly")
-            kind.pack(side="left", padx=6)
-            kind.bind("<<ComboboxSelected>>", on_blur_kind)
-            ttk.Label(ov, text=tr("흐림 정도는 시스템이 정해서 바꿀 수 없습니다. '진하게'는 위의 '배경' 투명도로 색 농도를 정하고, "
-                                  "'가볍게'는 배경 투명도의 영향을 받지 않습니다. 창을 움직이는 동안은 블러가 잠시 꺼집니다."),
-                      foreground="#666", wraplength=440, justify="left").grid(row=2, column=0, sticky="w", padx=6)
 
     def _tab_capture(self, nb):
         v = self.v
@@ -607,10 +683,41 @@ class OptionsWindow:
         self.send_prompt_text.grid(row=7, column=0, columnspan=3, sticky="we", padx=6)
         self.send_prompt_text.insert("1.0", self.app.cfg.get("send_prompt") or translator.DEFAULT_SEND_PROMPT)
         ttk.Button(tab, text=tr("기본 프롬프트로"), command=self._reset_send_prompt).grid(row=8, column=0, sticky="w", **PAD)
+        self.send_prompt_note = ttk.Label(tab, foreground="#b45f00", wraplength=420, justify="left")
+        self.send_prompt_note.grid(row=8, column=1, columnspan=2, sticky="w", **PAD)
+        self.send_prompt_text.bind("<KeyRelease>", lambda e: self._send_note_update(), add="+")
+        self._send_note_update()
+
+        # --- the user's own additional instructions for what they send (kept when the default prompt is updated)
+        ttk.Separator(tab).grid(row=9, column=0, columnspan=3, sticky="we", padx=6, pady=(4, 2))
+        ttk.Label(tab, text=tr("추가 지시 (내가 보내는 말의 말투 등. 비워 두면 사용하지 않습니다)"),
+                  font=("Malgun Gothic", 9, "bold")).grid(row=10, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(tab, text=tr("위의 기본 프롬프트는 그대로 두고, 여기에 적은 내용만 프롬프트 맨 끝에 덧붙입니다. 보내는 번역에만 적용되며 "
+                               "받은 채팅의 번역 설정과는 별개입니다. 모델이 더 잘 따르도록 영어로 쓰는 것을 권합니다. "
+                               "번역이 이상해지면 이 칸을 비워 보세요."),
+                  foreground="#666", wraplength=430, justify="left").grid(row=11, column=0, columnspan=3, sticky="w", padx=6)
+        self.send_extra_text = tk.Text(tab, width=62, height=3, wrap="word", font=("Malgun Gothic", 9), undo=True)
+        self.send_extra_text.grid(row=12, column=0, columnspan=3, sticky="we", padx=6, pady=(2, 2))
+        self.send_extra_text.insert("1.0", self.app.cfg.get("send_extra_prompt") or "")
+        ttk.Label(tab, text=tr("예시 (영어 문장을 복사해서 위 칸에 붙여 넣으세요):"), foreground="#666").grid(
+            row=13, column=0, columnspan=3, sticky="w", padx=6)
+        for i, (desc, english) in enumerate(((tr("존댓말로"), "Write in a polite, formal tone, like talking to a stranger."),
+                                              (tr("반말로 짧게"), "Write casually and keep it short."),
+                                              (tr("해적 말투로"), "Always write the message in the style of a pirate."))):
+            ttk.Label(tab, text=desc, foreground="#666").grid(row=14 + i, column=0, sticky="w", padx=6)
+            ex_e = ttk.Entry(tab)                              # read-only: the text can be selected and copied
+            ex_e.insert(0, english)
+            ex_e.configure(state="readonly")
+            ex_e.grid(row=14 + i, column=1, columnspan=2, sticky="we", padx=(0, 6), pady=1)
 
     def _reset_send_prompt(self):
         self.send_prompt_text.delete("1.0", "end")
         self.send_prompt_text.insert("1.0", translator.DEFAULT_SEND_PROMPT)
+        self._send_note_update()
+
+    def _send_note_update(self):
+        cur = self.send_prompt_text.get("1.0", "end-1c").strip()
+        self.send_prompt_note.configure(text="" if cur in ("", translator.DEFAULT_SEND_PROMPT.strip()) else self._newer_text())
 
     def capture_hotkey(self):
         dlg = tk.Toplevel(self.win)
@@ -941,6 +1048,17 @@ class OptionsWindow:
     def reset_prompt(self):
         self.prompt.delete("1.0", "end")
         self.prompt.insert("1.0", translator.DEFAULT_PROMPT)
+        self._prompt_note_update()
+
+    @staticmethod
+    def _newer_text():
+        return tr("지금 프롬프트는 프로그램에 들어 있는 최신 기본 프롬프트와 다릅니다. 기본 프롬프트는 계속 개선되고 있어서, "
+                  "직접 고치신 게 아니라면 '기본 프롬프트로 되돌리기'로 최신 버전을 받는 것을 권장합니다.")
+
+    def _prompt_note_update(self):
+        """Tell the user when the prompt in the box is not the latest official default (which keeps getting better)."""
+        cur = self.prompt.get("1.0", "end-1c").strip()
+        self.prompt_note.configure(text="" if cur in ("", translator.DEFAULT_PROMPT.strip()) else self._newer_text())
 
     # ------------------------------------------------------------------ form -> config
     def collect_translation(self):
@@ -991,9 +1109,11 @@ class OptionsWindow:
             "skip_regex_hide": bool(v["skip_regex_hide"].get()),
             "glossary_file": v["glossary_file"].get().strip() or glossary.DEFAULT_NAME,
             "glossary_google": bool(v["glossary_google"].get()),
+            "glossary_mode": glossary.mode({"glossary_mode": v["glossary_mode"].get()}),
             "glossary_style": {tr(label): key for key, label in glossary.GLOSSARY_STYLES.items()}.get(
                 v["glossary_style"].get(), "paren"),
             "prompt": self.prompt.get("1.0", "end-1c").strip() or translator.DEFAULT_PROMPT,
+            "extra_prompt": self.extra_prompt.get("1.0", "end-1c").strip(),
         })
 
     def _run_in_thread(self, fn, done):
@@ -1089,10 +1209,11 @@ class OptionsWindow:
         cfg.update(send_enabled=bool(v["send_enabled"].get()),
                    send_lang=v["send_lang"].get().strip() or "English", send_hotkey=hotkey,
                    send_autopaste=bool(v["send_autopaste"].get()), send_show_log=bool(v["send_show_log"].get()),
-                   send_prompt="" if sprompt == translator.DEFAULT_SEND_PROMPT.strip() else sprompt)
+                   send_prompt="" if sprompt == translator.DEFAULT_SEND_PROMPT.strip() else sprompt,
+                   send_extra_prompt=self.send_extra_text.get("1.0", "end-1c").strip())
         cfg.update(check_updates=bool(v["check_updates"].get()))
         cfg.update(shadow_on=bool(v["shadow_on"].get()), shadow_color=shadow_color, shadow_dx=sdx, shadow_dy=sdy)
-        cfg.update(swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, full_scan_sec=full_scan, max_lines=max_lines,
+        cfg.update(exit_with_game=bool(v["exit_with_game"].get()), swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, full_scan_sec=full_scan, max_lines=max_lines,
                    line_spacing=line_spacing, group_spacing=group_spacing, trans_font_size=trans_size, trans_color=trans_color,
                    show_time=bool(v["show_time"].get()), channel_detail=bool(v["channel_detail"].get()),
                    class_colors=bool(v["class_colors"].get()))

@@ -22,8 +22,10 @@ DEFAULTS = {
     "custom_path": "",                    # where the translation is in the answer, e.g. translations.0.text
     "google_api_key": "",                 # optional; empty = free unofficial endpoint
     "prompt": DEFAULT_PROMPT,
+    "extra_prompt": "",                   # the user's own additional instructions, added to the end of the prompt (style ...)
     "glossary_file": "Glossary.txt",      # relative to the app folder, or an absolute path
     "glossary_google": True,              # also apply the glossary to Google translation
+    "glossary_mode": "full",              # AI: full = the whole glossary in the prompt | list = the entries that occur in the line, before it | mixed = single meanings in parentheses, the rest listed
     "glossary_style": "paren",            # paren: LFM(구인) | replace: 구인
     "disable_reasoning": True,
     "reasoning_off_body": DEFAULT_REASONING_OFF,
@@ -46,12 +48,15 @@ DEFAULTS = {
     "send_show_log": False,               # show the translated text sent (the "↗" line) in the window; off: it comes back as a chat line
     "send_autopaste": False,              # press Ctrl+V in the game for you (off: you press it)
     "send_prompt": DEFAULT_SEND_PROMPT,
+    "send_extra_prompt": "",              # the user's own additional instructions for the send translation
     # window
     "bg_opacity": 1.0,                    # background (the dark area)
     "text_opacity": 1.0,                  # text, title bar, scrollbar
     "topmost": True,                      # above every other window
+    "exit_with_game": False,              # quit this program 10 s after the game has been closed
     "topmost_wow_only": False,            # only just above the game window, behind all other windows
     "wow_window_title": "World of Warcraft",
+    "interact_keys": ["Shift"],           # click-through: this window takes the mouse while ALL of these keys are held (Shift / Ctrl / Alt)
     "click_through": False,
     "font_size": 11,
     "shadow_on": False,                   # draw a copy of the text in shadow_color, shifted by (shadow_dx, shadow_dy)
@@ -89,6 +94,8 @@ def load():
     except (FileNotFoundError, json.JSONDecodeError):
         pass
     cfg.pop("opacity", None)
+    if cfg.pop("glossary_inline", False):                    # (replaced by glossary_mode) the checkbox of the first version
+        cfg["glossary_mode"] = "list"
     mp = cfg.pop("manual_pos", None)                         # (removed option) an old manual position becomes the first guess
     if mp and not cfg.get("last_pos"):
         try:
