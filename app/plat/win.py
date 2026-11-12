@@ -721,10 +721,27 @@ class WindowMixin:
     _gone_since = None                    # since when the game window has been missing
     _nogame_top = False                   # the windows were put on top because there is no game
 
-    EXIT_AFTER = 10.0                     # option "quit when the game is closed": seconds
+    EXIT_AFTER = 5.0                      # option "quit when the game is closed": seconds
+
+    def _set_ct_suspend(self, on):
+        """No game: nothing to see through to, so click-through and the hover-clear are lifted (only for as long as the
+        game is missing; the saved options are not touched). When the game is back they work as set."""
+        if on == self._suspend_ct:
+            return
+        self._suspend_ct = on
+        self._interactive = False
+        self._ghost_pass = False
+        try:
+            self._set_passthrough(bool(self.cfg.get("click_through")) and not on)
+        except Exception:
+            log.exception("클릭 통과 임시 해제/복원 실패")
+        if self.cfg.get("click_through"):
+            log.info("게임 창이 %s: 클릭 통과·마우스 올리면 투명을 %s", "없음" if on else "다시 보임", "임시 해제" if on else "설정대로 복원")
 
     def _nogame_raise(self):
-        """Without the game there is nothing to stack above: all our windows go to the top and stay visible."""
+        """Without the game there is nothing to stack above: all our windows go to the top and stay visible (and are
+        ordinary, clickable windows: the options, the log or the close button are all there is to do)."""
+        self._set_ct_suspend(True)
         u = _user32()
         u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
         chain = [_hwnd(self.root)] + list(self._below_hwnds())
@@ -743,6 +760,7 @@ class WindowMixin:
     def _leave_nogame_top(self):
         """The game is back: the settings decide again (the follow loop places the windows)."""
         self._nogame_top = False
+        self._set_ct_suspend(False)
         top = bool(self.cfg.get("topmost") and not self.cfg.get("topmost_wow_only"))
         try:
             for w in (self.root, getattr(self, "back", None)):

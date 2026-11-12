@@ -23,4 +23,4 @@ if [ ! -f .venv/.deps_ok ] || [ requirements-mac.txt -nt .venv/.deps_ok ]; then
     else echo "Install failed."; read -r -p "Press Enter to close" _; exit 1; fi
 fi
 
-exec .venv/bin/python app.py
+exec .venv/bin/python app/app.py

@@ -10,7 +10,7 @@ case "$SELF" in
 esac
 cd "$SELF" || exit 1
 if [ -x .venv/bin/python ] && .venv/bin/python -c "import numpy, Quartz, certifi, ApplicationServices" >> "$LOG" 2>&1; then
-    exec .venv/bin/python app.py >> "$LOG" 2>&1
+    exec .venv/bin/python app/app.py >> "$LOG" 2>&1
 fi
 echo "setup needed -> Terminal" >> "$LOG"
 open -a Terminal "$SELF/run.command"

@@ -1,4 +1,4 @@
-"""Optional extra fonts: put .ttf / .otf / .ttc files into the  fonts  folder next to the program.
+"""Optional extra fonts: put .ttf / .otf / .ttc files into the  fonts  folder in the main folder (next to the launchers).
 
 They are loaded for this program only (not installed in Windows) and can then be picked in the options.
 No folder / no files -> nothing happens and the default font is used.
@@ -9,8 +9,9 @@ import logging
 import os
 import struct
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-FONT_DIR = os.path.join(APP_DIR, "fonts")
+import paths
+
+FONT_DIR = os.path.join(paths.ROOT, "fonts")
 EXTS = (".ttf", ".otf", ".ttc")
 FR_PRIVATE = 0x10
 DEFAULT_FAMILY = "Apple SD Gothic Neo" if sys.platform == "darwin" else "Malgun Gothic"

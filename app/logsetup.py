@@ -1,11 +1,13 @@
-"""Logging: rotating file (chatmatrix.log next to the app) + in-memory ring buffer shown in the options 'log' tab."""
+"""Logging: rotating file (chatmatrix.log in the main folder) + in-memory ring buffer shown in the options 'log' tab."""
 import collections
 import logging
 import os
 import threading
 from logging.handlers import RotatingFileHandler
 
-PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chatmatrix.log")
+import paths
+
+PATH = os.path.join(paths.ROOT, "chatmatrix.log")
 
 
 class RingHandler(logging.Handler):

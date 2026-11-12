@@ -1,9 +1,11 @@
 import json
 import os
 
+import paths
+
 from translator import DEFAULT_PROMPT, DEFAULT_REASONING_OFF, DEFAULT_SEND_PROMPT, LEGACY_DEFAULT_PROMPTS
 
-PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+PATH = os.path.join(paths.ROOT, "config.json")
 
 DEFAULTS = {
     # translation
@@ -23,7 +25,7 @@ DEFAULTS = {
     "google_api_key": "",                 # optional; empty = free unofficial endpoint
     "prompt": DEFAULT_PROMPT,
     "extra_prompt": "",                   # the user's own additional instructions, added to the end of the prompt (style ...)
-    "glossary_file": "Glossary.txt",      # relative to the app folder, or an absolute path
+    "glossary_file": "Glossary.txt",      # relative to the main folder (next to the launchers), or an absolute path
     "glossary_google": True,              # also apply the glossary to Google translation
     "glossary_mode": "full",              # AI: full = the whole glossary in the prompt | list = the entries that occur in the line, before it | mixed = single meanings in parentheses, the rest listed
     "glossary_style": "paren",            # paren: LFM(구인) | replace: 구인
@@ -54,7 +56,7 @@ DEFAULTS = {
     "bg_opacity": 1.0,                    # background (the dark area)
     "text_opacity": 1.0,                  # text, title bar, scrollbar
     "topmost": True,                      # above every other window
-    "exit_with_game": False,              # quit this program 10 s after the game has been closed
+    "exit_with_game": False,              # quit this program 5 s after the game has been closed
     "topmost_wow_only": False,            # only just above the game window, behind all other windows
     "wow_window_title": "World of Warcraft",
     "interact_keys": ["Shift"],           # click-through: this window takes the mouse while ALL of these keys are held (Shift / Ctrl / Alt)

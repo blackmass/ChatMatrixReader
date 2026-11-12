@@ -37,6 +37,7 @@ import outgoing
 from plat import winutil
 import i18n
 import logsetup
+import migrate
 import translator
 import updatecheck
 import usage
@@ -76,6 +77,7 @@ TAG_COLORS = {
 OTHER_COLORS = {
     "!SY": "#ffff00", "!IG": "#ff0000", "!XP": "#6f6fff", "!HN": "#f0b300", "!RP": "#8080ff", "!SK": "#5555ff",
     "!LT": "#00aa00", "!CY": "#00aa00", "!MN": "#ffff00", "!CI": "#8080ff", "!AC": "#ffff00", "!GA": "#40ff40",
+    "!OP": "#8080ff", "!PI": "#8080ff", "!TS": "#ffffff",           # opening (lockpicking, herbs ...), pet info, trade skills
     "!BH": "#ff4040", "!BA": "#4090ff", "!BN": "#ffa040",
     "!MS": "#ffff9e", "!MY": "#ff4040", "!ME": "#ff8040", "!MW": "#ffb5f0", "!MP": "#aaaaff",
     "!BE": "#ffdd00", "!BW": "#ffdd00", "!UN": "#b8b8b8", "!AD": "#ffffff", "!CL": "#bf8080",
@@ -225,6 +227,7 @@ class App(WindowMixin):
         self._connected = False
         self._shift_grace = 0
         self._interactive = False      # click-through temporarily lifted by holding Shift
+        self._suspend_ct = False       # click-through / hover-clear lifted because there is no game window (not a saved option)
         self._game_hwnd = None         # cached game window (for "only above the game window")
         self._follow_failed = False
         self._game_next_search = 0.0
@@ -486,7 +489,7 @@ class App(WindowMixin):
 
     def _hover_tick(self):
         try:
-            ct = bool(self.cfg["click_through"])
+            ct = bool(self.cfg["click_through"]) and not self._suspend_ct
             inside = self._cursor_inside()
             past = self._check_past()
             # A mouse button held down since before the pointer reached this window (turning the camera in the game: the
@@ -516,11 +519,11 @@ class App(WindowMixin):
                     else:
                         self.text.tag_remove("sel", "1.0", "end")       # a half-made selection is not kept
                         self._leave_interactive()
-                want = self.dragging or interactive or past
+                want = self.dragging or interactive or past or self._suspend_ct      # no game: the frame stays visible
                 self._set_hover_clear(bool(self.cfg.get("hover_clear")) and inside and not interactive and not self.dragging
                                       and not self._send_open and not self._send_pending)
             else:
-                want = self.dragging or (inside and not ghost) or past
+                want = self.dragging or (inside and not ghost) or past or self._suspend_ct
                 self._set_hover_clear(False)
             self.set_chrome(bool(want))
             self._set_blur_paused(bool(self.dragging))              # also ends the pause when a drag ended by other paths
@@ -1733,7 +1736,7 @@ class App(WindowMixin):
 
     def set_click_through(self, on):
         self._interactive = False
-        self._set_passthrough(bool(on))
+        self._set_passthrough(bool(on) and not self._suspend_ct)
 
     def open_options(self):
         dump = getattr(self, "_state_dump", None)
@@ -1803,6 +1806,7 @@ def main():
     if not _single_instance():
         _msgbox(tr("ChatMatrix Reader가 이미 실행 중입니다."), 0x40)
         return
+    migrate.run()          # version 1.6.0: old program files in the main folder go to old_version_backup
     try:
         App().run()
     except Exception:

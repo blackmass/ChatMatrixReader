@@ -20,8 +20,9 @@ import re
 import logging
 import os
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-LOCALE_DIR = os.path.join(APP_DIR, "locale")
+import paths
+
+LOCALE_DIR = os.path.join(paths.ROOT, "locale")
 DEFAULT_LANG = "ko-KR"           # built in, needs no file
 FALLBACK_LANG = "en-US"          # used when the system language has no file
 AUTO = ""                        # config value meaning "use the system language"

@@ -6,7 +6,7 @@ py -3.11 -m venv .venv 2>nul || py -3 -m venv .venv || python -m venv .venv || g
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto fail
 echo ok> ".venv\.ready"
 :run
-start "" ".venv\Scripts\pythonw.exe" app.py
+start "" ".venv\Scripts\pythonw.exe" app\app.py
 exit /b 0
 :fail
 echo Setup failed. Install Python 3.11 ^(python.org^) and check:  py -3.11 --version

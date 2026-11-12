@@ -252,7 +252,7 @@ API Key 칸에 '아이디:시크릿' 으로 쓰세요. 원문 언어를 자동 �
 와우 창 위에만 표시 (다른 창에는 가려짐) = Only above the WoW window (other windows can cover it)
 번역을 위에, 원문을 아래에 표시 = Show the translation above and the original below
 채널 코드 자세히 표시 (문제 확인용) = Show channel codes in detail (for troubleshooting)
-와우가 종료되면 번역창도 종료 (10초 뒤) = Quit this window 10 seconds after WoW is closed
+와우가 종료되면 번역창도 종료 (5초 뒤) = Quit this window 5 seconds after WoW is closed
 와우가 실행 중이 아닐 때는 번역창이 항상 맨 위에 보입니다. = While WoW is not running, this window is always on top.
 켜면 평소에는 이 창이 마우스 입력을 받지 않습니다.\n{key}를 누른 채로 창 위에 마우스를 올리면 클릭, 드래그 선택(선택하면 자동 복사), 스크롤, 창 이동이 됩니다.\n옵션은 Ctrl+Alt+O 로도 열 수 있습니다.\n\n계속할까요? = When on, this window normally ignores the mouse.\nHold {key} while hovering over it to click, drag-select (selection is copied automatically), scroll and move the window.\nThe options can also be opened with Ctrl+Alt+O.\n\nContinue?
 제목줄/스크롤은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | Ctrl+Alt+O: 옵션 | 클릭 통과 중에는 {key}를 누른 채로 조작 = The title bar and scrollbar appear when you hover the window | Right-click or ⚙: options | Ctrl+Alt+O: options | While click-through is on, hold {key} to interact

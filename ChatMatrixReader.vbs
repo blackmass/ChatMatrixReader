@@ -6,7 +6,7 @@ dir = fso.GetParentFolderName(WScript.ScriptFullName)
 sh.CurrentDirectory = dir
 py = dir & "\.venv\Scripts\pythonw.exe"
 If fso.FileExists(dir & "\.venv\.ready") And fso.FileExists(py) Then
-    sh.Run """" & py & """ """ & dir & "\app.py""", 0, False
+    sh.Run """" & py & """ """ & dir & "\app\app.py""", 0, False
 Else
     sh.Run """" & dir & "\run.bat""", 1, False
 End If

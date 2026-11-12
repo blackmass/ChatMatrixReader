@@ -8,7 +8,7 @@ py -3.15 -m venv .venv315 || goto fail
 ".venv315\Scripts\python.exe" -m pip install -r requirements.txt || goto fail
 echo ok> ".venv315\.ready"
 :run
-start "" ".venv315\Scripts\pythonw.exe" app.py
+start "" ".venv315\Scripts\pythonw.exe" app\app.py
 exit /b 0
 :fail
 echo Setup failed. Is Python 3.15 installed?  Check:  py -3.15 --version

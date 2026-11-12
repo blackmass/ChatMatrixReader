@@ -1,4 +1,4 @@
-"""Reads credit.json (next to the program) for the "기타" tab: every key/value pair is listed as is,
+"""Reads credit.json (in the app folder) for the "기타" tab: every key/value pair is listed as is,
 so links and contact info can be changed by editing the json only.
 
     {

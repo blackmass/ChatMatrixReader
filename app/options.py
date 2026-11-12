@@ -666,7 +666,7 @@ class OptionsWindow:
                 v["ik_" + k] = tk.BooleanVar(value=k in app.interact_keys())
                 ttk.Checkbutton(ik, text=k, variable=v["ik_" + k], command=on_keys).pack(side="left", padx=(8, 0))
         if sys.platform == "win32":                       # (not built for macOS)
-            ttk.Checkbutton(left, text=tr("와우가 종료되면 번역창도 종료 (10초 뒤)"), variable=v["exit_with_game"]).grid(
+            ttk.Checkbutton(left, text=tr("와우가 종료되면 번역창도 종료 (5초 뒤)"), variable=v["exit_with_game"]).grid(
                 row=4, column=0, sticky="w", **PAD)
             ttk.Label(left, text=tr("와우가 실행 중이 아닐 때는 번역창이 항상 맨 위에 보입니다."), foreground="#666").grid(
                 row=5, column=0, sticky="w", padx=26)

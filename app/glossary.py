@@ -1,4 +1,4 @@
-"""External glossary file (default: Glossary.txt next to the app).
+"""External glossary file (default: Glossary.txt in the main folder).
 
 File format, one entry per line:      term = meaning        ('#' or '//' starts a comment line)
 
@@ -14,7 +14,9 @@ import re
 import shutil
 import threading
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+import paths
+
+DATA_DIR = paths.ROOT                  # Glossary.txt and the sample live in the main folder (next to the launchers)
 DEFAULT_NAME = "Glossary.txt"
 SAMPLE_NAME = "Glossary.sample.txt"
 GLOSSARY_STYLES = {
@@ -33,7 +35,7 @@ _warned = set()
 
 def resolve(name):
     name = (name or DEFAULT_NAME).strip() or DEFAULT_NAME
-    return name if os.path.isabs(name) else os.path.join(APP_DIR, name)
+    return name if os.path.isabs(name) else os.path.join(DATA_DIR, name)
 
 
 def _safe_name(name):
@@ -274,7 +276,7 @@ def expand_placeholders(prompt, mode="full"):
         if not _safe_name(name):
             log.warning("프롬프트의 {{%s}}: 앱 폴더 안의 파일 이름만 쓸 수 있습니다", name)
             return ""
-        path = os.path.join(APP_DIR, name)
+        path = os.path.join(DATA_DIR, name)
         if _signature(path) is None:
             if path not in _warned:
                 _warned.add(path)
@@ -294,13 +296,13 @@ def cache_key(cfg):
     google = (_signature(resolve(cfg.get("glossary_file"))), cfg.get("glossary_style")) if cfg.get("glossary_google", True) else None
     m = mode(cfg)
     own = _signature(resolve(cfg.get("glossary_file"))) if m != "full" else None     # the file's content is part of what is sent
-    return (google, m, own, tuple(_signature(os.path.join(APP_DIR, n)) for n in names))
+    return (google, m, own, tuple(_signature(os.path.join(DATA_DIR, n)) for n in names))
 
 
 def ensure_default(name=None):
     """Create Glossary.txt from the sample on first start (an existing file is never touched)."""
     path = resolve(name)
-    sample = os.path.join(APP_DIR, SAMPLE_NAME)
+    sample = os.path.join(DATA_DIR, SAMPLE_NAME)
     if not os.path.exists(path) and os.path.exists(sample):
         try:
             shutil.copyfile(sample, path)

@@ -1,14 +1,16 @@
 """Rough count of the characters sent to the official Google Cloud Translation API, per calendar month.
 An estimate only (other programs / other PCs using the same key are not counted; Google's month boundary may differ
-by a few hours). Stored in usage.json next to the program."""
+by a few hours). Stored in usage.json in the main folder."""
 import json
 import logging
 import os
 import threading
 import time
 
+import paths
+
 log = logging.getLogger("cmr.usage")
-PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage.json")
+PATH = os.path.join(paths.ROOT, "usage.json")
 FREE_LIMIT = 500_000          # characters per month that Google lists as free (check the pricing page)
 STEP = 100_000                # tell the user every time the total passes a multiple of this
 
