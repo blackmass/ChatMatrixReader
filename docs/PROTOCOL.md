@@ -80,9 +80,31 @@ Quest links: the name is `[[level] Quest Name]`; an id appended by another addon
 are sent as `[◈ Map Pin Location]` (the game's diamond icon becomes the character ◈; the label comes from the client's own
 `MAP_PIN_HYPERLINK` text); the coordinates are not sent. The addon puts the link names (item, spell, quest, achievement,
 profession, mount, battle pet, currency) in the language of the player's own client when the client knows the id (option
-"Show linked items ..."). A reader that does not know the marker can delete the bytes 0x02 and 0x03 and the code byte after
-0x02; a code without a colour is shown plain. A message cut by the byte limit may lack the closing 0x03. This does not
+"Show linked items ..."). With the option "Keep the original link names too" (on by default) a renamed link carries both names:
+`\x02 <code> [Name in the player's language] \x04 [original name] \x03`; the reader translates and copies the first and shows the second in
+the original line (a link without 0x04 has one name). A reader that does not know the marker can delete the bytes 0x02 and 0x03 and the code byte after
+0x02 (and, if it does not know 0x04, the 0x04 byte and the original name after it); a code without a colour is shown plain. A message cut by the byte limit may lack the closing 0x03. This does not
 change the pixel format or the protocol version.
+
+## Long messages (continuation flags)
+
+A line holds at most 255 bytes of text. A longer message (any channel) is sent as up to 8 consecutive lines (pieces) with the same
+channel and sender and consecutive ids (65535 is followed by 1). Control characters tell the pieces apart (the addon removes
+every control character from the message text itself, so they cannot occur otherwise):
+
+- `\x05` at the **end** of a piece: the message goes on in the next line.
+- `\x05` at the **start** of a piece: this line continues the one before it.
+- `\x06 <code>` at the **start** of a piece: the same, and the piece starts inside the link marker with this code. The piece before
+  closed that marker with `\x03` right before its `\x05`; a reader that joins the pieces removes that `\x03` and the `\x06 <code>`.
+  (Only a link marker longer than 80 bytes is cut; shorter markers, `|1a;b;` josa escapes and `|K..|k` protected texts are never cut,
+  and a cut never falls inside a UTF-8 character.)
+
+If the message does not fit in 8 pieces, the last piece ends with `…` (U+2026) and has no end flag. A reader joins the pieces before
+it translates or shows anything. Recommended handling: close a message with `…` at once when the next line is not its continuation
+(other channel or speaker, or an id that is not the next one), and also after about one second without a next piece; a continuation
+piece without its start (the first pieces were lost) is shown with a leading `…`. A reader that does not know the flags shows the
+pieces as separate lines (and may delete the bytes 0x05, 0x06 and the code byte after 0x06). This does not change the pixel format or
+the protocol version; update addon and reader together.
 
 ## Shape: 32 or 16 cells per row (width 128 or 64 px)
 

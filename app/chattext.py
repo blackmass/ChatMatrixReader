@@ -5,6 +5,8 @@ The addon turns a link into  \\x02 <code> [Item Name] \\x03 . The code is one by
   n 10-19  other game links and money: 10 yellow (quest, achievement, map pin), 11 light blue (spell, talent, mount), 12 gold (profession, gold coins), 13 transmog purple, 14 silver coins, 15 copper coins
   n 20     a whole message that is gibberish to the player's character (a language it does not know): not translated, shown dim
   n 21-29  reserved
+With the addon option "keep the original link names" the name is  <name in the game's language> \\x04 <original name>  :
+the translation (and the translator) use the first, the original line shows the second.
 The window colours the name; the translator gets the same text without the markers. A code without a colour here is
 shown without colour.
 """
@@ -138,13 +140,19 @@ def resolve_josa(text):
     return _JOSA.sub(pick, text)
 
 
-def _name(q, name):
+ORIG_SEP = "\x04"                  # inside a marker: the name in the game's language, then this, then the original name
+
+
+def _name(q, content, original=False):
+    """The name a marker shows: the one in the game's language, or (original=True, and the addon sent one) the original."""
+    local, sep, orig = content.partition(ORIG_SEP)
+    name = orig if (original and sep and orig) else local
     return _QUEST_ID.sub(r"\1", name) if q == YELLOW else name        # a quest id some addon appended is not shown
 
 
-def plain(text):
-    """Text without markers (what gets translated / copied)."""
-    return _STRAY.sub("", _MARK.sub(lambda m: _name(_code(m), m.group(2)), text))
+def plain(text, original=False):
+    """Text without markers (what gets translated / copied). original=True: the original link names where the addon sent them."""
+    return _STRAY.sub("", _MARK.sub(lambda m: _name(_code(m), m.group(2), original), text))
 
 
 def mask_links(text):
@@ -274,13 +282,23 @@ def check_text(text):
     return rest if any(c.isalpha() for c in rest) else plain(text)
 
 
-def segments(text):
-    """[(piece, quality or None)] - quality is set for item-link pieces."""
+def has_original(text):
+    """Does a link in the text carry an original name that differs from the name shown in the game's language?"""
+    for m in _MARK.finditer(text):
+        local, sep, orig = m.group(2).partition(ORIG_SEP)
+        if sep and orig and orig != local:
+            return True
+    return False
+
+
+def segments(text, original=True):
+    """[(piece, quality or None)] - quality is set for item-link pieces. This is the ORIGINAL line, so a link shows its
+    original name when the addon sent it (original=False: the name in the game's language)."""
     out, pos = [], 0
     for m in _MARK.finditer(text):
         if m.start() > pos:
             out.append((_STRAY.sub("", text[pos:m.start()]), None))
-        out.append((_name(_code(m), m.group(2)), _code(m)))
+        out.append((_name(_code(m), m.group(2), original), _code(m)))
         pos = m.end()
     if pos < len(text):
         out.append((_STRAY.sub("", text[pos:]), None))

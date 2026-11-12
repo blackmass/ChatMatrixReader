@@ -33,6 +33,7 @@ import chattext
 import fonts
 import glossary
 import hotkeys
+import joiner
 import outgoing
 from plat import winutil
 import i18n
@@ -211,6 +212,7 @@ class App(WindowMixin):
         translator.usage_notify = self._usage_notice
         self.opt = None
         self.tokens = itertools.count(1)
+        self.joiner = joiner.Joiner()    # pieces of a long message are put together before they are shown
         self.marks = {}            # token -> text mark name (where the translation goes)
         self.swapinfo = {}         # token -> what the "translation above the original" mode needs to fill / undo the top line
         self.link_names = {}       # token -> link names hidden behind [L1] [L2] while the line is translated
@@ -1241,7 +1243,10 @@ class App(WindowMixin):
             parts = [(f"{ts}{self._code_prefix(line.channel)}[", None), (sender, ctag), ("]: ", None)]
         else:
             parts = [(f"{ts}{self._code_prefix(line.channel)}", None)]
-        pieces = [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(body)]
+        # The original names of links (addon option) belong to chat lines that get a translation line below them, where the names
+        # in the game's language show up. A loot / system line has no such line: it shows the names in the game's language.
+        pieces = [(p, f"q{q}" if q in chattext.QUALITY_COLORS else None)
+                  for p, q in chattext.segments(body, not line.channel.startswith("!"))]
         if protected:
             pieces = [(body[:1], "protmark"), (body[1:], None)]
         if any(e == "q10" for _, e in pieces) and not line.channel.startswith("!"):
@@ -1260,11 +1265,20 @@ class App(WindowMixin):
         if self.cfg.get("swap_trans") and translatable:
             self._show_swapped(parts, pieces, tag, body, route)
             return
+        both = (not translatable and not protected and not line.channel.startswith("!") and chattext.has_original(body))
+        if both and self.cfg.get("swap_trans"):                  # "translation above": the names in the game's language on top, the original below
+            local = self._guild([(p, f"q{q}" if q in chattext.QUALITY_COLORS else None) for p, q in chattext.segments(body, False)])
+            self._insert(parts + local + [("\n", None)], tag)
+            self._insert(self._guild([(chattext.plain(body, True) + "\n", None)]), "trans", group=False, indent=True)
+            return
         parts += pieces
         parts.append(("\n", None))
         self._insert(parts, tag)
 
         if not translatable:
+            if both:
+                # nothing to translate (e.g. just an item link): the line below still gives the names in the game's language
+                self._insert(self._guild([(chattext.plain(body), None)]) + [("\n", None)], "trans", group=False, indent=True)
             return                                                # loot, money, experience, system ... or nothing to translate
         text, names = chattext.mask_links(body)                   # links become [L1] [L2] for the translator
         token = next(self.tokens)
@@ -1291,7 +1305,7 @@ class App(WindowMixin):
         self._mark_here(f"trb{token}")                            # ... then the translation goes here, instead of the "…"
         self._insert([("…", None), ("\n", None)], tag)
         self._mark_here(f"trl{token}")                            # start of the lower line (the original)
-        self._insert(self._guild([(chattext.plain(body) + "\n", None)]), "trans", group=False, indent=True)
+        self._insert(self._guild([(chattext.plain(body, True) + "\n", None)]), "trans", group=False, indent=True)
         mark = f"tr{token}"
         self._mark_here(mark)                                     # end of the group: errors are inserted here
         self.marks[token] = mark
@@ -1492,11 +1506,9 @@ class App(WindowMixin):
                             self.cfg["last_pos"] = list(payload)
                             config.save(self.cfg)
                     elif kind == "lines":
-                        for line in payload:
-                            try:
-                                self.on_new_line(line)
-                            except Exception:
-                                self._poll_failed("줄 표시", repr(getattr(line, "text", ""))[:80])
+                        for piece in payload:
+                            for line in self.joiner.feed(piece, time.monotonic()):
+                                self._show_line(line)
                     elif kind == "trans":
                         self.on_translation(*payload)
                     elif kind == "call":
@@ -1507,8 +1519,16 @@ class App(WindowMixin):
                         self.on_close()
                 except Exception:
                     self._poll_failed(str(kind), "")
+            for line in self.joiner.flush_due(time.monotonic()):     # a long message whose last piece never came
+                self._show_line(line)
         finally:
             self.root.after(50, self.poll)
+
+    def _show_line(self, line):
+        try:
+            self.on_new_line(line)
+        except Exception:
+            self._poll_failed("줄 표시", repr(getattr(line, "text", ""))[:80])
 
     def _poll_failed(self, what, detail):
         self._poll_errors += 1
@@ -1788,7 +1808,11 @@ class App(WindowMixin):
         logging.shutdown()
         os._exit(0)           # translation threads or the hotkey thread may still be waiting; do not wait for them
 
-    def run(self):
+    def run(self, migrated=()):
+        if migrated:                       # version 1.6.0: old program files were moved out of the main folder (see migrate.py)
+            self.root.after(1200, lambda: self.add_system(
+                "ℹ " + tr("프로그램 파일이 app 폴더로 정리되었습니다. 이전 버전 파일 {n}개를 {folder} 폴더로 옮겼습니다.", n=len(migrated), folder=migrate.BACKUP)
+                + "\n" + tr("번역창이 문제없이 실행된다면 {folder} 폴더는 삭제해도 됩니다.", folder=migrate.BACKUP)))
         self.root.mainloop()
 
 
@@ -1806,9 +1830,9 @@ def main():
     if not _single_instance():
         _msgbox(tr("ChatMatrix Reader가 이미 실행 중입니다."), 0x40)
         return
-    migrate.run()          # version 1.6.0: old program files in the main folder go to old_version_backup
+    moved = migrate.run()  # version 1.6.0: old program files in the main folder go to old_version_backup (and the window says so)
     try:
-        App().run()
+        App().run(moved)
     except Exception:
         log.exception("치명적 오류")
         last = traceback.format_exc().strip().splitlines()[-1]
