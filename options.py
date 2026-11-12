@@ -157,6 +157,7 @@ class OptionsWindow:
         nb = ttk.Notebook(win)
         nb.pack(side="top", fill="both", expand=True, padx=8, pady=(8, 4))
         self._tab_translate(nb)
+        self._tab_channels(nb)
         self._tab_window(nb)
         self._tab_capture(nb)
         self._tab_send(nb)
@@ -398,7 +399,8 @@ class OptionsWindow:
         self.extra_prompt.pack(fill="x", padx=6, pady=(0, 2))
         self.extra_prompt.insert("1.0", self.app.cfg.get("extra_prompt") or "")
         ttk.Label(g3, text=tr("예시 (영어 문장을 복사해서 위 칸에 붙여 넣으세요):"), foreground="#666").pack(anchor="w", padx=6)
-        for desc, english in ((tr("해적 말투로"), "Always write the translated dialogue in the style of a pirate."),
+        for desc, english in ((tr("자연스럽게"), "Use a natural, everyday way of speaking, like a native speaker in game chat."),
+                              (tr("해적 말투로"), "Always write the translated dialogue in the style of a pirate."),
                               (tr("반말로 짧게"), "Use a casual, informal tone and keep sentences short."),
                               (tr("존댓말로"), "Always use polite, formal speech.")):
             row = ttk.Frame(g3)
@@ -442,6 +444,69 @@ class OptionsWindow:
         ttk.Label(g4, textvariable=v["test_result"], wraplength=380, justify="left").grid(
             row=1, column=0, columnspan=2, sticky="w", **PAD)
         self.test_widgets += [e4, b3]
+
+    # ---- translation method per channel (the "channel translation" tab)
+    def _route_labels(self):
+        return {translator.ROUTE_DEFAULT: tr("기본 번역 (번역 탭 설정대로)"),
+                translator.ROUTE_GOOGLE_FREE: tr("구글 번역 (무료, 키 사용 안 함)"),
+                translator.ROUTE_OFF: tr("번역 안 함")}
+
+    def _tab_channels(self, nb):
+        tab = self._tab_frame(nb, tr("채널별 번역"))
+        labels = self._route_labels()
+        by_label = {v: k for k, v in labels.items()}
+        saved = self.app.cfg.get("channel_route") or {}
+        ttk.Label(tab, text=tr("채널마다 번역 방식을 따로 정할 수 있습니다. 기본은 모두 '번역 탭'에 설정한 방식입니다. "
+                               "중요하지 않은 공개 채팅은 '구글 번역 (무료)'로 돌리거나 번역하지 않으면 유료 번역의 사용량을 아낄 수 있습니다. "
+                               "'구글 번역 (무료)'는 번역 탭의 구글 설정(단어장 등)을 그대로 쓰되 API 키만 쓰지 않습니다."),
+                  foreground="#666", wraplength=620, justify="left").grid(row=0, column=0, columnspan=6, sticky="w", padx=8, pady=(8, 4))
+        rows = [("S", tr("말하기")), ("Y", tr("외치기")), ("E", tr("감정 표현")),
+                ("P", tr("파티")), ("PL", tr("파티장")), ("R", tr("공격대")), ("RL", tr("공격대장")), ("RW", tr("공격대 경보")),
+                ("I", tr("인스턴스")), ("IL", tr("인스턴스장")), ("G", tr("길드")), ("O", tr("길드 관리자")),
+                ("W", tr("받은 귓속말")), ("B", tr("받은 배틀넷 귓속말")), ("WT", tr("보낸 귓속말")), ("BT", tr("보낸 배틀넷 귓속말")),
+                ("CM", tr("커뮤니티"))]
+        rows += [(f"C{n}", tr("번호 채널 {n}", n=n)) for n in range(1, 11)]
+        rows.append(("!NPC", tr("NPC·보스 대사")))
+        self.route_vars = {}
+        half = (len(rows) + 1) // 2
+        for i, (code, label) in enumerate(rows):
+            r, c = 1 + i % half, (i // half) * 3
+            try:
+                color = self.app.type_color(code)
+            except Exception:
+                color = "#888888"
+            tk.Label(tab, width=2, bg=color, relief="solid", borderwidth=1).grid(row=r, column=c, padx=(8, 4), pady=2)   # the colour of its lines
+            ttk.Label(tab, text=label).grid(row=r, column=c + 1, sticky="w", padx=(0, 4), pady=1)
+            var = tk.StringVar(value=labels.get(saved.get(code), labels[translator.ROUTE_DEFAULT]))
+            self.route_vars[code] = var
+            ttk.Combobox(tab, textvariable=var, values=list(labels.values()), state="readonly", width=26).grid(
+                row=r, column=c + 2, sticky="w", padx=(0, 10), pady=1)
+        last = half + 1
+        bar = ttk.Frame(tab)
+        bar.grid(row=last, column=0, columnspan=6, sticky="w", padx=8, pady=(8, 2))
+
+        def preset_public():
+            for code in ("S", "Y", "C1", "C2", "C3", "C4"):
+                self.route_vars[code].set(labels[translator.ROUTE_GOOGLE_FREE])
+
+        def reset_all():
+            for var in self.route_vars.values():
+                var.set(labels[translator.ROUTE_DEFAULT])
+        ttk.Button(bar, text=tr("공개 채널(말하기·외치기·1~4번)을 무료 구글로"), command=preset_public).pack(side="left")
+        ttk.Button(bar, text=tr("모두 기본으로"), command=reset_all).pack(side="left", padx=6)
+        ttk.Label(tab, text=tr("번호 채널은 게임 채팅창에 보이는 번호 그대로입니다. 보통 1은 일반(공개), 2는 거래, 3은 지역 방어, "
+                               "4는 파티 찾기이지만 서버와 지역에 따라 다를 수 있습니다. 저장하면 이후에 들어오는 줄부터 적용됩니다. "
+                               "왼쪽의 색 칸은 그 채널 줄의 색입니다 (프로그램을 켠 뒤 게임에서 받은 색, 아직 줄이 없으면 게임 기본색)."),
+                  foreground="#666", wraplength=620, justify="left").grid(row=last + 1, column=0, columnspan=6, sticky="w", padx=8, pady=(2, 8))
+        self._route_by_label = by_label
+
+    def _collect_routes(self):
+        out = {}
+        for code, var in self.route_vars.items():
+            key = self._route_by_label.get(var.get(), translator.ROUTE_DEFAULT)
+            if key != translator.ROUTE_DEFAULT:
+                out[code] = key
+        return out
 
     def _tab_window(self, nb):
         v, cfg, app = self.v, self.app.cfg, self.app
@@ -701,7 +766,8 @@ class OptionsWindow:
         self.send_extra_text.insert("1.0", self.app.cfg.get("send_extra_prompt") or "")
         ttk.Label(tab, text=tr("예시 (영어 문장을 복사해서 위 칸에 붙여 넣으세요):"), foreground="#666").grid(
             row=13, column=0, columnspan=3, sticky="w", padx=6)
-        for i, (desc, english) in enumerate(((tr("존댓말로"), "Write in a polite, formal tone, like talking to a stranger."),
+        for i, (desc, english) in enumerate(((tr("자연스럽게"), "Use a natural, American-like way of speaking."),
+                                              (tr("존댓말로"), "Write in a polite, formal tone, like talking to a stranger."),
                                               (tr("반말로 짧게"), "Write casually and keep it short."),
                                               (tr("해적 말투로"), "Always write the message in the style of a pirate."))):
             ttk.Label(tab, text=desc, foreground="#666").grid(row=14 + i, column=0, sticky="w", padx=6)
@@ -1211,7 +1277,7 @@ class OptionsWindow:
                    send_autopaste=bool(v["send_autopaste"].get()), send_show_log=bool(v["send_show_log"].get()),
                    send_prompt="" if sprompt == translator.DEFAULT_SEND_PROMPT.strip() else sprompt,
                    send_extra_prompt=self.send_extra_text.get("1.0", "end-1c").strip())
-        cfg.update(check_updates=bool(v["check_updates"].get()))
+        cfg.update(check_updates=bool(v["check_updates"].get()), channel_route=self._collect_routes())
         cfg.update(shadow_on=bool(v["shadow_on"].get()), shadow_color=shadow_color, shadow_dx=sdx, shadow_dy=sdy)
         cfg.update(exit_with_game=bool(v["exit_with_game"].get()), swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, full_scan_sec=full_scan, max_lines=max_lines,
                    line_spacing=line_spacing, group_spacing=group_spacing, trans_font_size=trans_size, trans_color=trans_color,

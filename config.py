@@ -33,6 +33,7 @@ DEFAULTS = {
     "timeout": 30,
     "max_tokens": 300,
     "skip_same_lang": True,
+    "channel_route": {},                  # channel code -> "google_free" | "off" (missing = the translation tab's method)
     "hover_clear": False,             # click-through only: the window turns fully transparent while the mouse is over it
     "blur_experiment": False,         # Windows: blur what is behind the background window
     "blur_state": 3,                  # 3 = light blur, 4 = acrylic (stronger; tinted by the "background" opacity)
@@ -94,6 +95,8 @@ def load():
     except (FileNotFoundError, json.JSONDecodeError):
         pass
     cfg.pop("opacity", None)
+    if not isinstance(cfg.get("channel_route"), dict):
+        cfg["channel_route"] = {}
     if cfg.pop("glossary_inline", False):                    # (replaced by glossary_mode) the checkbox of the first version
         cfg["glossary_mode"] = "list"
     mp = cfg.pop("manual_pos", None)                         # (removed option) an old manual position becomes the first guess

@@ -944,6 +944,24 @@ def translate_outgoing(cfg: dict, text: str) -> str:
 # ----------------------------------------------------------------------
 # async service: thread pool + cache + queue limit
 # ----------------------------------------------------------------------
+ROUTE_DEFAULT, ROUTE_GOOGLE_FREE, ROUTE_OFF = "default", "google_free", "off"
+ROUTES = (ROUTE_DEFAULT, ROUTE_GOOGLE_FREE, ROUTE_OFF)
+
+
+def route_for(cfg: dict, channel: str):
+    """How the lines of one channel code are translated (option "channel translation"): None = the translation method of the
+    translation tab, ROUTE_GOOGLE_FREE = Google without the API key, ROUTE_OFF = not translated at all."""
+    r = (cfg.get("channel_route") or {}).get(channel)
+    return r if r in (ROUTE_GOOGLE_FREE, ROUTE_OFF) else None
+
+
+def apply_route(cfg: dict, route) -> dict:
+    """The settings one request is translated with: the same as the translation tab's, except that Google (free) ignores the key."""
+    if route == ROUTE_GOOGLE_FREE:
+        return dict(cfg, translator="google", google_api_key="")
+    return cfg
+
+
 class TranslationService:
     """submit() never blocks. Results arrive on out_queue as ("trans", (token, result|None, error|None)).
     result None with no error means 'nothing to add' (translation identical to the original)."""
@@ -977,8 +995,8 @@ class TranslationService:
                      h["new"], h["long"], h["short"], h["wait"], 100 * (total - h["new"]) // max(total, 1),
                      len(self.cache), len(self.long))
 
-    def submit(self, token, text) -> bool:
-        cfg = dict(self.get_cfg())                      # snapshot: later option changes don't affect this request
+    def submit(self, token, text, route=None) -> bool:
+        cfg = apply_route(dict(self.get_cfg()), route)  # snapshot: later option changes don't affect this request
         key = (cfg.get("translator"), cfg.get("target_lang"), cfg.get("api_model"),
                hash(cfg.get("prompt")), hash((cfg.get("extra_prompt") or "").strip()), glossary.cache_key(cfg), custom_signature(cfg), text)
         with self.lock:

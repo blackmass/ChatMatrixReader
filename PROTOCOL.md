@@ -10,7 +10,7 @@ The read position of a cell is the center of its 4x4 block (e.g. offset +2,+2).
 | 1 | `seq`, 24-bit big endian. Changes on every redraw. |
 | 2 | R,G = payload length (16-bit big endian); B = number of lines |
 | 3 | 24-bit checksum of the payload bytes (below) |
-| 4..126 | payload bytes, zero padded (max 369 bytes; default budget 255) |
+| 4..126 | payload bytes, zero padded (max 369 bytes; default budget 369) |
 | 127 | `0x4D 0x58 0x45` ("M","X","E") end marker |
 
 Checksum:
@@ -84,6 +84,22 @@ profession, mount, battle pet, currency) in the language of the player's own cli
 0x02; a code without a colour is shown plain. A message cut by the byte limit may lack the closing 0x03. This does not
 change the pixel format or the protocol version.
 
+## Shape: 32 or 16 cells per row (width 128 or 64 px)
+
+The cells are numbered row-major from 0 (v1: 128 cells, v2: `rows * cols`); only the number of cells per row differs:
+
+| | wide (default) | narrow |
+|---|---|---|
+| cells per row | 32 | 16 |
+| width | 128 px | 64 px |
+| v1 | 128 x 16 px (4 rows) | 64 x 32 px (8 rows) |
+| v2, 16 / 8 / 4 / 2 levels (budget 320) | 32 / 40 / 60 / 112 px high | 64 / 80 / 116 / 224 px high |
+
+Nothing else changes: the preamble, mode, ramp, data and end cells keep their numbers, so the first 12 cells always lie in the
+first row. The frame does not say which shape it has; the reader tries both (32 first) and the checksum decides, then it
+remembers the shape. The v2 mode field's row count (6 bits) is the real number of rows of that shape (at most 64).
+The addon option is `/cm width 128|64`.
+
 ## Speaker class (optional 5th field, v1 and v2)
 
 A line may carry a fifth field after the text: `<channel> \x1F <id> \x1F <sender> \x1F <text> \x1F <class>`.
@@ -136,12 +152,12 @@ Colours inside the text (links) are drawn over the base colour. Old readers igno
 32 columns of 4x4 px cells (width 128 px, as v1), `rows` rows (height `4 * rows` px); `rows` depends on L (fixed per
 mode, so the matrix never changes size):
 
-| L | bits / cell | rows | size (budget 255 bytes) |
+| L | bits / cell | rows | size (budget 320 bytes) |
 |---|---|---|---|
-| 2 | 3 | 23 | 128 x 92 |
-| 4 | 6 | 12 | 128 x 48 |
-| 8 | 9 | 9 | 128 x 36 |
-| 16 | 12 | 7 | 128 x 28 |
+| 2 | 3 | 28 | 128 x 112 |
+| 4 | 6 | 15 | 128 x 60 |
+| 8 | 9 | 10 | 128 x 40 |
+| 16 | 12 | 8 | 128 x 32 |
 | (v1: 256) | 24 | 4 | 128 x 16 |
 
 `rows = ceil((12 + L + 4 + ceil(8 * (9 + budget) / (3 * log2 L))) / 32)`. Cells are numbered row-major from 0.

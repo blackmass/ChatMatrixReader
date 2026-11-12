@@ -17,6 +17,28 @@ YELLOW, LIGHT_BLUE, UNINTELLIGIBLE = 10, 11, 20
 _GUILD = re.compile(r"<+[^<>\n]{1,40}>+")
 
 
+GUILD_QUALITY = 2                           # the colour code of a guild name: the same green as before (QUALITY_COLORS[2], also the "guild" tag)
+
+
+def mark_guilds(text):
+    """A <Guild Name> written inside a chat message becomes an item-link marker of colour 2 (green, the colour a guild name always had). So it is shown
+    green, it is not translated (the translator sees a placeholder [L1] like for an item link), and it comes back in the
+    translation unchanged. Text inside existing link markers is left alone; "<3" and the like (no letter inside) is not a guild."""
+    def rep(m):
+        inner = m.group(0).strip("<>")
+        if not re.search(r"[^\W\d_]", inner):
+            return m.group(0)
+        return "\x02" + chr(48 + GUILD_QUALITY) + m.group(0) + "\x03"
+
+    out, pos = [], 0
+    for m in _MARK.finditer(text):
+        out.append(_GUILD.sub(rep, text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(_GUILD.sub(rep, text[pos:]))
+    return "".join(out)
+
+
 def split_guild(text):
     """[(piece, is_guild)]: a <Guild Name> (the game writes guild names in angle brackets) is a piece of its own."""
     out, pos = [], 0

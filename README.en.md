@@ -21,7 +21,7 @@ A real-time, automated translator for World of Warcraft.
 
 # Important Notes
 - The only limitation is that, due to stricter addon censorship implemented following the *World of Warcraft: Midnight* expansion, the collection of all addon messages during boss encounters is now restricted.
-- There is a "message safety net" in place, which allows for the collection of all messages (provided you enable the relevant options—including "others"—in the add-on settings, and depending on your personal chat filter configurations). However, messages related to boss encounters—as well as, exceptionally, messages from guild administrators—cannot be captured, as they are censored by Blizzard. The reason for this is unclear. In any case, neither of these limitations poses a significant issue when playing on North American servers.
+- There is a "message safety net" in place, which allows for the collection of all messages (provided you enable the relevant options—including "others"—in the add-on settings, and depending on your personal chat filter configurations). However, messages related to boss encounters—as well as, exceptionally, messages from guild administrators—cannot be captured, as they are censored by Blizzard. The reason for this is unclear. In any case, neither of these limitations poses a significant issue when playing on North American servers. And looking at the recent official API patch notes, there is room for future improvements.
 - The tool has been tested on *World of Warcraft: Retail* and *WoW Classic: Forever* (the versions I currently play). Compatibility with other versions (such as *WoW Classic*) is not yet confirmed, though it may simply require an update to the version compatibility field in the `.toc` file.
 - It has been tested on both Windows and macOS. As the macOS version is a recent development and has only been tested on my own MacBook, you may encounter some initial issues.
 - Post-processing features that alter image colors—such as DLSS or HDR—may interfere with the tool's functionality. However, because the tool includes a color-detection adjustment feature, you can usually resolve this by lowering the "level" setting from 256 to 16. (Detection remains functional even with the in-game brightness set to 100%.)
@@ -54,7 +54,7 @@ A real-time, automated translator for World of Warcraft.
 - Since `config.json` is generally not included in the release archive, you can simply overwrite the existing files whenever you update the add-on or the program.
 
 # Using LM Studio for Free Local AI-Powered Translation
-- The functionality is already in place, but I will organize or revise it later to make it easier to understand.
+- <a href="https://github.com/blackmass/ChatMatrixReader/blob/main/LM%20Studio.md">(link)</a> I’ve posted a brief user guide to get you started.
 
 # Installation on macOS
 - Download and extract the files as you would normally.

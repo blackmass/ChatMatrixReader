@@ -7,8 +7,9 @@ from dataclasses import dataclass
 import numpy as np
 
 CELL = 4
-COLS, ROWS = 32, 4
-NUM_CELLS = COLS * ROWS
+COLS, ROWS = 32, 4                             # the default shape: 32 cells per row, 4 rows (128 x 16 px)
+NUM_CELLS = COLS * ROWS                        # 128 cells whatever the width
+COL_CHOICES = (32, 16)                         # the addon can draw the same cells 32 or 16 per row (128 or 64 px wide)
 HEADER_CELLS = 4
 PAYLOAD_CELLS = NUM_CELLS - HEADER_CELLS - 1
 MAX_PAYLOAD = PAYLOAD_CELLS * 3
@@ -63,20 +64,26 @@ def parse_payload(payload: bytes) -> list:
     return lines
 
 
-def cells_to_bytes(region: np.ndarray) -> bytes:
-    """Sample the center of every 4x4 cell and return the 384 RGB bytes."""
-    cy = np.arange(ROWS) * CELL + CELL // 2
-    cx = np.arange(COLS) * CELL + CELL // 2
+def size_for(cols: int):
+    """(width, height) in pixels of a v1 matrix with `cols` cells per row."""
+    return cols * CELL, NUM_CELLS // cols * CELL
+
+
+def cells_to_bytes(region: np.ndarray, cols: int = COLS) -> bytes:
+    """Sample the center of every 4x4 cell (row by row) and return the 384 RGB bytes."""
+    cy = np.arange(NUM_CELLS // cols) * CELL + CELL // 2
+    cx = np.arange(cols) * CELL + CELL // 2
     grid = region[np.ix_(cy, cx)]               # (ROWS, COLS, 4) BGRA
     rgb = grid[:, :, [2, 1, 0]]                  # -> RGB
     return rgb.reshape(-1).astype(np.uint8).tobytes()
 
 
-def decode_region(region: np.ndarray):
-    """Decode a 16x128 BGRA region. Returns (Frame, None) or (None, reason)."""
-    if region is None or region.shape[0] < HEIGHT or region.shape[1] < WIDTH:
+def decode_region(region: np.ndarray, cols: int = COLS):
+    """Decode a BGRA region of 128 x 16 px (cols=32) or 64 x 32 px (cols=16). Returns (Frame, None) or (None, reason)."""
+    width, height = size_for(cols)
+    if region is None or region.shape[0] < height or region.shape[1] < width:
         return None, "region too small"
-    flat = cells_to_bytes(region[:HEIGHT, :WIDTH])
+    flat = cells_to_bytes(region[:height, :width], cols)
     if tuple(flat[0:3]) != MARKER:
         return None, "no marker"
     if tuple(flat[381:384]) != END_MARKER:
@@ -92,18 +99,25 @@ def decode_region(region: np.ndarray):
     return Frame(seq, parse_payload(payload)), None
 
 
-def find_matrix(arr: np.ndarray, max_candidates: int = 4000):
-    """Search a screenshot for the matrix. Returns (x, y) of its top-left pixel or None."""
+def find_matrix_ex(arr: np.ndarray, max_candidates: int = 4000):
+    """Search a screenshot for the matrix. Returns (x, y, cols) of its top-left pixel and shape, or None."""
     h, w = arr.shape[:2]
     mask = (arr[:, :, 2] == MARKER[0]) & (arr[:, :, 1] == MARKER[1]) & (arr[:, :, 0] == MARKER[2])
     ys, xs = np.nonzero(mask)
     for n, (y, x) in enumerate(zip(ys.tolist(), xs.tolist())):
         if n >= max_candidates:
             break
-        if y + HEIGHT > h or x + WIDTH > w:
-            continue
-        frame, _ = decode_region(arr[y:y + HEIGHT, x:x + WIDTH])
-        if frame is not None:
-            return x, y
+        for cols in COL_CHOICES:
+            width, height = size_for(cols)
+            if y + height > h or x + width > w:
+                continue
+            frame, _ = decode_region(arr[y:y + height, x:x + width], cols)
+            if frame is not None:
+                return x, y, cols
     return None
 
+
+def find_matrix(arr: np.ndarray, max_candidates: int = 4000):
+    """Search a screenshot for the matrix. Returns (x, y) of its top-left pixel or None."""
+    hit = find_matrix_ex(arr, max_candidates)
+    return hit[:2] if hit else None

@@ -100,34 +100,36 @@ class CaptureWorker(threading.Thread):
                 arr = self._grab_array(sct, area)
             except Exception:
                 continue                                        # (e.g. a window partly outside the screen)
-            pos = decoder.find_matrix(arr)                      # protocol v1 first: exact colours, cheap
+            pos = decoder.find_matrix_ex(arr)                   # protocol v1 first: exact colours, cheap
             if pos:
-                return ox + pos[0], oy + pos[1], "v1", 0, None
+                return ox + pos[0], oy + pos[1], "v1", 0, None, pos[2]
             hit = proto2.find_and_decode(arr)                   # then v2 (colour-change tolerant)
             if hit:
                 x, y, frame = hit
-                return ox + x, oy + y, "v2", frame.rows, None
+                return ox + x, oy + y, "v2", frame.rows, None, frame.cols
             hit = scaled.find(arr)                              # v2 with cells of another size / mixed colours (macOS)
             if hit:
                 x, y, pitch, frame = hit
                 gx, gy = ox + x, oy + y
                 left, top = int(math.floor(gx)) - 3, int(math.floor(gy)) - 3
-                geom = {"pitch": pitch, "ox": gx - left, "oy": gy - top, "rows": frame.rows,
-                        "w": int(math.ceil(32 * pitch + gx - left + 4)), "h": int(math.ceil(frame.rows * pitch + gy - top + 4))}
-                return left, top, "v2s", frame.rows, geom
+                geom = {"pitch": pitch, "ox": gx - left, "oy": gy - top, "rows": frame.rows, "cols": frame.cols,
+                        "w": int(math.ceil(frame.cols * pitch + gx - left + 4)), "h": int(math.ceil(frame.rows * pitch + gy - top + 4))}
+                return left, top, "v2s", frame.rows, geom, frame.cols
         return None
 
     def _probe_last(self, sct, pos):
-        """Is the matrix still (or again) where it was found last time? -> (mode, rows) or None. One small grab: cheap enough
+        """Is the matrix still (or again) where it was found last time? -> (mode, rows, cols) or None. One small grab: cheap enough
         to do every second while the matrix is missing (game loading, addon reloaded, this program just started)."""
         try:
-            arr = self._grab_array(sct, {"left": pos[0], "top": pos[1], "width": decoder.WIDTH, "height": decoder.HEIGHT})
-            if decoder.decode_region(arr)[0] is not None:
-                return "v1", 0
-            arr = self._grab_array(sct, {"left": pos[0], "top": pos[1], "width": proto2.WIDTH, "height": 24 * proto2.CELL})
+            arr = self._grab_array(sct, {"left": pos[0], "top": pos[1], "width": decoder.WIDTH, "height": decoder.size_for(16)[1]})   # the tallest v1 shape
+            for cols in decoder.COL_CHOICES:
+                if decoder.decode_region(arr, cols)[0] is not None:
+                    return "v1", 0, cols
+            arr = self._grab_array(sct, {"left": pos[0], "top": pos[1], "width": proto2.WIDTH,
+                                         "height": proto2.rows_for(2, cols=min(proto2.COL_CHOICES)) * proto2.CELL})   # the tallest matrix (2 levels, narrow)
             frame, _ = proto2.decode(arr, 0, 0)
             if frame is not None:
-                return "v2", frame.rows
+                return "v2", frame.rows, frame.cols
         except Exception:
             pass
         return None
@@ -145,7 +147,7 @@ class CaptureWorker(threading.Thread):
 
     def _loop(self, sct):
         pos = None
-        mode, rows = "v1", 0               # protocol of the matrix at `pos` (v2 matrices are `rows` cell rows tall)
+        mode, rows, cols = "v1", 0, 32     # protocol of the matrix at `pos` (v2 matrices are `rows` cell rows tall), cells per row
         geom = None                        # mode "v2s": cell size and sub-pixel position of a scaled matrix
         fails = 0
         last_ok = time.time()             # when a frame was last read
@@ -187,15 +189,15 @@ class CaptureWorker(threading.Thread):
                     if remembered:                                  # every second: is it back where it was?
                         pm = self._probe_last(sct, remembered)
                         if pm:
-                            hit, how = (remembered[0], remembered[1], pm[0], pm[1], None), " (마지막 위치)"
+                            hit, how = (remembered[0], remembered[1], pm[0], pm[1], None, pm[2]), " (마지막 위치)"
                     if not hit and full:                            # (between the whole-window searches: only the last position)
                         hit = self._search(sct)
                     if hit:
-                        pos, mode, rows, geom = (hit[0], hit[1]), hit[2], hit[3], hit[4]
+                        pos, mode, rows, geom, cols = (hit[0], hit[1]), hit[2], hit[3], hit[4], hit[5]
                         fails = 0
                         last_ok = time.time()
                         log.info("매트릭스 발견 @ %d,%d | 프로토콜 %s%s%s", pos[0], pos[1], mode,
-                                 ((" (%d줄)" % rows) if mode != "v1" else "")
+                                 ((" (%d줄)" % rows) if mode != "v1" else "") + ((" 폭 %dpx" % (cols * 4)) if cols != 32 else "")
                                  + ((" 셀 %.2fpx" % geom["pitch"]) if geom else ""), how)
                         self._status(tr("연결됨 @ {x},{y}", x=pos[0], y=pos[1]))
                         if mode != "v2s" and remembered != pos:      # the next start looks here first
@@ -208,19 +210,19 @@ class CaptureWorker(threading.Thread):
             if mode == "v2s":
                 area = {"left": pos[0], "top": pos[1], "width": geom["w"], "height": geom["h"]}
             else:
-                area = {"left": pos[0], "top": pos[1], "width": decoder.WIDTH,
-                        "height": decoder.HEIGHT if mode == "v1" else rows * proto2.CELL}
+                area = {"left": pos[0], "top": pos[1], "width": cols * 4,
+                        "height": decoder.size_for(cols)[1] if mode == "v1" else rows * proto2.CELL}
             try:
                 tg = time.perf_counter()
                 arr = self._grab_array(sct, area)
                 perf_n += 1
                 perf_t += time.perf_counter() - tg
                 if mode == "v1":
-                    frame, reason = decoder.decode_region(arr)
+                    frame, reason = decoder.decode_region(arr, cols)
                 elif mode == "v2s":
-                    frame, reason = scaled.decode(arr, geom["ox"], geom["oy"], geom["pitch"], geom["rows"])
+                    frame, reason = scaled.decode(arr, geom["ox"], geom["oy"], geom["pitch"], geom["rows"], geom["cols"])
                 else:
-                    frame, reason = proto2.decode(arr, 0, 0)
+                    frame, reason = proto2.decode(arr, 0, 0, cols)
                 if frame is None and reason == "ramp merged" and time.time() - last_warn >= 30:
                     last_warn = time.time()
                     log.warning("v2 매트릭스: 단계가 화면에서 서로 구분되지 않습니다 - 애드온에서 '색 단계'를 더 낮추세요")

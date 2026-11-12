@@ -14,8 +14,10 @@ import numpy as np
 import decoder as v1
 
 CELL = 4
-COLS = 32
+COLS = 32                                 # default: 32 cells per row ...
+COL_CHOICES = (32, 16)                    # ... or 16 (the addon's "narrow" shape: 64 px wide, twice as many rows)
 WIDTH = COLS * CELL                       # 128 px, the same as v1
+MIN_WIDTH = min(COL_CHOICES) * CELL       # the narrowest shape
 PREAMBLE = [(1, 1, 1), (0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (0, 0, 0), (1, 1, 1)]   # W K R G B Y K W
 END = [(0, 0, 0), (1, 1, 1), (0, 0, 0), (1, 1, 1)]                                                     # K W K W
 N_PRE, N_MODE, RAMP_START, N_END = 8, 4, 12, 4
@@ -23,6 +25,7 @@ LEVEL_MAX = 180                           # highest data level (headroom against
 LEVEL_CODES = {2: 0, 4: 1, 8: 2, 16: 3}
 CODE_LEVELS = {v: k for k, v in LEVEL_CODES.items()}
 HEADER_BYTES = 9                          # seq(3) length(2) lines(1) checksum(3)
+DEFAULT_BUDGET = 320                      # payload bytes the matrix size is made for (V2_BUDGET in the addon): one chat line of 255 bytes + its fields
 VERSION = 2
 MIN_CONTRAST = 40                         # white minus black (per channel) needed to trust the preamble
 
@@ -35,15 +38,15 @@ def level_values(levels):
     return [int(round(i * LEVEL_MAX / (levels - 1))) for i in range(levels)]
 
 
-def rows_for(levels, budget=255):
+def rows_for(levels, budget=DEFAULT_BUDGET, cols=COLS):
     """Number of cell rows for a payload budget (fixed per mode, so the matrix never changes size)."""
     need_bits = 8 * (HEADER_BYTES + budget)
     data_cells = -(-need_bits // (3 * bits_per_symbol(levels)))
-    return -(-(RAMP_START + levels + N_END + data_cells) // COLS)
+    return -(-(RAMP_START + levels + N_END + data_cells) // cols)
 
 
-def size_px(levels, budget=255):
-    return WIDTH, rows_for(levels, budget) * CELL
+def size_px(levels, budget=DEFAULT_BUDGET, cols=COLS):
+    return cols * CELL, rows_for(levels, budget, cols) * CELL
 
 
 @dataclass
@@ -53,6 +56,7 @@ class Frame2:
     levels: int
     rows: int
     gain: float                           # how bright the screen shows the top level (1.0 = as sent); for the log
+    cols: int = COLS                      # cells per row of the matrix this frame came from (32 or 16)
 
 
 # ----------------------------------------------------------------------
@@ -68,7 +72,7 @@ def _mode_bits(levels, rows):
     return bits
 
 
-def encode(lines, seq, levels=8, budget=255):
+def encode(lines, seq, levels=8, budget=DEFAULT_BUDGET, cols=COLS):
     """-> list of (r, g, b) cell colours, row-major. `lines` are payload line strings (newest last)."""
     picked, total = [], 0
     for line in reversed(lines):
@@ -78,8 +82,8 @@ def encode(lines, seq, levels=8, budget=255):
         picked.insert(0, line)
         total += n
     payload = "\n".join(picked).encode("utf-8")
-    rows = rows_for(levels, budget)
-    n_cells = rows * COLS
+    rows = rows_for(levels, budget, cols)
+    n_cells = rows * cols
     b = bits_per_symbol(levels)
     data_cells = n_cells - RAMP_START - levels - N_END
     data = (seq.to_bytes(3, "big") + len(payload).to_bytes(2, "big") + bytes([len(picked)])
@@ -100,11 +104,11 @@ def encode(lines, seq, levels=8, budget=255):
     return cells
 
 
-def draw(cells):
-    rows = len(cells) // COLS
-    img = np.zeros((rows * CELL, WIDTH, 4), dtype=np.uint8)
+def draw(cells, cols=COLS):
+    rows = len(cells) // cols
+    img = np.zeros((rows * CELL, cols * CELL, 4), dtype=np.uint8)
     for i, (r, g, bl) in enumerate(cells):
-        x, y = (i % COLS) * CELL, (i // COLS) * CELL
+        x, y = (i % cols) * CELL, (i // cols) * CELL
         img[y:y + CELL, x:x + CELL] = (bl, g, r, 255)
     return img
 
@@ -112,9 +116,9 @@ def draw(cells):
 # ----------------------------------------------------------------------
 # decoder
 # ----------------------------------------------------------------------
-def _centres(region, n_rows):
-    """RGB of every cell centre: (n_rows*COLS, 3) int."""
-    c = region[2:n_rows * CELL:CELL, 2:WIDTH:CELL]                  # (rows, 32, 4) BGRA
+def _centres(region, n_rows, cols=COLS):
+    """RGB of every cell centre: (n_rows*cols, 3) int."""
+    c = region[2:n_rows * CELL:CELL, 2:cols * CELL:CELL]            # (rows, cols, 4) BGRA
     return c[:, :, [2, 1, 0]].reshape(-1, 3).astype(np.int32)
 
 
@@ -152,12 +156,25 @@ def _gamut_fix(first):
     return fix
 
 
-def decode(arr, x, y):
-    """Decode a v2 matrix whose top-left pixel is (x, y). -> (Frame2, None) or (None, reason)."""
+def decode(arr, x, y, cols=None):
+    """Decode a v2 matrix whose top-left pixel is (x, y). cols = cells per row if known (32 or 16), else every shape is tried
+    (the checksum tells which one is right). -> (Frame2, None) or (None, reason)."""
+    if cols:
+        return _decode_cols(arr, x, y, cols)
+    why = "no preamble"
+    for c in COL_CHOICES:
+        frame, why = _decode_cols(arr, x, y, c)
+        if frame is not None:
+            return frame, None
+    return None, why
+
+
+def _decode_cols(arr, x, y, cols):
     h, w = arr.shape[:2]
-    if x < 0 or y < 0 or x + WIDTH > w or y + CELL > h:
+    width = cols * CELL
+    if x < 0 or y < 0 or x + width > w or y + CELL > h:
         return None, "outside"
-    first = _centres(arr[y:y + CELL, x:x + WIDTH], 1)
+    first = _centres(arr[y:y + CELL, x:x + width], 1, cols)
     hi, lo = first[0], first[1]
     if (hi - lo).min() < MIN_CONTRAST:
         return None, "no preamble"
@@ -175,10 +192,10 @@ def decode(arr, x, y):
     rows = 1 + sum(bit << (5 - k) for k, bit in enumerate(mb[5:11]))
     if y + rows * CELL > h:
         return None, "outside"
-    cells = _centres(arr[y:y + rows * CELL, x:x + WIDTH], rows)
+    cells = _centres(arr[y:y + rows * CELL, x:x + width], rows, cols)
     if fix is not None:
         cells = fix(cells)
-    n = rows * COLS
+    n = rows * cols
     end = (2 * cells[n - N_END:] > thr2).astype(np.int32)
     if [tuple(r) for r in end.tolist()] != END:
         return None, "no end marker"
@@ -201,13 +218,13 @@ def decode(arr, x, y):
     if v1.checksum(payload) != int.from_bytes(raw[6:9], "big"):
         return None, "checksum mismatch"
     gain = float(ramp[-1].mean()) / level_values(levels)[-1] if level_values(levels)[-1] else 1.0
-    return Frame2(seq, v1.parse_payload(payload), levels, rows, gain), None
+    return Frame2(seq, v1.parse_payload(payload), levels, rows, gain, cols), None
 
 
 def find(arr, max_candidates=60):
     """Candidate top-left positions of v2 matrices in a screenshot (cheap checks only; decode() decides)."""
     h, w = arr.shape[:2]
-    hh, ww = h - CELL + 1, w - WIDTH + 1
+    hh, ww = h - CELL + 1, w - MIN_WIDTH + 1
     if hh <= 0 or ww <= 0:
         return []
     A = arr[2:2 + hh, 2:2 + ww, :3].astype(np.int16)                 # cell 0 centres (white)
@@ -229,15 +246,15 @@ def find(arr, max_candidates=60):
     return list(zip(xs[keep].tolist(), ys[keep].tolist()))[:max_candidates]
 
 
-def refine(arr, x, y, seq):
+def refine(arr, x, y, seq, cols=None):
     """A position up to 2 px off still decodes (the centre sample stays inside its cell); return the exact origin:
     the middle of the range of offsets that decode."""
     oks_x, oks_y = [], []
     for d in range(-3, 4):
-        f, _ = decode(arr, x + d, y)
+        f, _ = decode(arr, x + d, y, cols)
         if f is not None and f.seq == seq:
             oks_x.append(d)
-        f, _ = decode(arr, x, y + d)
+        f, _ = decode(arr, x, y + d, cols)
         if f is not None and f.seq == seq:
             oks_y.append(d)
     if not oks_x or not oks_y:
@@ -250,8 +267,8 @@ def find_and_decode(arr):
     for x, y in find(arr):
         frame, _ = decode(arr, x, y)
         if frame is not None:
-            x, y = refine(arr, x, y, frame.seq)
-            frame, _ = decode(arr, x, y)
+            x, y = refine(arr, x, y, frame.seq, frame.cols)
+            frame, _ = decode(arr, x, y, frame.cols)
             if frame is not None:
                 return x, y, frame
     return None

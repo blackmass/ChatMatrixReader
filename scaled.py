@@ -11,7 +11,7 @@ import proto2
 
 # colour classes: 0 other, 1 white, 2 black, 3 red, 4 green, 5 blue, 6 yellow
 PRE = [1, 2, 3, 4, 5, 6, 2, 1]                      # the v2 preamble: W K R G B Y K W
-MAX_ROWS = 24                                       # the tallest matrix (2 levels) has 23 cell rows
+MAX_ROWS = 65                                       # the tallest matrix (2 levels, narrow shape) has 56 cell rows; 64 is the most the mode field can say
 
 
 def classify(arr):
@@ -57,17 +57,25 @@ def locate(arr, cls=None):
     return hits
 
 
-def sample(arr, x, y, pitch, rows):
+def sample(arr, x, y, pitch, rows, cols=proto2.COLS):
     """Cell centres of a matrix with cell size `pitch` -> a clean image with 4x4-pixel cells (what proto2 reads)."""
     ys = np.clip((y + (np.arange(rows) + 0.5) * pitch).astype(int), 0, arr.shape[0] - 1)
-    xs = np.clip((x + (np.arange(proto2.COLS) + 0.5) * pitch).astype(int), 0, arr.shape[1] - 1)
-    cells = arr[np.ix_(ys, xs)]                                  # (rows, 32, 4)
+    xs = np.clip((x + (np.arange(cols) + 0.5) * pitch).astype(int), 0, arr.shape[1] - 1)
+    cells = arr[np.ix_(ys, xs)]                                  # (rows, cols, 4)
     return np.repeat(np.repeat(cells, proto2.CELL, axis=0), proto2.CELL, axis=1)
 
 
-def decode(arr, x, y, pitch, rows):
-    """-> (Frame2, None) or (None, reason). `rows` = number of cell rows to sample (at least the matrix height)."""
-    return proto2.decode(sample(arr, x, y, pitch, rows), 0, 0)
+def decode(arr, x, y, pitch, rows, cols=None):
+    """-> (Frame2, None) or (None, reason). `rows` = number of cell rows to sample (at least the matrix height);
+    cols = cells per row if known (32 or 16), else every shape is tried."""
+    if cols:
+        return proto2.decode(sample(arr, x, y, pitch, rows, cols), 0, 0, cols)
+    why = "no preamble"
+    for c in proto2.COL_CHOICES:
+        frame, why = proto2.decode(sample(arr, x, y, pitch, rows, c), 0, 0, c)
+        if frame is not None:
+            return frame, None
+    return None, why
 
 
 def fit(arr, x, y, pitch):
@@ -76,21 +84,22 @@ def fit(arr, x, y, pitch):
     rows = int(min(MAX_ROWS, (arr.shape[0] - y) // pitch))
     if rows < 7:
         return None, "outside"
-    first, good = None, []
+    first, good, cols = None, [], None                           # cols: the shape, known after the first success
     step = pitch / 2.0
     for dp in np.linspace(-0.03, 0.03, 13):
         for dx in (-0.5, 0.0, 0.5):
             for dy in (-0.5, 0.0, 0.5):
                 xx, yy, pp = x + dx * step, y + dy * step, pitch * (1 + dp)
-                frame, reason = decode(arr, xx, yy, pp, rows)
+                frame, reason = decode(arr, xx, yy, pp, rows, cols)
                 if frame is not None:
+                    cols = frame.cols
                     good.append((xx, yy, pp, frame))
                 first = first or reason
     if not good:
         return None, first
     # sampling slightly off still decodes; take the middle of everything that does, so that small drift later is harmless
     mx, my, mp = (float(np.median([g[k] for g in good])) for k in range(3))
-    frame, _ = decode(arr, mx, my, mp, rows)
+    frame, _ = decode(arr, mx, my, mp, rows, cols)
     if frame is not None:
         return frame, mx, my, mp
     return good[0][3], good[0][0], good[0][1], good[0][2]

@@ -87,6 +87,7 @@ OTHER_COLORS = {
 TAG_COLORS.update({code: color for code, color in OTHER_COLORS.items()})
 # "Other" lines that are somebody speaking (NPC / boss): these are translated; loot, money, experience ... are not
 SPEECH_CODES = ("!MS", "!MY", "!ME", "!MW", "!MP", "!BE", "!BW")
+TRANSLATED_CODES = SPEECH_CODES
 # the symbol in front of a ping (the addon replaces the game's icon by it), coloured by kind
 PING_COLORS = {"\u25c8": "#4da3ff", "\u2691": "#4ddc6b", "\u26a0": "#ff4545", "\u2694": "#ff9a2e", "\u25bc": "#4da3ff"}
 SHOWN_CODE = {"WT": "W→", "BT": "B→"}        # whispers you sent: the name in the line is the receiver
@@ -1155,11 +1156,12 @@ class App(WindowMixin):
             pass
         return self.text.yview()[1] >= 0.999
 
-    def _insert(self, s, tag, index="end", group=True):
+    def _insert(self, s, tag, index="end", group=True, indent=False):
         """`s` is a string, or a list of (text, extra_tag_or_None) pieces drawn in `tag` (+ the extra tag).
         group=True: the line starts a new group (gap above); a translation or an error of a line is part of its group."""
         at_bottom = self._at_bottom()
         base = (tag, "gstart") if group else (tag,)
+        start = self.text.index("end-1c" if index == "end" else index)
         if isinstance(s, str):
             self.text.insert(index, s, base)
         else:
@@ -1167,6 +1169,8 @@ class App(WindowMixin):
             for piece, extra in s:
                 args += [piece, base + ((extra,) if extra else ())]
             self.text.insert(index, *args)                      # one call: the pieces stay in order at a mark too
+        if indent:                                              # the translation line is pushed in by a margin, not by spaces
+            self.text.tag_add("ind", start, f"{start}+1c")      # (a space before a long word would let Tk drop the word to the next row)
         n = int(self.text.index("end-1c").split(".")[0])
         keep = int(self.cfg["max_lines"])
         if n > keep:
@@ -1226,6 +1230,7 @@ class App(WindowMixin):
                 body = tr("⚠ 길드관리자 메시지는 보호되어 있어 읽을 수 없습니다. 게임에서 직접 확인하세요.") if line.channel == "O" \
                     else tr("⚠ 보호된 메시지 (게임이 내용을 알려주지 않아 읽을 수 없음)")
             body = chattext.resolve_josa(body)                    # the Korean client leaves  |1이;가;  in event texts
+            body = chattext.mark_guilds(body)                     # <Guild Name> in the text: green, and not translated
             if line.channel.startswith("!") and "%s" in body and sender:
                 body, sender = body.replace("%s", sender), ""     # NPC emotes: "%s waves." -> the name goes into the text
         if sender:                                                # [name]: message  (the name in the class colour)
@@ -1243,11 +1248,14 @@ class App(WindowMixin):
             pieces[0:1] = [(first[0], f"pg{ord(first[0])}"), (first[1:], extra)]
         pieces = self._guild(pieces)
         text = chattext.plain(body)                               # item-link markers removed
-        translatable = not protected and not (line.channel.startswith("!") and line.channel not in SPEECH_CODES) \
+        translatable = not protected and not (line.channel.startswith("!") and line.channel not in TRANSLATED_CODES) \
             and not chattext.is_unintelligible(body) \
             and translator.should_translate(text, self.cfg, chattext.check_text(body))
+        route = translator.route_for(self.cfg, "!NPC" if line.channel in SPEECH_CODES else line.channel)
+        if route == translator.ROUTE_OFF:                         # option "channel translation": this channel is not translated
+            translatable, route = False, None
         if self.cfg.get("swap_trans") and translatable:
-            self._show_swapped(parts, pieces, tag, body)
+            self._show_swapped(parts, pieces, tag, body, route)
             return
         parts += pieces
         parts.append(("\n", None))
@@ -1263,7 +1271,7 @@ class App(WindowMixin):
         self.text.mark_set(mark, "end-1c")
         self.text.mark_gravity(mark, "left")          # later lines are inserted after the mark
         self.marks[token] = mark
-        if not self.translations.submit(token, text):
+        if not self.translations.submit(token, text, route):
             self.link_names.pop(token, None)
             self._drop_mark(token)
             self.status.set(tr("번역 대기열이 가득 차서 일부 줄을 번역하지 못했습니다"))
@@ -1273,14 +1281,14 @@ class App(WindowMixin):
         self.text.mark_set(name, "end-1c")
         self.text.mark_gravity(name, "left")                      # text inserted at the mark goes after it
 
-    def _show_swapped(self, head, pieces, tag, body):
+    def _show_swapped(self, head, pieces, tag, body, route=None):
         masked, names = chattext.mask_links(body)
         token = next(self.tokens)
         self._insert(head, tag)                                   # the name part of the top line ...
         self._mark_here(f"trb{token}")                            # ... then the translation goes here, instead of the "…"
         self._insert([("…", None), ("\n", None)], tag)
         self._mark_here(f"trl{token}")                            # start of the lower line (the original)
-        self._insert("    " + chattext.plain(body) + "\n", "trans", group=False)
+        self._insert(self._guild([(chattext.plain(body) + "\n", None)]), "trans", group=False, indent=True)
         mark = f"tr{token}"
         self._mark_here(mark)                                     # end of the group: errors are inserted here
         self.marks[token] = mark
@@ -1288,7 +1296,7 @@ class App(WindowMixin):
                                 "names": names, "quals": chattext.link_qualities(body)}
         if names:
             self.link_names[token] = names
-        if not self.translations.submit(token, masked):
+        if not self.translations.submit(token, masked, route):
             self.link_names.pop(token, None)
             self._swap_fallback(token)
             self.swapinfo.pop(token, None)
@@ -1329,12 +1337,17 @@ class App(WindowMixin):
             if self.text.get(trb, f"{trb}+1c") == "…":
                 self.text.delete(trb, f"{trb}+1c")
                 self._insert(info["orig"], info["tag"], index=trb, group=False)
-                if self.text.get(trl, f"{trl}+4c") == "    ":     # the original is shown above now: drop the lower copy
+                if "ind" in self.text.tag_names(trl):     # the original is shown above now: drop the lower copy
                     self.text.delete(trl, f"{trl} lineend+1c")
         except tk.TclError:
             pass
 
     _restr_n = 0
+
+    def type_color(self, code):
+        """The colour lines of this channel code have now: the one the game sent (kept until the program ends), else the game's default."""
+        code = "!MS" if code == "!NPC" else code               # NPC / boss speech: one colour row for all of it
+        return self._type_colors.get(code) or TAG_COLORS.get(channel_tag(code), TAG_COLORS["other"])
 
     def _type_tag(self, code, base):
         """The text tag of a chat type (the line's channel code): every line of the type carries it, so a change of the
@@ -1436,10 +1449,10 @@ class App(WindowMixin):
                 self.status.set(tr("번역 오류: {err}", err=err))
                 if err != self.last_error:                  # don't flood the window with the same error
                     self.last_error = err
-                    self._insert("    ⚠ " + tr("번역 오류: {err}", err=err) + "\n", "error", index=mark, group=False)
+                    self._insert("⚠ " + tr("번역 오류: {err}", err=err) + "\n", "error", index=mark, group=False, indent=True)
             elif result:
                 self.last_error = None
-                self._insert([("    ", None)] + self._guild([(result, None)]) + [("\n", None)], "trans", index=mark, group=False)
+                self._insert(self._guild([(result, None)]) + [("\n", None)], "trans", index=mark, group=False, indent=True)
         except tk.TclError:
             pass
         finally:
@@ -1593,6 +1606,7 @@ class App(WindowMixin):
         gap = max(0, min(40, int(self.cfg.get("line_spacing", 0))))
         group = max(0, min(60, int(self.cfg.get("group_spacing", 4))))
         widget.tag_configure("gstart", spacing1=gap // 2 + group)
+        widget.tag_configure("ind", lmargin1=self.font_trans.measure("    "))      # the width the four spaces had
         if colors:
             widget.tag_configure("trans", foreground=self._trans_color(), font=self.font_trans)
         else:
@@ -1662,7 +1676,7 @@ class App(WindowMixin):
         try:
             segs, active = [], set()                          # the text with the layout tags (translation size, group gap)
             for key, val, _idx in self.text.dump("1.0", "end-1c", text=True, tag=True):
-                if key == "tagon" and val in ("trans", "gstart"):
+                if key == "tagon" and val in ("trans", "gstart", "ind"):
                     active.add(val)
                 elif key == "tagoff":
                     active.discard(val)

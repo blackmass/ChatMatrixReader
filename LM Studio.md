@@ -1,6 +1,8 @@
 
 # LM Studio
-<a href="https://lmstudio.ai/">(link)</a> 개인적으로 일반인들에게 추천하는 로컬AI를 구동하는 가장 보편적인 프로그램입니다.
+<a href="https://lmstudio.ai/download">(link)</a> 개인적으로 일반인들에게 추천하는 로컬AI를 구동하는 가장 보편적인 프로그램입니다.
+- 'Download LM Studio' 이걸 설치해야합니다.
+- 'Download LM Studio Bionic' 이걸 받으시면 안됩니다.
 
 ---
 # 기계번역과 AI 번역의 차이 
@@ -42,8 +44,7 @@
 
 # 서버 호스팅 설정
 - 솔직히 처음 기본 설정 값은 기억에서 잊혀져서 모르겠지만, 사실 아무것도 건들지 않고 기본 값으로 써도 문제는 없을 겁니다. 다만 'Status: Running' 만 켜져 있는지 확인하시고, 오른쪽 'Reachable at:' 뒤의 주소를 기억하세요.
-
-
+- 확인 후 상단의 파란색 버튼 [Load Moel]을 눌러 원하는 모델을 불러오세요.
 ---
 <img width="1181" height="337" alt="Image" src="https://github.com/user-attachments/assets/4965538a-afbe-41b2-a26f-7a5055e1bcab" />
 
