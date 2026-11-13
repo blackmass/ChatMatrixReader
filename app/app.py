@@ -43,6 +43,9 @@ import translator
 import updatecheck
 import usage
 import version
+import voice
+import voicemeter
+from decoder import Line
 from i18n import tr
 from capture import CaptureWorker
 from options import OptionsWindow
@@ -85,12 +88,14 @@ OTHER_COLORS = {
     "!PG": "#ff5050",                                  # pings: stand out like a yell
     "!BI": "#66ccff",                                  # Battle.net friend online / offline (light blue like the game)
     "!CN": "#ffc0c0",                                  # channel notices ("Changed Channel: [...]"): the channel chat colour
-    "!TM": "#ffff00",                                  # "appearance added to your collection": a yellow system line (the item name keeps its quality colour)
+    "!VC": "#9fe8ff",                                  # voice chat (recognised speech, see voice.py): light cyan
+    "!TI": "#ffff00",                                  # raid-target marks set on somebody ("X marks Y with {skull}"): the yellow system colour
+    "!TM": "#ffff00",                                 # "appearance added to your collection": a yellow system line (the item name keeps its quality colour)
 }
 TAG_COLORS.update({code: color for code, color in OTHER_COLORS.items()})
 # "Other" lines that are somebody speaking (NPC / boss): these are translated; loot, money, experience ... are not
 SPEECH_CODES = ("!MS", "!MY", "!ME", "!MW", "!MP", "!BE", "!BW")
-TRANSLATED_CODES = SPEECH_CODES
+TRANSLATED_CODES = SPEECH_CODES + ("!VC",)
 # the symbol in front of a ping (the addon replaces the game's icon by it), coloured by kind
 PING_COLORS = {"\u25c8": "#4da3ff", "\u2691": "#4ddc6b", "\u26a0": "#ff4545", "\u2694": "#ff9a2e", "\u25bc": "#4da3ff"}
 SHOWN_CODE = {"WT": "W→", "BT": "B→"}        # whispers you sent: the name in the line is the receiver
@@ -290,6 +295,9 @@ class App(WindowMixin):
         self._game_rect_cache = None                    # the game window on screen, refreshed once a second (main thread)
         self.worker = CaptureWorker(self.q, lambda: self.cfg, lambda: self._game_rect_cache)
         self.worker.start()
+        self.voice = voice.VoiceManager(self.q, lambda: self.cfg)
+        self._cap_status = ""          # the capture's last status text (shown again when a live voice text goes away)
+        self._part_job = None
         self.translations = translator.TranslationService(
             self.q, lambda: self.cfg, workers=max(1, min(8, int(self.cfg.get("max_parallel", 2)))))
 
@@ -299,6 +307,8 @@ class App(WindowMixin):
         self.root.bind("<Configure>", self._on_configure)
         self.root.bind("<FocusIn>", lambda e: self._stack_back())
         self.root.after(50, self.poll)
+        if self.cfg.get("voice_enabled"):
+            self.root.after(1500, self.voice.start)
         self.root.after(80, self._hover_tick)
         self.root.after(500, self._follow_game)
         self.root.after(300, self._send_tick)
@@ -364,6 +374,8 @@ class App(WindowMixin):
         self.btn_close.pack(side="right", fill="y")
         self.btn_opt = tk.Label(self.title, text="⚙", bg=TITLE_BG, fg=DIM, font=btn_font, width=3, cursor="hand2")
         self.btn_opt.pack(side="right", fill="y")
+        self.btn_voice = tk.Label(self.title, text="🔊", bg=TITLE_BG, fg=DIM, font=btn_font, width=3, cursor="hand2")
+        self.btn_voice.pack(side="right", fill="y")                 # between the refresh and the options button (packed from the right)
         self.btn_refresh = tk.Label(self.title, text="⟳", bg=TITLE_BG, fg=DIM, font=btn_font, width=3, cursor="hand2")
         self.btn_refresh.pack(side="right", fill="y")
         self.lbl_title = tk.Label(self.title, text="ChatMatrix", bg=TITLE_BG, fg="#cfd2d8",
@@ -373,12 +385,15 @@ class App(WindowMixin):
                                    font=("Malgun Gothic", 8), anchor="w")
         self.lbl_status.pack(side="left", fill="both", expand=True)
 
-        for w, hot in ((self.btn_close, "#e5484d"), (self.btn_opt, "#6b83b3"), (self.btn_refresh, "#6bb38a")):
+        for w, hot in ((self.btn_close, "#e5484d"), (self.btn_opt, "#6b83b3"), (self.btn_refresh, "#6bb38a")):   # (the voice button has its own, see below)
             w.bind("<Enter>", lambda e, w=w, hot=hot: w.configure(fg=hot))
             w.bind("<Leave>", lambda e, w=w: w.configure(fg=DIM))
         self.btn_close.bind("<Button-1>", lambda e: self.on_close())
         self.btn_opt.bind("<Button-1>", lambda e: self.open_options())
         self.btn_refresh.bind("<Button-1>", lambda e: self._refresh_matrix())
+        self.btn_voice.bind("<Button-1>", lambda e: self._voice_toggle())
+        self.btn_voice.bind("<Enter>", lambda e: (self.btn_voice.configure(fg="#6bb38a"), self._voice_button_hint(True)))
+        self.btn_voice.bind("<Leave>", lambda e: (self._voice_button_color(), self._voice_button_hint(False)))
         for w in (self.title, self.lbl_title, self.lbl_status):
             w.configure(cursor="fleur")
             w.bind("<ButtonPress-1>", self._drag_start)
@@ -386,7 +401,7 @@ class App(WindowMixin):
             w.bind("<ButtonRelease-1>", self._drag_end)
 
         # ---- overlay: scrollbar and resize grip
-        self.sb = MiniScrollbar(self.body, self.text.yview)
+        self.sb = MiniScrollbar(self.body, lambda *a: self._scroll(self.text.yview, *a))
         self.text.configure(yscrollcommand=self._on_yscroll)
         self.text.bind("<Configure>", self._on_text_resized, add="+")
         self.sb.bind("<MouseWheel>", self._wheel)
@@ -395,6 +410,12 @@ class App(WindowMixin):
         self.grip.bind("<ButtonPress-1>", self._resize_start)
         self.grip.bind("<B1-Motion>", self._resize_move)
         self.grip.bind("<ButtonRelease-1>", self._resize_end)
+        # the voice recognition indicator: created last, so it lies above the text, the title bar and the scrollbar
+        self.vmodel = voicemeter.Model()
+        self.vmeter = voicemeter.VoiceMeter(self.body, self._voice_clicked, self._voice_tip)
+        self._vmeter_key = None
+        self._vphase = 0
+        self.root.after(150, self._vmeter_tick)
 
         # ---- read-only but selectable / copyable
         nav = {"Up", "Down", "Left", "Right", "Prior", "Next", "Home", "End"}
@@ -468,6 +489,7 @@ class App(WindowMixin):
             for w in (self.title, self.sb, self.grip):
                 w.place_forget()
             self.body.configure(highlightbackground=BG)
+        self._place_vmeter()
 
 
 
@@ -1051,7 +1073,15 @@ class App(WindowMixin):
         self.root.geometry(f"{max(260, w0 + e.x_root - x0)}x{max(120, h0 + e.y_root - y0)}")
 
     def _wheel(self, e):
-        self.text.yview_scroll(-3 if e.delta > 0 else 3, "units")
+        self._scroll(self.text.yview_scroll, -3 if e.delta > 0 else 3, "units")
+
+    def _scroll(self, fn, *args):
+        """Scroll the real text AND the shadow in the same moment. Waiting for yscrollcommand is one redraw too late: Tk calls it
+        after the real text has been drawn, so the shadow would be drawn one frame behind. Moving both now lets Tk draw
+        them in the same idle pass."""
+        fn(*args)
+        if self._shadow_active():
+            self._sync_shadow()
 
     # ---- two-window plumbing
     def _on_configure(self, e):
@@ -1221,7 +1251,7 @@ class App(WindowMixin):
             self._insert(f"{ts}{tr('✓ 채팅 제한이 해제되었습니다')}\n", "restricted")
             return
         self._restr_n = 0                                         # a normal line ends a run of restricted ones
-        if line.channel in ("!AD", "!UN"):                        # the colour belongs to this line (an addon wrote it)
+        if line.channel in ("!AD", "!UN", "!CN"):                 # the colour belongs to this line (an addon wrote it; a channel notice has the colour of the channel it is about)
             tag = f"bc{line.base}" if line.base in chattext.QUALITY_COLORS else channel_tag(line.channel)
         else:                                                     # the colour belongs to the chat type: all its lines change together
             tag = self._type_tag(line.channel, line.base)
@@ -1260,6 +1290,8 @@ class App(WindowMixin):
             and not chattext.is_unintelligible(body) \
             and translator.should_translate(text, self.cfg, chattext.check_text(body))
         route = translator.route_for(self.cfg, "!NPC" if line.channel in SPEECH_CODES else line.channel)
+        if line.channel == "!VC" and not self.cfg.get("voice_translate", True):
+            route = translator.ROUTE_OFF
         if route == translator.ROUTE_OFF:                         # option "channel translation": this channel is not translated
             translatable, route = False, None
         if self.cfg.get("swap_trans") and translatable:
@@ -1402,6 +1434,8 @@ class App(WindowMixin):
     def _code_prefix(self, ch):
         """What stands in front of a line: nothing, like the game's chat, except "(1)" for numbered channels and an arrow
         for a whisper you sent. The option "show channel codes in detail" brings back  (S) (W→) (C1) (!LT)."""
+        if ch == "!VC":
+            return tr("(음성)") + " "
         if self.cfg.get("channel_detail", False):
             return f"({SHOWN_CODE.get(ch, ch)}) "
         if ch in ("WT", "BT"):
@@ -1499,6 +1533,7 @@ class App(WindowMixin):
                     break
                 try:
                     if kind == "status":
+                        self._cap_status = payload
                         self.status.set(payload)
                         self._log_status(payload)
                     elif kind == "pos":
@@ -1509,6 +1544,8 @@ class App(WindowMixin):
                         for piece in payload:
                             for line in self.joiner.feed(piece, time.monotonic()):
                                 self._show_line(line)
+                    elif kind == "voice":
+                        self.on_voice(payload)
                     elif kind == "trans":
                         self.on_translation(*payload)
                     elif kind == "call":
@@ -1523,6 +1560,128 @@ class App(WindowMixin):
                 self._show_line(line)
         finally:
             self.root.after(50, self.poll)
+
+    # ---- voice recognition (the extension process, see voice.py)
+    def _clear_partial(self):
+        if self._part_job is not None:
+            try:
+                self.root.after_cancel(self._part_job)
+            except Exception:
+                pass
+            self._part_job = None
+            self.status.set(self._cap_status)
+
+    def on_voice(self, m):
+        """Messages of the voice process. What goes on is shown by the indicator (voicemeter.py) and written to the log: the window
+        itself only gets the spoken lines and a real error (something the user has to act on)."""
+        kind = m.get("type")
+        self.vmodel.on_event(m, time.monotonic())
+        if kind == "text":
+            self._clear_partial()
+            text = (m.get("text") or "").strip()
+            if text:
+                self._show_line(Line("!VC", 0, "", text))
+        elif kind == "partial":                                   # live mode: what is being said right now, in the title line
+            text = (m.get("text") or "").strip()
+            if text:
+                self.status.set(tr("음성: {text}", text=text[-70:]))
+                if self._part_job is not None:
+                    self.root.after_cancel(self._part_job)
+                self._part_job = self.root.after(4000, self._clear_partial)
+        elif kind == "status":
+            st, msg = m.get("state"), m.get("msg", "")
+            log.info("음성 인식 상태: %s %s", st, msg)
+            if st == "error":
+                if msg == "not installed":
+                    msg = tr("음성 인식 확장이 설치되어 있지 않습니다 (extensions/stt/README.md 참고)")
+                self.add_system("⚠ " + tr("음성 인식 오류: {msg}", msg=voice.explain_error(msg)))
+        elif kind == "warn":
+            log.info("음성 인식 경고: %s", m.get("msg", ""))
+        elif kind == "exit":
+            self._clear_partial()
+            self.add_system("⚠ " + tr("음성 인식이 종료되었습니다 (코드 {code}). 자세한 내용: {path}", code=m.get("code"), path=voice.LOG))
+
+    # ---- the on / off button of the voice recognition (title bar). It switches only for now: the option "use voice recognition"
+    #      (start with the program) is not touched.
+    def _voice_toggle(self):
+        if self.voice.running() or self.vmodel.state in ("loading", "idle", "active"):
+            self.voice.stop(wait=1.0)
+        else:
+            self.voice.start()
+        self._voice_button_color()
+        self._voice_button_hint(True)
+
+    def _voice_button_color(self):
+        self.btn_voice.configure(fg="#4cc38a" if self.vmodel.state != "off" else DIM)
+
+    def _voice_button_hint(self, on):
+        """The title line says what a click does (the title bar has no tooltips of its own)."""
+        if on:
+            self.status.set(tr("음성 인식 끄기") if self.vmodel.state != "off" else tr("음성 인식 켜기"))
+        else:
+            self.status.set(self._cap_status)
+
+    # ---- the indicator in the top right corner
+    def _place_vmeter(self):
+        """4 px from the right and top edge; while the frame (title bar, scrollbar) is shown it moves below the title bar and left
+        of the scrollbar so that it covers neither."""
+        m = getattr(self, "vmeter", None)
+        if m is None:
+            return
+        on = self.vmodel.state != "off"
+        key = (on, self.chrome_on)
+        if key == self._vmeter_key:
+            return
+        self._vmeter_key = key
+        if not on:
+            m.place_forget()
+            return
+        m.place(relx=1.0, x=-(4 + (SB_W if self.chrome_on else 0)), y=4 + (TITLE_H if self.chrome_on else 0), anchor="ne")
+        m.lift()
+
+    def _vmeter_tick(self):
+        try:
+            state, bars, _code, _vals = self.vmodel.tick(time.monotonic())
+            self._vphase += 1
+            self._place_vmeter()
+            if state != "off":
+                self.vmeter.render(state, bars, self._vphase)
+            if self.chrome_on:
+                self._voice_button_color()
+        except Exception:
+            log.exception("음성 표시기 오류")
+        finally:
+            self.root.after(150, self._vmeter_tick)
+
+    def _voice_tip(self):
+        state, _bars, code, v = self.vmodel.snapshot(time.monotonic())
+        name = voice.target_name(self.cfg)
+        if state == "loading":
+            return tr("음성 인식: 준비 중입니다 (모델을 불러오는 중)")
+        if state == "active":
+            return tr("음성 인식: {name} 소리를 듣는 중", name=name)
+        if state == "idle":
+            if v.get("ago") is None:
+                return tr("음성 인식: {name}에 연결됨 - 지금은 소리가 없습니다", name=name)
+            return tr("음성 인식: {name}에 연결됨 - 지금은 소리가 없습니다 (마지막 소리 {sec}초 전)", name=name, sec=v["ago"])
+        if state == "error":
+            if code == "not_installed":
+                return tr("음성 인식 확장이 설치되어 있지 않습니다 (extensions/stt/README.md 참고)")
+            if code == "exit":
+                text = tr("음성 인식이 종료되었습니다 (코드 {code}). 자세한 내용: {path}", code=v.get("code"), path=voice.LOG)
+            elif code == "stale":
+                text = tr("음성 인식 프로그램이 응답하지 않습니다.")
+            else:
+                text = tr("음성 인식 오류: {msg}", msg=voice.explain_error(v.get("msg", "")))
+            return text + "\n" + tr("클릭하면 다시 시작합니다.")
+        return ""
+
+    def _voice_clicked(self):
+        state, _bars, code, _v = self.vmodel.snapshot(time.monotonic())
+        if state == "error" and code != "not_installed":
+            self.voice.restart()
+        else:
+            self.open_options(select_voice=True)
 
     def _show_line(self, line):
         try:
@@ -1758,7 +1917,7 @@ class App(WindowMixin):
         self._interactive = False
         self._set_passthrough(bool(on) and not self._suspend_ct)
 
-    def open_options(self):
+    def open_options(self, select_voice=False):
         dump = getattr(self, "_state_dump", None)
         if dump:                                   # if the window had vanished, this shows why (before saving repairs it)
             try:
@@ -1767,8 +1926,10 @@ class App(WindowMixin):
                 log.exception("창 상태 기록 실패")
         if self.opt is not None and self.opt.alive():
             self.opt.lift()
-            return
-        self.opt = OptionsWindow(self)
+        else:
+            self.opt = OptionsWindow(self)
+        if select_voice:
+            self.opt.select_voice()
 
     def reopen_options(self, select_tab=None):
         """Rebuild the options window (after a language change)."""
@@ -1794,6 +1955,7 @@ class App(WindowMixin):
             self.cfg["geometry"] = self.root.geometry()
             config.save(self.cfg)
             self.worker.stop()
+            self.voice.stop(wait=1.5)
             self.translations.shutdown()
         except Exception:
             log.exception("종료 정리 중 오류")

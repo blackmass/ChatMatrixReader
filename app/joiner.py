@@ -11,6 +11,9 @@ follows within TIMEOUT seconds (flush_due()). A continuation without its start (
 with a leading ellipsis.
 """
 import dataclasses
+import logging
+
+log = logging.getLogger("cmr.join")
 
 CONT, CONT_IN = "\x05", "\x06"
 ELLIPSIS = "…"
@@ -26,13 +29,19 @@ class Joiner:
     def __init__(self, timeout=TIMEOUT):
         self.timeout = timeout
         self.line = None           # the message being collected (a Line whose text is what was read so far)
+        self.pieces = 0            # how many pieces it has so far
         self.last_id = 0
         self.deadline = 0.0
 
     # -------------------------------------------------------------- helpers
-    def _finish(self, with_ellipsis):
+    def _finish(self, why=None):
+        """why: None = the message is complete; else the reason it was closed with an ellipsis (for the log)."""
         line, self.line = self.line, None
-        if with_ellipsis:
+        if why:
+            log.warning("긴 메시지 %d조각에서 끊김 (%s): %s %s, %d자", self.pieces, why, line.channel, line.sender, len(line.text))
+        else:
+            log.info("긴 메시지 %d조각 합침: %s %s, %d자", self.pieces, line.channel, line.sender, len(line.text))
+        if why:
             line = dataclasses.replace(line, text=_closed(line.text) + ELLIPSIS)
         return line
 
@@ -59,16 +68,19 @@ class Joiner:
                     body = body[:-1]
                 self.line = dataclasses.replace(self.line, text=body + text)
                 self.last_id = line.id
+                self.pieces += 1
                 if goes_on:
                     self.deadline = now + self.timeout
                     return out
-                return [self._finish(False)]
-            out.append(self._finish(True))            # not the continuation: the message ended here
+                return [self._finish()]
+            why = "다음 줄이 이어짐이 아님" if (lead is None) else "다음 조각이 아님 (채널/화자/번호 불일치, 조각 유실)"
+            out.append(self._finish(why))             # not the continuation: the message ended here
         if lead is not None:                          # a continuation whose start was lost
+            log.warning("이어지는 조각인데 앞 조각이 없음 (유실): %s %s", line.channel, line.sender)
             text = ELLIPSIS + ("\x02" + lead if lead else "") + text
         line = dataclasses.replace(line, text=text)
         if goes_on:
-            self.line, self.last_id, self.deadline = line, line.id, now + self.timeout
+            self.line, self.last_id, self.deadline, self.pieces = line, line.id, now + self.timeout, 1
             return out
         out.append(line)
         return out
@@ -76,5 +88,5 @@ class Joiner:
     def flush_due(self, now, force=False):
         """Nothing came after the last piece for a while (or the reader stops): close the message."""
         if self.line is not None and (force or now >= self.deadline):
-            return [self._finish(True)]
+            return [self._finish("1초 안에 다음 조각이 오지 않음" if not force else "종료")]
         return []

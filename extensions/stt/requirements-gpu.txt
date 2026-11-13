@@ -1,0 +1,3 @@
+# Only for NVIDIA GPUs: the CUDA 12 libraries faster-whisper needs (the program finds them in site-packages\nvidia\*\bin by itself)
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

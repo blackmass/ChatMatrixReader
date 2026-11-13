@@ -1,0 +1,7 @@
+# STT extension (its own environment; the reader itself does not need any of this)
+numpy
+psutil
+faster-whisper
+proc-tap; sys_platform == "win32"
+PyAudioWPatch; sys_platform == "win32"
+pycaw; sys_platform == "win32"

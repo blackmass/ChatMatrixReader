@@ -551,12 +551,15 @@ class WindowMixin:
             fg = u.GetForegroundWindow()
             if not g or u.IsIconic(g) or not fg or fg == g or self._pid_of(fg) == os.getpid():
                 return
-            if self._above_game(g):
+            u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+            stuck_top = bool(u.GetWindowLongW(_hwnd(self.root), -20) & 0x8)    # topmost while another program has the focus: it covers that program
+            if self._above_game(g) and not stuck_top:
                 return
             now = time.monotonic()
             if now - self._ensure_logged > 5:
                 self._ensure_logged = now
-                log.warning("점검: 번역창이 게임 창 아래로 내려가 있음 -> 다시 게임 바로 위로 (최상위 속성: %s)", self._topmost_flags())
+                log.warning("점검: 번역창이 %s -> 다시 게임 바로 위로 (최상위 속성: %s)",
+                            "다른 프로그램을 덮는 최상위 상태임" if stuck_top else "게임 창 아래로 내려가 있음", self._topmost_flags())
                 log.info("점검 상태: %s", self._state_dump())
             self._place_above_game(force=True)
             if self._ensure_logged == now:
@@ -649,13 +652,25 @@ class WindowMixin:
                     if self._is_above(h, me) and (hi is None or self._is_above(h, hi)):
                         hi = h
                 if hi is not None:
-                    above = u.GetWindow(hi, 3)
                     topmost = bool(u.GetWindowLongW(hi, -20) & 0x8)
-                    ia = above if above else (-1 if topmost else 0)  # HWND_TOPMOST / HWND_TOP
-                    ok = u.SetWindowPos(me, ia, 0, 0, 0, 0, flags)
-                    err = ctypes.windll.kernel32.GetLastError() if not ok else 0
-                    self._stack_back()
-                    how = "글자 창을 위로 올림 (SetWindowPos=%s 오류=%s)" % (bool(ok), err)
+                    if (not topmost and not self._follow_top and self.cfg.get("topmost_wow_only")
+                            and self._game_hwnd and self._fg_last != self._game_hwnd):
+                        # Another program has the focus: the text window belongs just above the game, below that program.
+                        # Taking the window above the shadow as the reference here would be wrong: it can be a topmost one
+                        # (the taskbar), and a window placed behind a topmost window becomes topmost itself - and then
+                        # covers the browser.
+                        self._place_above_game(force=True)
+                        ok, err = True, 0
+                        how = "글자 창을 게임 바로 위로 다시 배치"
+                    else:
+                        above = u.GetWindow(hi, 3)
+                        if above and not topmost and (u.GetWindowLongW(above, -20) & 0x8):
+                            above = None                                  # never make a normal window topmost by accident
+                        ia = above if above else (-1 if topmost else -2)  # HWND_TOPMOST / HWND_NOTOPMOST
+                        ok = u.SetWindowPos(me, ia, 0, 0, 0, 0, flags)
+                        err = ctypes.windll.kernel32.GetLastError() if not ok else 0
+                        self._stack_back()
+                        how = "글자 창을 위로 올림 (SetWindowPos=%s 오류=%s)" % (bool(ok), err)
             now = time.monotonic()
             if now - self._inner_logged > 30:
                 self._inner_logged = now

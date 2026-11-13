@@ -52,6 +52,24 @@ DEFAULTS = {
     "send_autopaste": False,              # press Ctrl+V in the game for you (off: you press it)
     "send_prompt": DEFAULT_SEND_PROMPT,
     "send_extra_prompt": "",              # the user's own additional instructions for the send translation
+    # voice recognition (optional extension in extensions/stt, see voice.py)
+    "voice_enabled": False,               # on: started with the program (and by the options)
+    "voice_target": "discord",            # discord | discord-all | wow | system | app: whose sound is recognised (app: the program in voice_app)
+    "voice_app": "",                      # the program picked from the list (file name, e.g. chrome.exe): remembered, used when voice_target is "app"
+    "voice_lang": "auto",                 # language spoken in the voice chat ("auto" = detect for every sentence)
+    "voice_mode": "sentence",             # sentence: one text when a sentence is finished | live: the text while it is spoken (Whisper: not recommended)
+    "voice_partial_ms": 1000,             # live mode: how often the text so far is updated
+    "voice_translate": True,              # translate what was said (with the translation tab's method)
+    "voice_end_ms": 700,                  # quiet time (ms) that ends a sentence
+    "voice_device": "auto",               # auto | cuda | cpu
+    "voice_model": "",                    # "" = the extension's default (large-v3-turbo)
+    "voice_max_s": 12,                    # longest piece of speech recognised at once (longer speech is cut there)
+    "voice_engine": "whisper",            # whisper (on this PC) | openai (a server with the OpenAI speech-to-text API)
+    "voice_oa_url": "",                   # openai: e.g. http://localhost:8000/v1
+    "voice_oa_key": "",                   # openai: API key (empty = none; sent to the child through its environment)
+    "voice_oa_model": "",                 # openai: model name on that server ("" = whisper-1)
+    "voice_oa_format": "json",            # openai: json | verbose_json
+    "voice_oa_timeout": 30,               # openai: seconds to wait for the server
     # window
     "bg_opacity": 1.0,                    # background (the dark area)
     "text_opacity": 1.0,                  # text, title bar, scrollbar
