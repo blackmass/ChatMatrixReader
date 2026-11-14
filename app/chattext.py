@@ -177,6 +177,12 @@ _PLACEHOLDER = re.compile(r"[\[\uff3b\u3010(\uff08]\s*[Ll]\s*(\d+)\s*[\]\uff3d\u
 PLACEHOLDER = _PLACEHOLDER
 
 
+def is_server_notice(channel, text):
+    """A system line that the SERVER wrote ("[SERVER] All realms will come down ..."): unlike the game's own system texts it is in
+    English whatever the client language is, so it is the one kind of system line that is translated."""
+    return channel == "!SY" and bool(re.match(r"\s*\[SERVER\]", plain(text or ""), re.I))
+
+
 def is_unintelligible(text):
     """Is the message marked by the addon as gibberish (a language this character does not know)?"""
     return any(_code(m) == UNINTELLIGIBLE for m in _MARK.finditer(text))

@@ -1286,7 +1286,8 @@ class App(WindowMixin):
             pieces[0:1] = [(first[0], f"pg{ord(first[0])}"), (first[1:], extra)]
         pieces = self._guild(pieces)
         text = chattext.plain(body)                               # item-link markers removed
-        translatable = not protected and not (line.channel.startswith("!") and line.channel not in TRANSLATED_CODES) \
+        translatable = not protected and not (line.channel.startswith("!") and line.channel not in TRANSLATED_CODES
+                                              and not chattext.is_server_notice(line.channel, body)) \
             and not chattext.is_unintelligible(body) \
             and translator.should_translate(text, self.cfg, chattext.check_text(body))
         route = translator.route_for(self.cfg, "!NPC" if line.channel in SPEECH_CODES else line.channel)
@@ -1593,7 +1594,7 @@ class App(WindowMixin):
             log.info("음성 인식 상태: %s %s", st, msg)
             if st == "error":
                 if msg == "not installed":
-                    msg = tr("음성 인식 확장이 설치되어 있지 않습니다 (extensions/stt/README.md 참고)")
+                    msg = voice.not_installed_text()
                 self.add_system("⚠ " + tr("음성 인식 오류: {msg}", msg=voice.explain_error(msg)))
         elif kind == "warn":
             log.info("음성 인식 경고: %s", m.get("msg", ""))
@@ -1607,7 +1608,12 @@ class App(WindowMixin):
         if self.voice.running() or self.vmodel.state in ("loading", "idle", "active"):
             self.voice.stop(wait=1.0)
         else:
-            self.voice.start()
+            why = voice.missing(self.cfg)
+            if why:                                  # nothing is installed behind the user's back: say so and show where to do it
+                self.add_system("⚠ " + why)
+                self.open_options(select_voice=True)
+            else:
+                self.voice.start()
         self._voice_button_color()
         self._voice_button_hint(True)
 
@@ -1666,7 +1672,7 @@ class App(WindowMixin):
             return tr("음성 인식: {name}에 연결됨 - 지금은 소리가 없습니다 (마지막 소리 {sec}초 전)", name=name, sec=v["ago"])
         if state == "error":
             if code == "not_installed":
-                return tr("음성 인식 확장이 설치되어 있지 않습니다 (extensions/stt/README.md 참고)")
+                return voice.not_installed_text()
             if code == "exit":
                 text = tr("음성 인식이 종료되었습니다 (코드 {code}). 자세한 내용: {path}", code=v.get("code"), path=voice.LOG)
             elif code == "stale":

@@ -70,6 +70,25 @@ def installed():
     return os.path.isfile(SCRIPT) and os.path.isfile(python_exe())
 
 
+def not_installed_text(broken=False):
+    """What to say when the voice recognition cannot start because it is not installed (broken: the installation was cut off)."""
+    if broken:
+        return tr("음성 인식 설치가 끝나지 않았습니다. 옵션의 음성 탭에서 설치하기를 다시 눌러 주세요.")
+    return tr("음성 인식(Whisper)이 설치되어 있지 않습니다. 옵션의 음성 탭에서 설치하기를 눌러 설치해 주세요.")
+
+
+def missing(cfg):
+    """None when it can start, else the text to show. Whisper needs its package in the environment (an installation that was cut off
+    has the environment but not the package); an OpenAI-compatible server only needs the environment."""
+    if not installed():
+        return not_installed_text()
+    if (cfg.get("voice_engine") or "whisper") != "openai":
+        import voiceinstall
+        if voiceinstall.state() == "broken":
+            return not_installed_text(broken=True)
+    return None
+
+
 def build_args(cfg, python=None, script=None):
     """The command line for the child, from the settings. Pure function (tested without starting anything). The API key is NOT in
     it (every program can read command lines): see build_env()."""
@@ -157,7 +176,7 @@ def check_connection(cfg, python=None, script=None, timeout=90):
     """The "test connection" button: runs the child once with --check. -> (ok, text in the user's language). Blocks: call it in a thread."""
     py = python or python_exe()
     if not (os.path.isfile(script or SCRIPT) and os.path.isfile(py)):
-        return False, tr("음성 인식 확장이 설치되어 있지 않습니다 (extensions/stt/README.md 참고)")
+        return False, not_installed_text()
     args = [py, "-X", "utf8", script or SCRIPT, "--json", "--check", "--log", LOG, "--engine", "openai",
             "--url", str(cfg.get("voice_oa_url") or "").strip(),
             "--response-format", cfg.get("voice_oa_format") if cfg.get("voice_oa_format") in OA_FORMATS else "json",
@@ -223,7 +242,7 @@ def list_sessions(python=None, script=None, timeout=70):
     A row: {"name": "chrome.exe", "devices": [...], "active": bool, "peak": 0..1, "count": n}. Blocks (about 2 s): call it in a thread."""
     py = python or python_exe()
     if not (os.path.isfile(script or SCRIPT) and os.path.isfile(py)):
-        return [], tr("음성 인식 확장이 설치되어 있지 않습니다 (extensions/stt/README.md 참고)")
+        return [], not_installed_text()
     kw = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if sys.platform == "win32" else {}
     try:
         p = subprocess.run([py, "-X", "utf8", script or SCRIPT, "--json", "--sessions"], capture_output=True, timeout=timeout,

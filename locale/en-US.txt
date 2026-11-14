@@ -311,7 +311,6 @@ NPC·보스 대사 = NPC / boss speech
 # --- voice recognition (voice.py extension)
 (음성) = (voice)
 음성: {text} = Voice: {text}
-음성 인식 확장이 설치되어 있지 않습니다 (extensions/stt/README.md 참고) = The voice recognition extension is not installed (see extensions/stt/README.md)
 음성 인식이 종료되었습니다 (코드 {code}). 자세한 내용: {path} = Voice recognition has ended (code {code}). Details: {path}
 음성 인식 오류: {msg} = Voice recognition error: {msg}
 음성 인식 = Voice recognition
@@ -464,4 +463,5 @@ GPU 라이브러리를 지우는 중... = Removing the GPU libraries...
 {what}를 설치합니다.\n\n내려받을 양: 약 {gb}GB (인터넷 연결 필요)\n모든 파일은 이 폴더 안에만 저장됩니다: {path}\n\n처음 음성 인식을 켤 때 모델(약 {model}GB)을 한 번 더 내려받아 {models} 에 저장합니다.\n\n계속할까요? = {what} will be installed.\n\nDownload size: about {gb} GB (an internet connection is needed)\nEvery file is stored inside this folder only: {path}\n\nThe first time you start voice recognition, the model (about {model} GB) is downloaded once more and stored in {models}.\n\nContinue?
 이전에 받은 모델이 허깅페이스 기본 폴더에 {size} 남아 있습니다 ({path}). 이 프로그램은 그 폴더를 건드리지 않으니, 필요 없으면 직접 지우세요. = Models downloaded earlier are still in the default Hugging Face folder ({size}, {path}). This program does not touch that folder; delete them by hand if you do not need them.
 사용 안 함 (CPU로 동작 중) = not used (running on the CPU)
-
+음성 인식(Whisper)이 설치되어 있지 않습니다. 옵션의 음성 탭에서 설치하기를 눌러 설치해 주세요. = Voice recognition (Whisper) is not installed. Open the voice tab in the options and press the install button.
+음성 인식 설치가 끝나지 않았습니다. 옵션의 음성 탭에서 설치하기를 다시 눌러 주세요. = The voice recognition installation was not finished. Open the voice tab in the options and press the install button again.
