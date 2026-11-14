@@ -11,8 +11,8 @@
 EVERYTHING this module and the extension write stays inside extensions/stt: the .venv, the models, a temporary folder for pip (.tmp);
 pip's own download cache is switched off (--no-cache-dir).
 
-The reader's own Python makes the environment (the same version it runs on); when that one is too new for the packages, a Python 3.11 / 3.12
-found through the "py" launcher is used. Everything the pip commands print goes to chatmatrix_stt_install.log.
+Python 3.11 is preferred for the environment (found through the "py" launcher or the default install folders); the reader's own Python is used
+when it is 3.11 or the only supported one, and 3.12 / 3.13 / 3.10 are the fallbacks. Everything the pip commands print goes to chatmatrix_stt_install.log.
 """
 import glob
 import logging
@@ -100,22 +100,54 @@ def reader_python():
     return exe
 
 
+PREFERRED = ("3.11", "3.12", "3.13", "3.10")      # Python 3.11 first: that is the one the packages are tested with
+
+
+def find_python(tag, run=subprocess.run):
+    """The python.exe of version `tag` ("3.11"), found through the "py" launcher, the default install folders or the PATH; "" if none."""
+    try:
+        r = run(["py", "-" + tag, "-c", "import sys; print(sys.executable)"], capture_output=True, timeout=20, creationflags=NO_WINDOW)
+        path = r.stdout.decode("utf-8", "replace").strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
+    except (OSError, subprocess.TimeoutExpired, IndexError):
+        path = ""
+    if path and os.path.isfile(path):
+        return path
+    short = tag.replace(".", "")
+    cands = []
+    if sys.platform == "win32":
+        for base in (os.environ.get("LocalAppData"), os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432")):
+            if base:
+                sub = os.path.join("Programs", "Python") if base == os.environ.get("LocalAppData") else "Python"
+                cands.append(os.path.join(base, sub, "Python" + short, "python.exe"))
+    else:
+        found = shutil.which("python" + tag)
+        if found:
+            cands.append(found)
+    return next((c for c in cands if os.path.isfile(c)), "")
+
+
 def pick_python(version=None, run=subprocess.run, exe=None):
-    """-> (python executable, "") or (None, reason in the user's language)."""
-    version = version or sys.version_info[:2]
+    """-> (python executable, "") or (None, reason in the user's language).
+    Python 3.11 is preferred; the reader's own Python is used when it is 3.11 or (if there is no 3.11) within SUPPORTED;
+    otherwise 3.12 / 3.13 / 3.10 are looked for."""
+    version = tuple(version or sys.version_info[:2])
     exe = exe or reader_python()
-    if SUPPORTED[0] <= tuple(version) <= SUPPORTED[1]:
+    ok = SUPPORTED[0] <= version <= SUPPORTED[1]
+    if version == (3, 11):
         return exe, ""
-    for tag in ("3.12", "3.11"):
-        try:
-            r = run(["py", "-" + tag, "-c", "import sys; print(sys.executable)"], capture_output=True, timeout=20, creationflags=NO_WINDOW)
-            path = r.stdout.decode("utf-8", "replace").strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
-        except (OSError, subprocess.TimeoutExpired, IndexError):
-            path = ""
-        if path and os.path.isfile(path):
+    path = find_python(PREFERRED[0], run)
+    if path:
+        return path, ""
+    if ok:
+        return exe, ""
+    for tag in PREFERRED[1:]:
+        path = find_python(tag, run)
+        if path:
             return path, ""
-    return None, tr("이 프로그램의 파이썬({ver})에는 음성 인식 패키지가 아직 없을 수 있습니다. 파이썬 3.11을 설치한 뒤 다시 시도하세요.",
-                   ver="%d.%d" % tuple(version))
+    return None, tr("이 프로그램의 파이썬({ver})에는 음성 인식 패키지(onnxruntime, av 등)가 아직 없습니다.\n\n"
+                   "파이썬 3.11을 python.org에서 추가로 설치한 뒤 다시 시도하세요. (설치할 때 'py launcher'를 체크하세요.)\n"
+                   "지금 쓰는 파이썬을 지우거나 이 프로그램을 다시 설치할 필요는 없습니다. 3.11이 있으면 음성 인식 설치가 자동으로 찾아 씁니다.",
+                   ver="%d.%d" % version)
 
 
 # ------------------------------------------------------------------------------------------------ the steps

@@ -141,11 +141,71 @@ def resolve_josa(text):
 
 
 ORIG_SEP = "\x04"                  # inside a marker: the name in the game's language, then this, then the original name
+TIP_SEP, TIP_LINE = "\x07", "\x08"  # inside a marker, after the names: the tooltip lines of the link (addon option "tooltips")
+
+
+TIP_RIGHT = "\x0c"                  # in a tooltip line: what follows is the right-hand text (the game draws it at the right edge)
+TIP_COL = "\x0b"                    # in a tooltip line: this and one code character start a run in that palette colour (a line starts white)
+
+
+def tip_runs(line):
+    """[(text, palette code)] of one tooltip line. A line starts in white (code 1); a colour code is chr(48 + n) as in the link markers."""
+    out, code = [], 1
+    parts = line.split(TIP_COL)
+    if parts[0]:
+        out.append((parts[0], code))
+    for part in parts[1:]:
+        if not part:
+            continue
+        code, text = ord(part[0]) - 48, part[1:]
+        if text:
+            out.append((text, code))
+    return out
+
+
+def tip_plain(line):
+    return "".join(t for t, _ in tip_runs(line)).replace(TIP_RIGHT, "  ")
+
+
+def readable(text):
+    """A received line for the log, the way the addon's debug log shows what it sent:
+    <n:name [orig: ...] [tip: line | line :: right text {colour}]>  (n = colour code); ~ and ~~ mark the pieces of a long message."""
+    def mark(m):
+        code, inner = _code(m), m.group(2)
+        head, lines = split_tip(inner)
+        name, sep, orig = head.partition(ORIG_SEP)
+        out = "<%d:%s" % (code, name)
+        if sep and orig:
+            out += " [orig: %s]" % orig
+        if lines:
+            shown = []
+            for ln in lines:
+                runs = tip_runs(ln)
+                shown.append("".join(("{%d}" % c if c != 1 else "") + t for t, c in runs).replace(TIP_RIGHT, " :: "))
+            out += " [tip: %s]" % " | ".join(shown)
+        return out + ">"
+
+    text = _MARK.sub(mark, text)
+    text = text.replace("\x05", "~").replace("\x06", "~~")
+    return re.sub("[\x00-\x1f]", lambda m: "<%d>" % ord(m.group(0)), text)
+
+
+def split_tip(content):
+    """(the marker's text without its tooltip, [tooltip lines])"""
+    head, sep, tip = content.partition(TIP_SEP)
+    if not sep:
+        return head, []
+    lines = tip.split(TIP_LINE)                       # an empty line inside is a gap of the tooltip; at the ends it is nothing
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return head, lines
 
 
 def _name(q, content, original=False):
     """The name a marker shows: the one in the game's language, or (original=True, and the addon sent one) the original."""
-    local, sep, orig = content.partition(ORIG_SEP)
+    local, sep, orig = split_tip(content)[0].partition(ORIG_SEP)
     name = orig if (original and sep and orig) else local
     return _QUEST_ID.sub(r"\1", name) if q == YELLOW else name        # a quest id some addon appended is not shown
 
@@ -193,6 +253,11 @@ def link_qualities(text):
     return [_code(m) for m in _MARK.finditer(text)]
 
 
+def link_tips(text):
+    """The tooltip lines of every link marker (with the name as first line; [] = none), in the order of mask_links()."""
+    return [_with_name(_code(m), m.group(2)) for m in _MARK.finditer(text)]
+
+
 def ensure_links(text, names):
     """(text, [numbers of the links the translator lost]): a placeholder [Ln] missing from the translation is put back at
     the end, so the item name is not lost (its place in the sentence is not known)."""
@@ -203,21 +268,22 @@ def ensure_links(text, names):
     return text, missing
 
 
-def split_translation(text, names, quals):
+def split_translation(text, names, quals, tips=None):
     """[(piece, quality or None)] of a translated text that still holds the placeholders [L1] [L2] ...: the links come back
-    as pieces of their own (so the reader can colour them), the rest is plain text."""
+    as pieces of their own (so the reader can colour them), the rest is plain text.
+    With `tips` (link_tips()) the pieces are (piece, quality, tooltip lines)."""
     out, pos = [], 0
     for m in _PLACEHOLDER.finditer(text):
         i = int(m.group(1))
         if not (1 <= i <= len(names) and names[i - 1]):
             continue                                            # unknown placeholder: stays as the translator wrote it
         if m.start() > pos:
-            out.append((text[pos:m.start()], None))
-        out.append((names[i - 1], quals[i - 1] if i - 1 < len(quals) else None))
+            out.append((text[pos:m.start()], None, []))
+        out.append((names[i - 1], quals[i - 1] if i - 1 < len(quals) else None, (tips[i - 1] if tips and i - 1 < len(tips) else [])))
         pos = m.end()
     if pos < len(text):
-        out.append((text[pos:], None))
-    return [(p, q) for p, q in out if p]
+        out.append((text[pos:], None, []))
+    return [(p, q, t) if tips is not None else (p, q) for p, q, t in out if p]
 
 
 _BRACKETED = re.compile(r"\[[^\[\]]*\]")
@@ -243,29 +309,30 @@ def is_command(channel: str) -> bool:
     return channel.startswith(COMMAND_PREFIX)
 
 
-def color_brackets(text, quals):
+def color_brackets(text, quals, tips=None):
     """[(piece, quality or None)] of the translation of a line that is only links ("[Faction Banner]"): such a line is
     translated as it is (no [L1] placeholders), so the translated names are found by their brackets and coloured with the
     quality of the link at the same place. When the numbers of brackets and links differ, one common quality is used if
     there is one, else nothing is coloured."""
     spans = list(_BRACKETED.finditer(text))
     if not spans or not quals:
-        return [(text, None)]
+        return [(text, None, [])] if tips is not None else [(text, None)]
     if len(spans) == len(quals):
         qs = list(quals)
     elif len(set(quals)) == 1:
         qs = [quals[0]] * len(spans)
     else:
-        return [(text, None)]
+        return [(text, None, [])] if tips is not None else [(text, None)]
+    same = len(spans) == len(quals)                             # the tooltips are matched only when each bracket has its own link
     out, pos = [], 0
-    for m, q in zip(spans, qs):
+    for k, (m, q) in enumerate(zip(spans, qs)):
         if m.start() > pos:
-            out.append((text[pos:m.start()], None))
-        out.append((m.group(0), q))
+            out.append((text[pos:m.start()], None, []))
+        out.append((m.group(0), q, (tips[k] if tips and same and k < len(tips) else [])))
         pos = m.end()
     if pos < len(text):
-        out.append((text[pos:], None))
-    return out
+        out.append((text[pos:], None, []))
+    return [(p, q, t) if tips is not None else (p, q) for p, q, t in out]
 
 
 def unmask_links(text, names):
@@ -291,10 +358,34 @@ def check_text(text):
 def has_original(text):
     """Does a link in the text carry an original name that differs from the name shown in the game's language?"""
     for m in _MARK.finditer(text):
-        local, sep, orig = m.group(2).partition(ORIG_SEP)
+        local, sep, orig = split_tip(m.group(2))[0].partition(ORIG_SEP)
         if sep and orig and orig != local:
             return True
     return False
+
+
+def _with_name(code, content):
+    """The tooltip lines of a link with the name (in the game's language, in the link's colour) as the first line: the addon leaves that line out."""
+    head, lines = split_tip(content)
+    if not lines:
+        return []
+    name = head.partition(ORIG_SEP)[0].strip()
+    if name.startswith("[") and name.endswith("]"):
+        name = name[1:-1]
+    return [TIP_COL + chr(48 + code) + name] + lines
+
+
+def segments_tips(text, original=True):
+    """[(piece, quality or None, tooltip lines)] - like segments(), with the tooltip lines a link carried (empty list: none)."""
+    out, pos = [], 0
+    for m in _MARK.finditer(text):
+        if m.start() > pos:
+            out.append((_STRAY.sub("", text[pos:m.start()]), None, []))
+        out.append((_name(_code(m), m.group(2), original), _code(m), _with_name(_code(m), m.group(2))))
+        pos = m.end()
+    if pos < len(text):
+        out.append((_STRAY.sub("", text[pos:]), None, []))
+    return [t for t in out if t[0]]
 
 
 def segments(text, original=True):

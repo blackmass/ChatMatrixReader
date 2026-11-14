@@ -752,6 +752,13 @@ CUSTOM_PRESETS = {
                                '{"model": "claude-haiku-5-5", "max_tokens": 1024, "thinking": {"type": "disabled"}, "system": "{system}", '
                                '"messages": [{"role": "user", "content": "{text}"}]}', "content.0.text",
                                "프롬프트 칸의 내용이 {system} 자리에 들어갑니다 (단어장도 그 프롬프트로 전달). 모델 이름은 직접 바꿀 수 있습니다."),
+    "Gemini (Google AI Studio)": ("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent",
+                                  '{"x-goog-api-key": "{key}"}', "json",
+                                  '{"systemInstruction": {"parts": [{"text": "{system}"}]}, "contents": [{"role": "user", "parts": [{"text": "{text}"}]}], '
+                                  '"generationConfig": {"temperature": 0.2}}', "candidates.0.content.parts.0.text",
+                                  "키는 Google AI Studio 에서 무료로 받습니다. 모델 이름은 주소 안(models/ 뒤)에 있고 직접 바꿀 수 있습니다. "
+                                  "프롬프트 칸의 내용이 {system} 자리에 들어갑니다 (단어장도 그 프롬프트로 전달). "
+                                  "무료 사용은 한도가 낮고 입력한 내용이 구글 서비스 개선에 쓰일 수 있습니다 (유료 결제를 연결하면 쓰이지 않습니다)."),
 }
 CUSTOM_PRESET_MANUAL = "직접 입력"
 _CUSTOM_VAR = re.compile(r"\{(text|key|key1|key2|target|TARGET|system)\}")
@@ -968,32 +975,64 @@ def translate(cfg: dict, text: str) -> str:
 
 def translate_outgoing(cfg: dict, text: str) -> str:
     """What the player types -> the language of the people they talk to (cfg['send_lang'], source is detected)."""
-    lang = (cfg.get("send_lang") or "English").strip() or "English"
-    prompt = (cfg.get("send_prompt") or DEFAULT_SEND_PROMPT).replace("{send_lang}", lang)
-    # no Korean-glossary rewriting on the way out; the extra instructions are the sending ones (never those of the received lines)
-    cfg2 = dict(cfg, target_lang=lang, prompt=prompt, glossary_google=False, extra_prompt=cfg.get("send_extra_prompt"))
-    return translate(cfg2, text)
+    return translate(apply_route(send_cfg(cfg), send_route(cfg)), text)
 
 
 # ----------------------------------------------------------------------
 # async service: thread pool + cache + queue limit
 # ----------------------------------------------------------------------
-ROUTE_DEFAULT, ROUTE_GOOGLE_FREE, ROUTE_OFF = "default", "google_free", "off"
-ROUTES = (ROUTE_DEFAULT, ROUTE_GOOGLE_FREE, ROUTE_OFF)
+ROUTE_DEFAULT, ROUTE_GOOGLE_FREE, ROUTE_GOOGLE, ROUTE_OPENAI, ROUTE_CUSTOM, ROUTE_OFF = (
+    "default", "google_free", "google", "openai", "custom", "off")
+ROUTES = (ROUTE_DEFAULT, ROUTE_GOOGLE_FREE, ROUTE_GOOGLE, ROUTE_OPENAI, ROUTE_CUSTOM, ROUTE_OFF)
+_ROUTE_MODE = {ROUTE_GOOGLE_FREE: "google", ROUTE_GOOGLE: "google", ROUTE_OPENAI: "openai", ROUTE_CUSTOM: "custom"}
 
 
 def route_for(cfg: dict, channel: str):
     """How the lines of one channel code are translated (option "channel translation"): None = the translation method of the
-    translation tab, ROUTE_GOOGLE_FREE = Google without the API key, ROUTE_OFF = not translated at all."""
+    translation tab; else one of ROUTE_GOOGLE_FREE (Google without the API key), ROUTE_GOOGLE (Google, with the key when there is
+    one, else free), ROUTE_OPENAI, ROUTE_CUSTOM (the settings of those tabs), ROUTE_OFF (not translated at all)."""
     r = (cfg.get("channel_route") or {}).get(channel)
-    return r if r in (ROUTE_GOOGLE_FREE, ROUTE_OFF) else None
+    return r if r in ROUTES and r != ROUTE_DEFAULT else None
 
 
 def apply_route(cfg: dict, route) -> dict:
-    """The settings one request is translated with: the same as the translation tab's, except that Google (free) ignores the key."""
+    """The settings one request is translated with: the same as the translation tab's, except for the method the route names."""
     if route == ROUTE_GOOGLE_FREE:
         return dict(cfg, translator="google", google_api_key="")
+    if route in _ROUTE_MODE:                                    # Google with its key (without one: the free way), OpenAI, HTTP
+        return dict(cfg, translator=_ROUTE_MODE[route])
     return cfg
+
+
+def send_route(cfg: dict):
+    """The translation method of the sending direction (option "sending"): None = the translation tab's method."""
+    r = cfg.get("send_route")
+    return r if r in _ROUTE_MODE else None
+
+
+def modes_in_use(cfg: dict, sending=True) -> set:
+    """Every translation method ("openai", "google", "custom") the program may call: the translation tab's, those chosen for
+    channels, the one for sending (sending=False: without it). Used to check a connection once however many places use it."""
+    out = {cfg.get("translator", "none")}
+    out |= {_ROUTE_MODE[r] for r in (cfg.get("channel_route") or {}).values() if r in _ROUTE_MODE}
+    if sending and cfg.get("send_enabled", True) and send_route(cfg):
+        out.add(_ROUTE_MODE[send_route(cfg)])
+    out.discard("none")
+    return out
+
+
+def only_sending_uses(cfg: dict, mode: str) -> bool:
+    """True when `mode` is used by the sending direction and by nothing that translates received lines: then its connection
+    check carries the prompt of the sending, not that of the received lines."""
+    return mode in modes_in_use(cfg) and mode not in modes_in_use(cfg, sending=False)
+
+
+def send_cfg(cfg: dict) -> dict:
+    """The settings the sending direction translates with (before its route is applied)."""
+    lang = (cfg.get("send_lang") or "English").strip() or "English"
+    prompt = (cfg.get("send_prompt") or DEFAULT_SEND_PROMPT).replace("{send_lang}", lang)
+    # no Korean-glossary rewriting on the way out; the extra instructions are the sending ones (never those of the received lines)
+    return dict(cfg, target_lang=lang, prompt=prompt, glossary_google=False, extra_prompt=cfg.get("send_extra_prompt"))
 
 
 class TranslationService:
@@ -1031,7 +1070,7 @@ class TranslationService:
 
     def submit(self, token, text, route=None) -> bool:
         cfg = apply_route(dict(self.get_cfg()), route)  # snapshot: later option changes don't affect this request
-        key = (cfg.get("translator"), cfg.get("target_lang"), cfg.get("api_model"),
+        key = (cfg.get("translator"), bool((cfg.get("google_api_key") or "").strip()), cfg.get("target_lang"), cfg.get("api_model"),
                hash(cfg.get("prompt")), hash((cfg.get("extra_prompt") or "").strip()), glossary.cache_key(cfg), custom_signature(cfg), text)
         with self.lock:
             if key in self.long:                         # long-term first

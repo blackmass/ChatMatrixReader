@@ -12,12 +12,26 @@ with a leading ellipsis.
 """
 import dataclasses
 import logging
+import re
 
 log = logging.getLogger("cmr.join")
 
 CONT, CONT_IN = "\x05", "\x06"
 ELLIPSIS = "…"
 TIMEOUT = 1.0                      # seconds to wait for the next piece
+
+
+JUNK = "\x04\x07\x08\x0b\x0c"        # in a link marker: the original name, the tooltip (and its lines / colours)
+
+
+def _junk(text):
+    """`text` is the rest of a link marker whose start was lost, up to its close (\\3). -> (what comes after the marker,
+    True if the marker is not closed within this piece: it goes on in the next one)."""
+    close = text.find("\x03")
+    if close < 0:
+        return "", True
+    rest = text[close + 1:]
+    return rest, rest == ""
 
 
 def _closed(body):
@@ -32,6 +46,7 @@ class Joiner:
         self.pieces = 0            # how many pieces it has so far
         self.last_id = 0
         self.deadline = 0.0
+        self.dead_open = False     # the piece before ended inside a link marker whose start was lost: what follows is tooltip rest
 
     # -------------------------------------------------------------- helpers
     def _finish(self, why=None):
@@ -64,7 +79,9 @@ class Joiner:
             nxt = self.last_id % 65535 + 1
             if lead is not None and line.channel == self.line.channel and line.sender == self.line.sender and line.id == nxt:
                 body = self.line.text
-                if lead and body.endswith("\x03"):    # the piece before closed the marker: it goes on, so take the close back
+                if lead and self.dead_open:                # still inside the tooltip of a link whose start was lost: not shown
+                    text, self.dead_open = _junk(text)
+                elif lead and body.endswith("\x03"):    # the piece before closed the marker: it goes on, so take the close back
                     body = body[:-1]
                 self.line = dataclasses.replace(self.line, text=body + text)
                 self.last_id = line.id
@@ -75,9 +92,19 @@ class Joiner:
                 return [self._finish()]
             why = "다음 줄이 이어짐이 아님" if (lead is None) else "다음 조각이 아님 (채널/화자/번호 불일치, 조각 유실)"
             out.append(self._finish(why))             # not the continuation: the message ended here
+        self.dead_open = False
         if lead is not None:                          # a continuation whose start was lost
             log.warning("이어지는 조각인데 앞 조각이 없음 (유실): %s %s", line.channel, line.sender)
-            text = ELLIPSIS + ("\x02" + lead if lead else "") + text
+            if lead:                                  # starts inside a link marker whose start (name, tooltip start) is lost
+                close = text.find("\x03")
+                head = text if close < 0 else text[:close]
+                if "\x04" in head:                    # it still holds the end of the local name: that much is shown
+                    text = "\x02" + lead + head.split("\x04")[0] + "\x03" + (text[close + 1:] if close >= 0 else "")
+                elif any(c in head for c in JUNK):    # the original name / tooltip: nothing a reader can use without its start
+                    text, self.dead_open = _junk(text)
+                else:                                 # the rest of the name
+                    text = "\x02" + lead + text
+            text = ELLIPSIS + text
         line = dataclasses.replace(line, text=text)
         if goes_on:
             self.line, self.last_id, self.deadline, self.pieces = line, line.id, now + self.timeout, 1

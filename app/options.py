@@ -2,6 +2,7 @@
 import ctypes
 import sys
 import subprocess
+import copy
 import json
 import re
 import logging
@@ -12,6 +13,7 @@ import tkinter as tk
 from ctypes import wintypes
 from tkinter import colorchooser, ttk, messagebox
 
+import childwin
 import config
 import plat
 import resmeter
@@ -139,10 +141,12 @@ class OptionsWindow:
             "channel_detail": tk.BooleanVar(value=bool(cfg.get("channel_detail", False))),
             "class_colors": tk.BooleanVar(value=bool(cfg.get("class_colors", True))),
             "max_lines": tk.IntVar(value=int(cfg["max_lines"])),
+            "fade_sec": tk.IntVar(value=int(cfg.get("fade_sec", 0))),
             "poll_hz": tk.IntVar(value=int(cfg["poll_hz"])),
             "full_scan_sec": tk.IntVar(value=int(cfg.get("full_scan_sec", 30))),
             "send_enabled": tk.BooleanVar(value=bool(cfg.get("send_enabled", True))),
             "send_lang": tk.StringVar(value=cfg.get("send_lang") or "English"),
+            "send_route": tk.StringVar(value=self._send_route_labels().get(cfg.get("send_route"), self._send_route_labels()[translator.ROUTE_DEFAULT])),
             "send_hotkey": tk.StringVar(value=cfg.get("send_hotkey") or hotkeys.DEFAULT),
             "send_autopaste": tk.BooleanVar(value=bool(cfg.get("send_autopaste", False))),
             "log_request": tk.BooleanVar(value=bool(cfg.get("log_request", False))),
@@ -152,7 +156,6 @@ class OptionsWindow:
             "voice_app": tk.StringVar(value=str(cfg.get("voice_app") or "")),
             "voice_lang": tk.StringVar(value=cfg.get("voice_lang") or "auto"),
             "voice_mode": tk.StringVar(value=cfg.get("voice_mode") if cfg.get("voice_mode") in ("sentence", "live") else "sentence"),
-            "voice_translate": tk.BooleanVar(value=bool(cfg.get("voice_translate", True))),
             "voice_end_ms": tk.IntVar(value=int(cfg.get("voice_end_ms", 700) or 700)),
             "voice_device": tk.StringVar(value=cfg.get("voice_device") if cfg.get("voice_device") in voice.DEVICES else "auto"),
             "voice_model": tk.StringVar(value=cfg.get("voice_model", "")),
@@ -180,7 +183,7 @@ class OptionsWindow:
         nb.pack(side="top", fill="both", expand=True, padx=8, pady=(8, 4))
         self._tab_translate(nb)
         self._tab_channels(nb)
-        self._tab_window(nb)
+        self._tab_windows(nb)
         self._tab_capture(nb)
         self._tab_send(nb)
         self._tab_voice(nb)
@@ -472,7 +475,291 @@ class OptionsWindow:
     def _route_labels(self):
         return {translator.ROUTE_DEFAULT: tr("기본 번역 (번역 탭 설정대로)"),
                 translator.ROUTE_GOOGLE_FREE: tr("구글 번역 (무료, 키 사용 안 함)"),
+                translator.ROUTE_GOOGLE: tr("구글 번역 (키 사용, 키가 없으면 무료)"),
+                translator.ROUTE_OPENAI: tr("OpenAI 호환 API"),
+                translator.ROUTE_CUSTOM: tr("사용자 정의 HTTP"),
                 translator.ROUTE_OFF: tr("번역 안 함")}
+
+    def _send_route_labels(self):
+        """The sending direction offers the same methods, but 'not translated' makes no sense there."""
+        labels = self._route_labels()
+        labels.pop(translator.ROUTE_OFF)
+        return labels
+
+    def _channel_rows(self, etc=False):
+        """(code, label) of every channel row; the lists of the "windows" tab also have a row for everything else."""
+        rows = [("S", tr("말하기")), ("Y", tr("외치기")), ("E", tr("감정 표현")),
+                ("P", tr("파티")), ("PL", tr("파티장")), ("R", tr("공격대")), ("RL", tr("공격대장")), ("RW", tr("공격대 경보")),
+                ("I", tr("인스턴스")), ("IL", tr("인스턴스장")), ("G", tr("길드")), ("O", tr("길드 관리자")),
+                ("W", tr("받은 귓속말")), ("B", tr("받은 배틀넷 귓속말")), ("WT", tr("보낸 귓속말")), ("BT", tr("보낸 배틀넷 귓속말")),
+                ("CM", tr("커뮤니티"))]
+        rows += [(f"C{n}", tr("번호 채널 {n}", n=n)) for n in range(1, 11)]
+        rows.append(("!NPC", tr("NPC·보스 대사")))
+        rows.append(("!VC", tr("음성 인식 (들은 말)")))
+        if etc:
+            rows.append((childwin.ETC, tr("그 밖의 줄 (시스템·전리품·경험치 등)")))
+        return rows
+
+    # ---- "windows" tab: the main window and the extra windows in one place (list | channels | options of the chosen window)
+    def _chan_grid(self, parent, selected, cols=2):
+        """Check boxes of every channel row in `parent` (in `cols` vertical columns); returns {code: BooleanVar}."""
+        for w in parent.winfo_children():
+            w.destroy()
+        rows = self._channel_rows(etc=True)
+        per = -(-len(rows) // cols)
+        out = {}
+        for i, (code, label) in enumerate(rows):
+            var = tk.BooleanVar(value=code in selected)
+            ttk.Checkbutton(parent, text=label, variable=var).grid(row=i % per, column=i // per, sticky="w", padx=(2, 10), pady=0)
+            out[code] = var
+        return out
+
+    def _win_name(self, i):
+        """Name in the list: 0 = the main window, then the extra windows."""
+        if i == 0:
+            return tr("번역")
+        c = self._kw[i - 1]
+        name = c.get("name") or (tr("음성 인식") if c["id"] == childwin.VOICE_ID else tr("창 {n}", n=c["id"]))
+        return f"{c['id']}  {name}"
+
+    def _kw_modes(self, wid):
+        """open_mode -> label, for the window (only the voice window has "while the voice recognition runs")."""
+        d = {"always": tr("항상 (프로그램을 켤 때부터)")}
+        if wid == childwin.VOICE_ID:
+            d["voice"] = tr("음성 인식이 켜져 있는 동안만")
+        d["never"] = tr("열지 않음 (우클릭 메뉴에서 열 때만)")
+        return d
+
+    def _tab_windows(self, nb):
+        app = self.app
+        tab = self._tab_frame(nb, tr("창 관리"))
+        self._kw = copy.deepcopy(app.cfg.get("child_windows") or [])
+        off = set(app.cfg.get("win1_off") or ())
+        self._w1_on = {c for c, _l in self._channel_rows(etc=True) if c not in off}     # working copy: channels of the main window
+        self._cur = 0                                                                    # shown: 0 = main window, i = self._kw[i - 1]
+        self._chan_vars = {}
+        # ---- column 0: the windows
+        c0 = ttk.Frame(tab)
+        c0.grid(row=0, column=0, sticky="nsw", padx=(4, 6), pady=6)
+        ttk.Label(c0, text=tr("창"), foreground="#666").pack(anchor="w")
+        self._wlist = tk.Listbox(c0, exportselection=False, width=16, height=12, activestyle="none")
+        self._wlist.pack(fill="y", expand=True)
+        self._wlist.bind("<<ListboxSelect>>", self._win_pick)
+        self._win_del = ttk.Button(c0, text=tr("선택한 창 삭제"), command=self._win_delete)
+        self._win_del.pack(fill="x", pady=(6, 0))
+        # ---- column 1: channels
+        ttk.Separator(tab, orient="vertical").grid(row=0, column=1, sticky="ns", pady=10)
+        c1 = ttk.Frame(tab)
+        c1.grid(row=0, column=2, sticky="nsw", padx=6, pady=6)
+        ttk.Label(c1, text=tr("이 창에 표시할 채널"), foreground="#666").pack(anchor="w")
+        self._chan_frame = ttk.Frame(c1)
+        self._chan_frame.pack(anchor="w", pady=2)
+        cb = ttk.Frame(c1)
+        cb.pack(anchor="w", pady=(4, 0))
+        ttk.Button(cb, text=tr("모두 선택"), command=lambda: [x.set(True) for x in self._chan_vars.values()]).pack(side="left")
+        ttk.Button(cb, text=tr("모두 해제"), command=lambda: [x.set(False) for x in self._chan_vars.values()]).pack(side="left", padx=6)
+        ttk.Label(c1, text=tr("같은 줄이 여러 창에 함께 나올 수 있습니다. 번역은 한 번만 요청합니다."), foreground="#666",
+                  wraplength=250, justify="left").pack(anchor="w", pady=(8, 0))
+        # ---- column 2: the options of the chosen window
+        ttk.Separator(tab, orient="vertical").grid(row=0, column=3, sticky="ns", pady=10)
+        c2 = ttk.Frame(tab)
+        c2.grid(row=0, column=4, sticky="nsew", padx=6, pady=6)
+        tab.columnconfigure(4, weight=1)
+        hdr = ttk.Frame(c2)
+        hdr.pack(fill="x", pady=(0, 4))
+        ttk.Label(hdr, text=tr("창이 열리는 때")).pack(side="left")
+        self._kw_mode = tk.StringVar()
+        self._kw_mode_combo = ttk.Combobox(hdr, textvariable=self._kw_mode, state="readonly", width=34)
+        self._kw_mode_combo.pack(side="left", padx=6)
+        self._page_main = ttk.Frame(c2)
+        self._tab_window(self._page_main)                       # the options of the main window (as they were)
+        self._page_kid = ttk.Frame(c2)
+        self._build_kid_page(self._page_kid)
+        self._wrap_notes(self._page_main)                       # the notes break into short lines: the tab must not get wide
+        self._wrap_notes(self._page_kid)
+        self._win_refresh()
+        self._win_show()
+
+    def _wrap_notes(self, frame, width=300):
+        for w in frame.winfo_children():
+            if isinstance(w, ttk.Label) and str(w.cget("foreground")) == "#666":
+                w.configure(wraplength=width, justify="left")
+            self._wrap_notes(w, width)
+
+    def _build_kid_page(self, page):
+        """The options of an extra window: what exists is switched on, the rest is shown grey (still main window only)."""
+        app = self.app
+        self._kw_name, self._kw_font, self._kw_size = tk.StringVar(), tk.StringVar(), tk.StringVar()
+        self._kw_bgop, self._kw_txop = tk.StringVar(), tk.StringVar()
+        self._kw_top, self._kw_wow = tk.BooleanVar(), tk.BooleanVar()
+        self._kw_ct, self._kw_hover = tk.BooleanVar(), tk.BooleanVar()
+        left, right = ttk.Frame(page), ttk.Frame(page)
+        left.grid(row=0, column=0, sticky="nsew")
+        ttk.Separator(page, orient="vertical").grid(row=0, column=1, sticky="ns", padx=6, pady=10)
+        right.grid(row=0, column=2, sticky="nsew")
+        page.columnconfigure(0, weight=1)
+        page.columnconfigure(2, weight=1)
+        grey = []
+
+        def dis_check(parent, row, text):
+            b = ttk.Checkbutton(parent, text=text, state="disabled")
+            b.grid(row=row, column=0, sticky="w", **PAD)
+            return b
+
+        def dis_spin(parent, row, text):
+            f = ttk.Frame(parent)
+            f.grid(row=row, column=0, columnspan=2, sticky="w", **PAD)
+            ttk.Label(f, text=text, foreground="#999").pack(side="left")
+            ttk.Spinbox(f, width=6, state="disabled").pack(side="left", padx=6)
+        # ---- left: behaviour (the same options as the main window's left column)
+        ttk.Checkbutton(left, text=tr("항상 위에 표시"), variable=self._kw_top,
+                        command=lambda: self._kw_wow.set(False) if self._kw_top.get() else None).grid(row=0, column=0, sticky="w", **PAD)
+        ttk.Checkbutton(left, text=tr("와우 창 위에만 표시 (다른 창에는 가려짐)"), variable=self._kw_wow,
+                        command=lambda: self._kw_top.set(False) if self._kw_wow.get() else None).grid(row=1, column=0, sticky="w", **PAD)
+        ttk.Checkbutton(left, text=tr("클릭 통과 (조작 키를 누르는 동안만 조작)"), variable=self._kw_ct).grid(row=2, column=0, sticky="w", **PAD)
+        ttk.Checkbutton(left, text=tr("마우스를 올리면 완전히 투명하게 (클릭 통과를 켠 경우만)"), variable=self._kw_hover).grid(
+            row=3, column=0, sticky="w", **PAD)
+        dis_spin(left, 4, tr("최대 보관 줄 수"))
+        dis_check(left, 5, tr("채팅 시간 표시"))
+        dis_check(left, 6, tr("직업 색상으로 이름 표시"))
+        dis_check(left, 7, tr("채널 코드 자세히 표시 (문제 확인용)"))
+        dis_check(left, 8, tr("번역을 위에, 원문을 아래에 표시"))
+        dis_spin(left, 9, tr("아래 줄 글자 크기 (0: 위 줄과 같게)"))
+        dis_spin(left, 10, tr("(실험) 지난 줄이 사라지는 시간 (초, 0: 사라지지 않음)"))
+        ttk.Label(left, text=tr("회색 항목은 아직 창 1에서만 바꿀 수 있습니다. 이 창은 창 1의 설정을 그대로 따릅니다."), foreground="#666",
+                  wraplength=300, justify="left").grid(row=11, column=0, sticky="w", padx=6, pady=(6, 0))
+        # ---- right: look
+        ttk.Label(right, text=tr("이름")).grid(row=0, column=0, sticky="w", **PAD)
+        ttk.Entry(right, textvariable=self._kw_name, width=22).grid(row=0, column=1, sticky="w", **PAD)
+        ttk.Label(right, text=tr("글꼴")).grid(row=1, column=0, sticky="w", **PAD)
+        ttk.Combobox(right, textvariable=self._kw_font, values=[tr("창 1과 같게")] + app.custom_fonts, state="readonly",
+                     width=20).grid(row=1, column=1, sticky="w", **PAD)
+        ttk.Label(right, text=tr("글자 크기 (0: 창 1과 같게)")).grid(row=2, column=0, sticky="w", **PAD)
+        ttk.Spinbox(right, from_=0, to=32, textvariable=self._kw_size, width=6).grid(row=2, column=1, sticky="w", **PAD)
+        ttk.Label(right, text=tr("배경 투명도 (%, 낮을수록 투명)")).grid(row=3, column=0, sticky="w", **PAD)
+        ttk.Spinbox(right, from_=3, to=100, increment=5, textvariable=self._kw_bgop, width=6).grid(row=3, column=1, sticky="w", **PAD)
+        ttk.Label(right, text=tr("글자 투명도 (%, 낮을수록 투명)")).grid(row=4, column=0, sticky="w", **PAD)
+        ttk.Spinbox(right, from_=20, to=100, increment=5, textvariable=self._kw_txop, width=6).grid(row=4, column=1, sticky="w", **PAD)
+        for r, text in ((5, tr("줄 간격 (원문-번역, 픽셀)")), (6, tr("묶음 간격 (묶음 사이, 픽셀)"))):
+            f = ttk.Frame(right)
+            f.grid(row=r, column=0, columnspan=2, sticky="w", **PAD)
+            ttk.Label(f, text=text, foreground="#999").pack(side="left")
+            ttk.Spinbox(f, width=5, state="disabled").pack(side="left", padx=6)
+        ttk.Checkbutton(right, text=tr("글자 그림자 사용 (배경이 투명할 때 글자가 잘 보이게)"), state="disabled").grid(
+            row=7, column=0, columnspan=2, sticky="w", **PAD)
+        if sys.platform == "win32":
+            ttk.Checkbutton(right, text=tr("배경 블러 (Windows)"), state="disabled").grid(row=8, column=0, columnspan=2, sticky="w", **PAD)
+
+    # ---- the list and what it shows
+    def _win_refresh(self):
+        self._wlist.delete(0, "end")
+        for i in range(len(self._kw) + 1):
+            self._wlist.insert("end", self._win_name(i))
+        self._wlist.insert("end", "+  " + tr("새 창"))
+        self._wlist.selection_clear(0, "end")
+        self._wlist.selection_set(self._cur)
+
+    def _win_show(self):
+        """Load the chosen window into the widgets."""
+        main = self._cur == 0
+        if main:
+            self._page_kid.pack_forget()
+            self._page_main.pack(fill="both", expand=True)
+            modes = {"always": tr("항상 (프로그램을 켤 때부터)")}
+            self._kw_mode_combo.configure(values=list(modes.values()), state="disabled")
+            self._kw_mode.set(modes["always"])
+            selected = self._w1_on
+            self._win_del.state(["disabled"])
+        else:
+            self._page_main.pack_forget()
+            self._page_kid.pack(fill="both", expand=True)
+            c = self._kw[self._cur - 1]
+            modes = self._kw_modes(c["id"])
+            self._kw_mode_combo.configure(values=list(modes.values()), state="readonly")
+            self._kw_mode.set(modes.get(c["open_mode"], modes["never"]))
+            self._kw_name.set(c["name"])
+            self._kw_top.set(bool(c.get("topmost", True)))
+            self._kw_wow.set(bool(c.get("topmost_wow_only")))
+            self._kw_ct.set(bool(c.get("click_through")))
+            self._kw_hover.set(bool(c.get("hover_clear")))
+            fam = c.get("font_family")
+            self._kw_font.set(fam if fam in self.app.custom_fonts else tr("창 1과 같게"))
+            self._kw_size.set(str(int(c.get("font_size") or 0)))
+            self._kw_bgop.set(str(int(round(float(c.get("bg_opacity", 1.0)) * 100))))
+            self._kw_txop.set(str(int(round(float(c.get("text_opacity", 1.0)) * 100))))
+            selected = set(c.get("channels") or ())
+            self._win_del.state(["disabled"] if c["id"] == childwin.VOICE_ID else ["!disabled"])
+        self._chan_vars = self._chan_grid(self._chan_frame, selected)
+
+    def _win_store(self):
+        """The widgets of the shown window into the working copy."""
+        chosen = {code for code, var in self._chan_vars.items() if var.get()}
+        if self._cur == 0:
+            self._w1_on = chosen
+            return
+        c = self._kw[self._cur - 1]
+        rev = {v: k for k, v in self._kw_modes(c["id"]).items()}
+        c["open_mode"] = rev.get(self._kw_mode.get(), "never")
+        c["name"] = self._kw_name.get().strip()[:30]
+        c["topmost_wow_only"] = bool(self._kw_wow.get())
+        c["topmost"] = bool(self._kw_top.get()) and not c["topmost_wow_only"]
+        c["click_through"] = bool(self._kw_ct.get())
+        c["hover_clear"] = bool(self._kw_hover.get())
+        c["font_family"] = self._kw_font.get() if self._kw_font.get() in self.app.custom_fonts else ""
+        try:
+            n = int(float(self._kw_size.get()))
+        except ValueError:
+            n = 0
+        c["font_size"] = 0 if n <= 0 else max(8, min(32, n))
+        for key, var, lo in (("bg_opacity", self._kw_bgop, 3), ("text_opacity", self._kw_txop, 20)):
+            try:
+                o = int(float(var.get()))
+            except ValueError:
+                o = 100
+            c[key] = max(lo, min(100, o)) / 100
+        c["channels"] = [code for code, _l in self._channel_rows(etc=True) if code in chosen]
+
+    def _win_pick(self, _e=None):
+        sel = self._wlist.curselection()
+        if not sel:
+            return
+        i = sel[0]
+        if i == self._cur:
+            return
+        self._win_store()
+        if i == len(self._kw) + 1:                               # "+ new window": empty, switched off, no channels
+            self._kw.append(childwin.new_conf(childwin.next_id(self._kw)))
+            i = len(self._kw)
+        self._cur = i
+        self._win_refresh()
+        self._win_show()
+
+    def _win_delete(self):
+        if self._cur == 0:
+            return
+        c = self._kw[self._cur - 1]
+        if c["id"] == childwin.VOICE_ID:
+            return
+        if not messagebox.askyesno(tr("창 삭제"), tr("'{n}' 창을 삭제할까요? (저장하면 적용됩니다)", n=self._win_name(self._cur)), parent=self.win):
+            return
+        del self._kw[self._cur - 1]
+        self._cur = 0
+        self._win_refresh()
+        self._win_show()
+
+    def _collect_windows(self):
+        """The working copy into the settings. The window objects keep their own settings dicts (and the position the user gave them)."""
+        cfg = self.app.cfg
+        self._win_store()
+        cur = {c["id"]: c for c in cfg.get("child_windows") or []}
+        out = []
+        for item in self._kw:
+            c = cur.get(item["id"]) or childwin.new_conf(item["id"])
+            c.update({k: v for k, v in item.items() if k != "geometry"})
+            out.append(c)
+        cfg["child_windows"] = out
+        cfg["win1_off"] = [code for code, _l in self._channel_rows(etc=True) if code not in self._w1_on]
+        self.app.kid_override.clear()                   # the choice just made counts, not an earlier hand-made open / close
 
     def _tab_channels(self, nb):
         tab = self._tab_frame(nb, tr("채널별 번역"))
@@ -481,15 +768,11 @@ class OptionsWindow:
         saved = self.app.cfg.get("channel_route") or {}
         ttk.Label(tab, text=tr("채널마다 번역 방식을 따로 정할 수 있습니다. 기본은 모두 '번역 탭'에 설정한 방식입니다. "
                                "중요하지 않은 공개 채팅은 '구글 번역 (무료)'로 돌리거나 번역하지 않으면 유료 번역의 사용량을 아낄 수 있습니다. "
-                               "'구글 번역 (무료)'는 번역 탭의 구글 설정(단어장 등)을 그대로 쓰되 API 키만 쓰지 않습니다."),
+                               "'구글 번역 (무료)'는 번역 탭의 구글 설정(단어장 등)을 그대로 쓰되 API 키만 쓰지 않습니다. "
+                               "'OpenAI 호환 API'와 '사용자 정의 HTTP'는 각 탭에 입력한 서버·키·프롬프트를 그대로 씁니다 "
+                               "(번역 탭에서 고른 방식과 달라도 됩니다)."),
                   foreground="#666", wraplength=620, justify="left").grid(row=0, column=0, columnspan=6, sticky="w", padx=8, pady=(8, 4))
-        rows = [("S", tr("말하기")), ("Y", tr("외치기")), ("E", tr("감정 표현")),
-                ("P", tr("파티")), ("PL", tr("파티장")), ("R", tr("공격대")), ("RL", tr("공격대장")), ("RW", tr("공격대 경보")),
-                ("I", tr("인스턴스")), ("IL", tr("인스턴스장")), ("G", tr("길드")), ("O", tr("길드 관리자")),
-                ("W", tr("받은 귓속말")), ("B", tr("받은 배틀넷 귓속말")), ("WT", tr("보낸 귓속말")), ("BT", tr("보낸 배틀넷 귓속말")),
-                ("CM", tr("커뮤니티"))]
-        rows += [(f"C{n}", tr("번호 채널 {n}", n=n)) for n in range(1, 11)]
-        rows.append(("!NPC", tr("NPC·보스 대사")))
+        rows = self._channel_rows()
         self.route_vars = {}
         half = (len(rows) + 1) // 2
         for i, (code, label) in enumerate(rows):
@@ -502,7 +785,7 @@ class OptionsWindow:
             ttk.Label(tab, text=label).grid(row=r, column=c + 1, sticky="w", padx=(0, 4), pady=1)
             var = tk.StringVar(value=labels.get(saved.get(code), labels[translator.ROUTE_DEFAULT]))
             self.route_vars[code] = var
-            ttk.Combobox(tab, textvariable=var, values=list(labels.values()), state="readonly", width=26).grid(
+            ttk.Combobox(tab, textvariable=var, values=list(labels.values()), state="readonly", width=30).grid(
                 row=r, column=c + 2, sticky="w", padx=(0, 10), pady=1)
         last = half + 1
         bar = ttk.Frame(tab)
@@ -523,6 +806,10 @@ class OptionsWindow:
                   foreground="#666", wraplength=620, justify="left").grid(row=last + 1, column=0, columnspan=6, sticky="w", padx=8, pady=(2, 8))
         self._route_by_label = by_label
 
+    def _send_route_key(self):
+        by_label = {v: k for k, v in self._send_route_labels().items()}
+        return by_label.get(self.v["send_route"].get(), translator.ROUTE_DEFAULT)
+
     def _collect_routes(self):
         out = {}
         for code, var in self.route_vars.items():
@@ -531,9 +818,9 @@ class OptionsWindow:
                 out[code] = key
         return out
 
-    def _tab_window(self, nb):
+    def _tab_window(self, tab):
+        """The options of the main window (window 1), built into `tab` (the "windows" tab shows them next to the list and the channels)."""
         v, cfg, app = self.v, self.app.cfg, self.app
-        tab = self._tab_frame(nb, tr("창"))
         # two columns: left = what the window does (behaviour, what is shown), right = how it looks
         left = ttk.Frame(tab)
         left.grid(row=0, column=0, sticky="nsew")
@@ -555,10 +842,10 @@ class OptionsWindow:
 
         ttk.Label(sl, text=tr("배경")).grid(row=0, column=0, sticky="w")
         ttk.Scale(sl, from_=0.05, to=1.0, variable=v["bg_opacity"], command=on_opacity,
-                  length=200).grid(row=0, column=1, padx=6, pady=2)
+                  length=110).grid(row=0, column=1, padx=6, pady=2)
         ttk.Label(sl, text=tr("글자")).grid(row=1, column=0, sticky="w")
         ttk.Scale(sl, from_=0.3, to=1.0, variable=v["text_opacity"], command=on_opacity,
-                  length=200).grid(row=1, column=1, padx=6, pady=2)
+                  length=110).grid(row=1, column=1, padx=6, pady=2)
         ttk.Label(sl, text=tr("두 값이 다르면 창 2개로 합성합니다."), foreground="#666").grid(
             row=2, column=0, columnspan=2, sticky="w")
 
@@ -603,8 +890,11 @@ class OptionsWindow:
             cfg["blur_experiment"] = bool(v["blur_experiment"].get())
             app.apply_opacity()
 
-        ttk.Checkbutton(ov, text=tr("마우스를 올리면 창을 완전히 투명하게 (클릭 통과를 켠 경우만. 조작 키를 누르면 다시 보임)"),
-                        variable=v["hover_clear"], command=on_overlay).grid(row=0, column=0, sticky="w", **PAD)
+        hf = ttk.Frame(ov)
+        hf.grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(hf, text=tr("마우스를 올리면 창을 완전히 투명하게"),
+                        variable=v["hover_clear"], command=on_overlay).pack(anchor="w", **PAD)
+        ttk.Label(hf, text=tr("클릭 통과를 켠 경우만. 조작 키를 누르면 다시 보임"), foreground="#666").pack(anchor="w", padx=26)
         if sys.platform == "win32":                       # the blur is not implemented on macOS
             bl = ttk.Frame(ov)
             bl.grid(row=1, column=0, sticky="w")
@@ -713,6 +1003,12 @@ class OptionsWindow:
         tc.grid(row=1, column=1, sticky="w", padx=6)
         ttk.Entry(tc, textvariable=v["trans_color"], width=9).pack(side="left")
         ttk.Button(tc, text=tr("색 선택"), command=self.pick_trans_color).pack(side="left", padx=4)
+        fd = ttk.Frame(left)
+        fd.grid(row=12, column=0, sticky="w", **PAD)
+        ttk.Label(fd, text=tr("(실험) 지난 줄이 사라지는 시간 (초, 0: 사라지지 않음)"), wraplength=240, justify="left").pack(side="left")
+        ttk.Spinbox(fd, from_=0, to=3600, increment=10, textvariable=v["fade_sec"], width=6).pack(side="left", padx=6)
+        ttk.Label(left, text=tr("위로 스크롤하거나 클릭 통과 상호작용 키를 누르고 있으면 모두 다시 보입니다."), foreground="#666").grid(
+            row=13, column=0, sticky="w", padx=26)
 
     def _tab_capture(self, nb):
         v = self.v
@@ -811,8 +1107,7 @@ class OptionsWindow:
         row += 1
         self.voice_mode_note = note(left, "", color="#b45f00", row=row)
         row += 1
-        ttk.Checkbutton(left, text=tr("들은 말을 번역해서 보여 주기 (번역 탭의 방식으로)"),
-                        variable=v["voice_translate"]).grid(row=row, column=0, columnspan=3, sticky="w", **PAD)
+        note(left, tr("들은 말의 번역 방식(또는 번역 안 함)은 '채널별 번역' 탭의 '음성 인식'에서 고릅니다."), row=row)
         row += 1
         note(left, tr("주의: 번역 방식이 구글이나 AI 서버이면 들은 말의 글자(음성 자체가 아님)가 그 서버로 전송됩니다."), row=row)
         row += 1
@@ -1092,8 +1387,8 @@ class OptionsWindow:
             return
         what = {"cpu": tr("Whisper (CPU용)"), "gpu": tr("Whisper (GPU용)"), "gpu_extra": tr("GPU 지원 (CUDA 라이브러리)")}[kind]
         if not messagebox.askyesno(tr("음성 인식 설치"), tr("{what}를 설치합니다.\n\n내려받을 양: 약 {gb}GB (인터넷 연결 필요)\n모든 파일은 이 폴더 안에만 저장됩니다: {path}\n\n"
-                                                           "처음 음성 인식을 켤 때 모델(약 {model}GB)을 한 번 더 내려받아 {models} 에 저장합니다.\n\n계속할까요?",
-                                                           what=what, gb=f"{vinst.SIZE_GB[kind]:g}", path=voice.DIR,
+                                                           "처음 음성 인식을 켤 때 모델(약 {model}GB)을 한 번 더 내려받아 {models} 에 저장합니다.\n\n설치에 쓸 파이썬: {python}\n\n계속할까요?",
+                                                           what=what, python=python, gb=f"{vinst.SIZE_GB[kind]:g}", path=voice.DIR,
                                                            model=f"{vinst.SIZE_GB['model']:g}", models=vinst.MODELS), parent=self.win):
             return
         self.app.voice.stop()
@@ -1321,7 +1616,7 @@ class OptionsWindow:
             app += ".exe"
         return {"voice_enabled": bool(v["voice_enabled"].get()), "voice_target": target, "voice_app": app,
                 "voice_lang": v["voice_lang"].get().strip() or "auto", "voice_mode": v["voice_mode"].get(),
-                "voice_translate": bool(v["voice_translate"].get()), "voice_end_ms": end_ms,
+                "voice_end_ms": end_ms,
                 "voice_device": v["voice_device"].get(), "voice_model": v["voice_model"].get().strip(),
                 "voice_max_s": max(3, min(30, int(v["voice_max_s"].get()))), "voice_engine": v["voice_engine"].get(),
                 "voice_oa_url": v["voice_oa_url"].get().strip(), "voice_oa_key": v["voice_oa_key"].get().strip(),
@@ -1334,8 +1629,12 @@ class OptionsWindow:
         ttk.Checkbutton(tab, text=tr("보내기 번역 사용 (단축키 → 입력줄 → 번역을 클립보드로)"),
                         variable=v["send_enabled"]).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
         ttk.Label(tab, text=tr("보내는 언어")).grid(row=1, column=0, sticky="w", **PAD)
-        ttk.Combobox(tab, textvariable=v["send_lang"], values=LANGS, width=24).grid(row=1, column=1, sticky="w", **PAD)
-
+        lr = ttk.Frame(tab)
+        lr.grid(row=1, column=1, columnspan=2, sticky="w", **PAD)
+        ttk.Combobox(lr, textvariable=v["send_lang"], values=LANGS, width=14).pack(side="left")
+        ttk.Label(lr, text=tr("번역 방식")).pack(side="left", padx=(12, 4))
+        ttk.Combobox(lr, textvariable=v["send_route"], values=list(self._send_route_labels().values()), state="readonly",
+                     width=28).pack(side="left")
         ttk.Label(tab, text=tr("단축키")).grid(row=2, column=0, sticky="w", **PAD)
         hk = ttk.Frame(tab)
         hk.grid(row=2, column=1, columnspan=2, sticky="w", **PAD)
@@ -1762,7 +2061,8 @@ class OptionsWindow:
             "custom_body": self.custom_body.get("1.0", "end-1c").strip(),
             "custom_path": v["custom_path"].get().strip(),
         }
-        if self._mode() == "custom":
+        routes_now = set(self._collect_routes().values()) | {self._send_route_key()}
+        if self._mode() == "custom" or translator.ROUTE_CUSTOM in routes_now:
             translator.custom_check(custom)             # ValueError with a message for the user
         return dict(custom, **{
             "disable_reasoning": bool(v["disable_reasoning"].get()),
@@ -1867,6 +2167,7 @@ class OptionsWindow:
             poll_hz = max(5, min(60, int(v["poll_hz"].get())))
             full_scan = max(5, min(600, int(v["full_scan_sec"].get())))
             max_lines = max(50, min(5000, int(v["max_lines"].get())))
+            fade_sec = max(0, min(3600, int(v["fade_sec"].get())))
             line_spacing = max(0, min(40, int(v["line_spacing"].get())))
             group_spacing = max(0, min(60, int(v["group_spacing"].get())))
             trans_size = int(v["trans_font_size"].get())
@@ -1900,7 +2201,7 @@ class OptionsWindow:
         cfg.update(hover_clear=bool(v["hover_clear"].get()), blur_experiment=bool(v["blur_experiment"].get()),
                    blur_state=4 if v["blur_kind"].get() == tr("진하게 (아크릴)") else 3)
         cfg.update(send_enabled=bool(v["send_enabled"].get()),
-                   send_lang=v["send_lang"].get().strip() or "English", send_hotkey=hotkey,
+                   send_lang=v["send_lang"].get().strip() or "English", send_route=self._send_route_key(), send_hotkey=hotkey,
                    send_autopaste=bool(v["send_autopaste"].get()), send_show_log=bool(v["send_show_log"].get()),
                    send_prompt="" if sprompt == translator.DEFAULT_SEND_PROMPT.strip() else sprompt,
                    send_extra_prompt=self.send_extra_text.get("1.0", "end-1c").strip())
@@ -1908,11 +2209,13 @@ class OptionsWindow:
         cfg.update(new_voice)
         cfg.update(check_updates=bool(v["check_updates"].get()), channel_route=self._collect_routes())
         cfg.update(shadow_on=bool(v["shadow_on"].get()), shadow_color=shadow_color, shadow_dx=sdx, shadow_dy=sdy)
-        cfg.update(exit_with_game=bool(v["exit_with_game"].get()), swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, full_scan_sec=full_scan, max_lines=max_lines,
+        cfg.update(exit_with_game=bool(v["exit_with_game"].get()), swap_trans=bool(v["swap_trans"].get()), font_family=(v["font_family"].get() if v["font_family"].get() in app.custom_fonts else ""), font_size=font_size, poll_hz=poll_hz, full_scan_sec=full_scan, max_lines=max_lines, fade_sec=fade_sec,
                    line_spacing=line_spacing, group_spacing=group_spacing, trans_font_size=trans_size, trans_color=trans_color,
                    show_time=bool(v["show_time"].get()), channel_detail=bool(v["channel_detail"].get()),
                    class_colors=bool(v["class_colors"].get()))
         app.apply_window_settings()
+        self._collect_windows()
+        app.sync_children()
         config.save(cfg)
         self._apply_voice(old_voice, new_voice)
         app.worker.research()

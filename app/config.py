@@ -1,6 +1,7 @@
 import json
 import os
 
+import childwin
 import paths
 
 from translator import DEFAULT_PROMPT, DEFAULT_REASONING_OFF, DEFAULT_SEND_PROMPT, LEGACY_DEFAULT_PROMPTS
@@ -35,7 +36,9 @@ DEFAULTS = {
     "timeout": 30,
     "max_tokens": 300,
     "skip_same_lang": True,
-    "channel_route": {},                  # channel code -> "google_free" | "off" (missing = the translation tab's method)
+    "channel_route": {},                  # channel code -> "google_free" | "google" | "openai" | "custom" | "off" (missing = the translation tab's method)
+    "win1_off": [],                       # channels NOT shown in the main window (empty = all; see childwin.py)
+    "child_windows": [],                  # extra windows (childwin.py): id, name, enabled, channels, geometry, font_family, font_size, opacity
     "hover_clear": False,             # click-through only: the window turns fully transparent while the mouse is over it
     "blur_experiment": False,         # Windows: blur what is behind the background window
     "blur_state": 3,                  # 3 = light blur, 4 = acrylic (stronger; tinted by the "background" opacity)
@@ -46,6 +49,7 @@ DEFAULTS = {
     "max_parallel": 2,
     # send box: type in your own language, get the translation on the clipboard
     "send_enabled": True,
+    "send_route": "default",             # the translation method for sending: "default" = the translation tab's | google_free | google | openai | custom
     "send_lang": "English",
     "send_hotkey": "Shift+Enter",
     "send_show_log": False,               # show the translated text sent (the "↗" line) in the window; off: it comes back as a chat line
@@ -59,7 +63,6 @@ DEFAULTS = {
     "voice_lang": "auto",                 # language spoken in the voice chat ("auto" = detect for every sentence)
     "voice_mode": "sentence",             # sentence: one text when a sentence is finished | live: the text while it is spoken (Whisper: not recommended)
     "voice_partial_ms": 1000,             # live mode: how often the text so far is updated
-    "voice_translate": True,              # translate what was said (with the translation tab's method)
     "voice_end_ms": 700,                  # quiet time (ms) that ends a sentence
     "voice_device": "auto",               # auto | cuda | cpu
     "voice_model": "",                    # "" = the extension's default (large-v3-turbo)
@@ -96,6 +99,7 @@ DEFAULTS = {
     "channel_detail": False,              # show the line codes "(S) (W→) (C1) (!LT)" as before; off: only "(1)" for numbered channels
     "show_time": True,                    # prefix every line with the time it was read
     "max_lines": 500,
+    "fade_sec": 0,                        # a line (with its translation) older than this many seconds is hidden; scrolling up shows it again (0 = never)
     "geometry": "560x420",
     # capture
     "poll_hz": 30,
@@ -115,6 +119,11 @@ def load():
     except (FileNotFoundError, json.JSONDecodeError):
         pass
     cfg.pop("opacity", None)
+    if cfg.pop("voice_translate", True) is False and "!VC" not in (cfg.get("channel_route") or {}):   # (replaced by the channel translation of "!VC")
+        cfg["channel_route"] = dict(cfg.get("channel_route") or {}, **{"!VC": "off"})
+    cfg["child_windows"] = childwin.normalize(cfg.get("child_windows"))
+    if not isinstance(cfg.get("win1_off"), list):
+        cfg["win1_off"] = []
     if not isinstance(cfg.get("channel_route"), dict):
         cfg["channel_route"] = {}
     if cfg.pop("glossary_inline", False):                    # (replaced by glossary_mode) the checkbox of the first version
