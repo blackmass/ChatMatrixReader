@@ -1,6 +1,7 @@
+PySide6-Essentials>=6.11,<6.13
 numpy>=1.26
-pyobjc-framework-Cocoa>=10.0
-pyobjc-framework-Quartz>=10.0
 pillow>=10.0
 certifi
+pyobjc-framework-Cocoa>=10.0
+pyobjc-framework-Quartz>=10.0
 pyobjc-framework-ApplicationServices>=10.0

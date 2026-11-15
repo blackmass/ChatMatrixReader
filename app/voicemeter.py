@@ -1,7 +1,7 @@
 """The small signal indicator of the voice recognition (top right corner of the window).
 
     Model   what the indicator shows, from the events of the voice process (no window needed, so it is tested on its own)
-    VoiceMeter   the little canvas that draws a Model snapshot (needs tkinter)
+    (the little widget that draws a Model snapshot comes with the Qt window code)
 
 States:  off (nothing shown) | loading (preparing, a light moves over the bars) | idle (connected, nobody is making sound right now:
 one dim bar) | active (sound is coming in: the bars follow the level) | error (a red "!"; needs the user's attention).
@@ -95,73 +95,3 @@ class Model:
         if self.state == "loading":
             return ("loading", 0, "loading", {})
         return ("off", 0, "off", {})
-
-
-# ------------------------------------------------------------------------------------------------------------------------------
-try:
-    import tkinter as tk
-except ImportError:                                  # no tkinter (the tests of Model)
-    tk = None
-
-if tk is not None:
-    W, H = 31, 16
-    BAR_W, GAP, X0 = 3, 2, 4
-    HEIGHTS = (3, 5, 7, 9, 11)
-    C_BG, C_EDGE = "#1c1e22", "#3a3d44"
-    C_OFF, C_ON, C_DIM, C_LOAD, C_ERR = "#3a3d44", "#4cc38a", "#2f7a57", "#6b83b3", "#ff5a5f"
-
-    class VoiceMeter(tk.Canvas):
-        """Five rising bars. Clicking opens the options (voice tab); the pointer over it shows what it means."""
-
-        def __init__(self, parent, on_click, tip_text):
-            super().__init__(parent, width=W, height=H, bg=C_BG, highlightthickness=1, highlightbackground=C_EDGE, bd=0,
-                             cursor="hand2")
-            self.tip_text = tip_text                       # () -> the sentence for the current state
-            self._last = None
-            self._tip = None
-            self.bind("<Button-1>", lambda e: on_click())
-            self.bind("<Enter>", self._show_tip)
-            self.bind("<Leave>", self._hide_tip)
-
-        def render(self, state, bars, phase=0):
-            key = (state, bars, phase if state == "loading" else 0)
-            if key == self._last:
-                return
-            self._last = key
-            self.delete("all")
-            if state == "error":
-                self.create_text(W // 2, H // 2, text="!", fill=C_ERR, font=("Segoe UI", 10, "bold"))
-                return
-            for i in range(BARS):
-                h = HEIGHTS[i]
-                x = X0 + i * (BAR_W + GAP)
-                if state == "active":
-                    color = C_ON if i < bars else C_OFF
-                elif state == "idle":
-                    color = C_DIM if i == 0 else C_OFF
-                else:                                       # loading: one bar lit, moving
-                    color = C_LOAD if i == (phase // 2) % BARS else C_OFF
-                self.create_rectangle(x, H - 3 - h, x + BAR_W, H - 3, fill=color, width=0)
-
-        def _show_tip(self, e=None):
-            self._hide_tip()
-            try:
-                tip = tk.Toplevel(self)
-                tip.wm_overrideredirect(True)
-                tip.attributes("-topmost", True)
-                tk.Label(tip, text=self.tip_text(), bg="#2b2d31", fg="#e6e6e6", font=("Malgun Gothic", 9), padx=8, pady=4,
-                         justify="left", wraplength=320, bd=1, relief="solid").pack()
-                tip.update_idletasks()
-                x = self.winfo_rootx() + W - tip.winfo_width()
-                tip.wm_geometry(f"+{max(0, x)}+{self.winfo_rooty() + H + 4}")
-                self._tip = tip
-            except tk.TclError:
-                self._tip = None
-
-        def _hide_tip(self, e=None):
-            if self._tip is not None:
-                try:
-                    self._tip.destroy()
-                except tk.TclError:
-                    pass
-                self._tip = None

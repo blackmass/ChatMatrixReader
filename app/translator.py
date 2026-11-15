@@ -33,7 +33,8 @@ GOOGLE_V2_URL = "https://translation.googleapis.com/language/translate/v2"
 TRANSLATOR_LABELS = {
     "none": "사용 안 함 (원문만)",
     "openai": "OpenAI 호환 API (LM Studio 등)",
-    "google": "Google 번역",
+    "google_free": "Google 번역 (무료)",             # same method as "google", the API key is not used (cfg["google_free"])
+    "google": "Google 번역 (유료, API Key)",
     "custom": "사용자 정의 HTTP (DeepL, Azure 등)",
 }
 
@@ -632,9 +633,14 @@ def _same_text(a: str, b: str) -> bool:
     return " ".join((a or "").split()).lower() == " ".join((b or "").split()).lower()
 
 
+def google_key(cfg: dict) -> str:
+    """The Cloud Translation API key a Google request uses: none when the free way is chosen (whatever is typed in the key field)."""
+    return "" if cfg.get("google_free") else (cfg.get("google_api_key") or "").strip()
+
+
 def translate_google(cfg: dict, text: str) -> str:
     tl = lang_code(cfg.get("target_lang", "한국어"))
-    key = (cfg.get("google_api_key") or "").strip()
+    key = google_key(cfg)
     timeout = min(float(cfg.get("timeout", 30)), 10)
     sent, words = text, []
     if cfg.get("glossary_google", True):
@@ -944,7 +950,7 @@ def _http_form(req, headers, timeout):
 def translate(cfg: dict, text: str) -> str:
     mode = cfg.get("translator", "none")
     if mode == "google":
-        where = "Google v2(키)" if (cfg.get("google_api_key") or "").strip() else "Google gtx(키 없음)"
+        where = "Google v2(키)" if google_key(cfg) else "Google gtx(키 없음)"
     elif mode == "openai":
         where = f"{cfg.get('api_url')} model={cfg.get('api_model') or '(기본)'}"
     elif mode == "custom":
@@ -998,8 +1004,10 @@ def route_for(cfg: dict, channel: str):
 def apply_route(cfg: dict, route) -> dict:
     """The settings one request is translated with: the same as the translation tab's, except for the method the route names."""
     if route == ROUTE_GOOGLE_FREE:
-        return dict(cfg, translator="google", google_api_key="")
-    if route in _ROUTE_MODE:                                    # Google with its key (without one: the free way), OpenAI, HTTP
+        return dict(cfg, translator="google", google_free=True, google_api_key="")
+    if route == ROUTE_GOOGLE:                                   # Google with its key (without one: the free way)
+        return dict(cfg, translator="google", google_free=False)
+    if route in _ROUTE_MODE:                                    # OpenAI, HTTP
         return dict(cfg, translator=_ROUTE_MODE[route])
     return cfg
 
@@ -1070,7 +1078,7 @@ class TranslationService:
 
     def submit(self, token, text, route=None) -> bool:
         cfg = apply_route(dict(self.get_cfg()), route)  # snapshot: later option changes don't affect this request
-        key = (cfg.get("translator"), bool((cfg.get("google_api_key") or "").strip()), cfg.get("target_lang"), cfg.get("api_model"),
+        key = (cfg.get("translator"), bool(google_key(cfg)), cfg.get("target_lang"), cfg.get("api_model"),
                hash(cfg.get("prompt")), hash((cfg.get("extra_prompt") or "").strip()), glossary.cache_key(cfg), custom_signature(cfg), text)
         with self.lock:
             if key in self.long:                         # long-term first

@@ -1,7 +1,7 @@
 import json
 import os
 
-import childwin
+import winconf
 import paths
 
 from translator import DEFAULT_PROMPT, DEFAULT_REASONING_OFF, DEFAULT_SEND_PROMPT, LEGACY_DEFAULT_PROMPTS
@@ -23,6 +23,7 @@ DEFAULTS = {
     "custom_body_type": "json",           # json | form
     "custom_body": "",
     "custom_path": "",                    # where the translation is in the answer, e.g. translations.0.text
+    "google_free": False,                 # True: the main method is Google without the API key (the key field is kept but not used)
     "google_api_key": "",                 # optional; empty = free unofficial endpoint
     "prompt": DEFAULT_PROMPT,
     "extra_prompt": "",                   # the user's own additional instructions, added to the end of the prompt (style ...)
@@ -37,8 +38,8 @@ DEFAULTS = {
     "max_tokens": 300,
     "skip_same_lang": True,
     "channel_route": {},                  # channel code -> "google_free" | "google" | "openai" | "custom" | "off" (missing = the translation tab's method)
-    "win1_off": [],                       # channels NOT shown in the main window (empty = all; see childwin.py)
-    "child_windows": [],                  # extra windows (childwin.py): id, name, enabled, channels, geometry, font_family, font_size, opacity
+    "win1_off": [],                       # channels NOT shown in the main window (empty = all; see winconf.py)
+    "child_windows": [],                  # extra windows (winconf.py): id, name, enabled, channels, geometry, font_family, font_size, opacity
     "hover_clear": False,             # click-through only: the window turns fully transparent while the mouse is over it
     "blur_experiment": False,         # Windows: blur what is behind the background window
     "blur_state": 3,                  # 3 = light blur, 4 = acrylic (stronger; tinted by the "background" opacity)
@@ -96,9 +97,14 @@ DEFAULTS = {
     "swap_trans": False,                  # translation above, the original below it (in the second-line colour / size)
     "trans_font_size": 0,                 # size of the translated text (0 = same as the original)
     "class_colors": True,                 # colour the speaker's name by class (needs the addon to send the class)
+    "bottom_stick": False,                # few lines sit at the bottom of the window (new lines push the older ones up)
+    "text_align": "left",                 # left | center | right: where the lines sit in the window
+    "head_mode": "",                      # what stands before a line: detail | basic | nochan | body ("" = from channel_detail)
     "channel_detail": False,              # show the line codes "(S) (W→) (C1) (!LT)" as before; off: only "(1)" for numbered channels
     "show_time": True,                    # prefix every line with the time it was read
     "max_lines": 500,
+    "options_pos": "",                    # last position of the options window ("x,y"; empty = the middle of the monitor of the chat window)
+    "options_size": "800x600",            # size of the options window (it can be resized; minimum 720x480)
     "fade_sec": 0,                        # a line (with its translation) older than this many seconds is hidden; scrolling up shows it again (0 = never)
     "geometry": "560x420",
     # capture
@@ -121,7 +127,7 @@ def load():
     cfg.pop("opacity", None)
     if cfg.pop("voice_translate", True) is False and "!VC" not in (cfg.get("channel_route") or {}):   # (replaced by the channel translation of "!VC")
         cfg["channel_route"] = dict(cfg.get("channel_route") or {}, **{"!VC": "off"})
-    cfg["child_windows"] = childwin.normalize(cfg.get("child_windows"))
+    cfg["child_windows"] = winconf.normalize(cfg.get("child_windows"))
     if not isinstance(cfg.get("win1_off"), list):
         cfg["win1_off"] = []
     if not isinstance(cfg.get("channel_route"), dict):
