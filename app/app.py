@@ -449,6 +449,7 @@ class App(WindowMixin):
             self.text.tag_add("sel", "1.0", "end-1c")
             return "break"
 
+        self.text.bind("<Configure>", lambda e: self._bottom_soon(), add="+")
         self.text.bind("<MouseWheel>", self._wheel)           # over the letters too (the window behind has its own binding)
         self._bind_hover(self.text)
         self.text.bind("<Key>", on_key)
@@ -523,13 +524,13 @@ class App(WindowMixin):
         if time.monotonic() - getattr(self, "_fade_changed", -9) < 0.4 and not self._past:
             return False                                          # the view is being rearranged by the fade (see _fade_update)
         try:
-            past = self.text.yview()[1] < 0.999 and self.text.bbox("end-1c") is None
+            past = self.text.yview()[1] < 0.999 and self.text.bbox("end-2c") is None
         except tk.TclError:
             past = False
         if past != self._past:
             if self._fade_end is not None or past:
                 log.info("fade| past 변경 %s -> %s (yview=%s, 마지막 줄 보임=%s)", self._past, past, self.text.yview(),
-                         self.text.bbox("end-1c") is not None)
+                         self.text.bbox("end-2c") is not None)
             self._past = past
             self._refresh_title()
         return past
@@ -580,7 +581,7 @@ class App(WindowMixin):
                 self.text.tag_remove("ghost", "1.0", "end")
                 if not self._past:
                     self.text.update_idletasks()
-                    self.text.see("end")
+                    self.text.see("end-2c")
                     if later:
                         self.root.after(30, self._scroll_to_end_again)
             except tk.TclError:
@@ -852,7 +853,7 @@ class App(WindowMixin):
         if mode == "openai":
             return (mode, c.get("api_url"), c.get("api_model"), c.get("api_key"))
         if mode == "google":
-            return (mode, c.get("google_api_key"))
+            return (mode, translator.google_key(c))
         if mode == "custom":
             return (mode, c.get("custom_url"), c.get("custom_key"), c.get("custom_headers"), c.get("custom_body"))
         return (mode,)
@@ -976,7 +977,7 @@ class App(WindowMixin):
             cfg = translator.send_cfg(cfg)
         cfg["translator"] = mode
         if mode == "google":
-            who = "Google" + (" (API Key)" if (cfg.get("google_api_key") or "").strip() else "")
+            who = "Google" + (" (API Key)" if translator.google_key(cfg) else "")
         elif mode == "custom":
             who = cfg.get("custom_preset") or cfg.get("custom_url") or "HTTP"
         else:
@@ -1089,7 +1090,7 @@ class App(WindowMixin):
         self.send_entry.configure(state="normal")
         self.send_entry.delete(0, "end")
         self.sendbar.pack(side="bottom", fill="x", before=self.text)
-        self.text.see("end")
+        self.text.see("end-2c")
         self.root.update_idletasks()
         if not winutil.grab_focus(_hwnd(self.root)):
             self.sendbar.pack_forget()
@@ -1383,7 +1384,7 @@ class App(WindowMixin):
         made the window stop following new lines.)"""
         try:
             self.text.update_idletasks()                          # finish pending line measuring first
-            if self.text.bbox("end-1c") is not None:
+            if self.text.bbox("end-2c") is not None:
                 return True
         except Exception:
             pass
@@ -1615,7 +1616,7 @@ class App(WindowMixin):
         """`s` is a string, or a list of (text, extra_tag_or_None) pieces drawn in `tag` (+ the extra tag).
         group=True: the line starts a new group (gap above); a translation or an error of a line is part of its group."""
         at_bottom = self._at_bottom()
-        base = (tag, "gstart") if group else (tag,)
+        base = (tag, "gstart", "al") if group else (tag, "al")      # "al": the alignment of the lines (option)
         start = self.text.index("end-1c" if index == "end" else index)
         if isinstance(s, str):
             self.text.insert(index, s, base)
@@ -1624,6 +1625,7 @@ class App(WindowMixin):
             for piece, extra in s:
                 args += [piece, base + ((extra if isinstance(extra, tuple) else (extra,)) if extra else ())]
             self.text.insert(index, *args)                      # one call: the pieces stay in order at a mark too
+        self._bottom_soon()
         if indent:                                              # the translation line is pushed in by a margin, not by spaces
             self.text.tag_add("ind", start, f"{start}+1c")      # (a space before a long word would let Tk drop the word to the next row)
         if group:
@@ -1650,16 +1652,16 @@ class App(WindowMixin):
         a moment later (the window may also have changed size meanwhile, e.g. the send box closing)."""
         try:
             self.text.update_idletasks()
-            self.text.see("end")
+            self.text.see("end-2c")
             self.root.after(30, self._scroll_to_end_again)
         except tk.TclError:
             pass
 
     def _scroll_to_end_again(self):
         try:
-            if self.text.bbox("end-1c") is None:                  # still not on screen
+            if self.text.bbox("end-2c") is None:                  # still not on screen
                 self.text.update_idletasks()
-                self.text.see("end")
+                self.text.see("end-2c")
         except tk.TclError:
             pass
 
@@ -1677,7 +1679,8 @@ class App(WindowMixin):
         if self.cfg.get("skip_regex_hide") and line.text != "[restricted]" \
                 and translator.matches_skip_regex(chattext.check_text(line.text), self.cfg):
             return                                                # the user's pattern matches: leave the line out
-        ts = (time.strftime("%H:%M:%S") + " ") if self.cfg.get("show_time", True) else ""
+        now_ts = time.strftime("%H:%M:%S") + " "
+        ts = now_ts if self.cfg.get("show_time", True) else ""
         restricted = line.text == "[restricted]"
         if restricted:
             self._show_restricted(ts)
@@ -1708,11 +1711,15 @@ class App(WindowMixin):
             body = chattext.mark_guilds(body)                     # <Guild Name> in the text: green, and not translated
             if line.channel.startswith("!") and "%s" in body and sender:
                 body, sender = body.replace("%s", sender), ""     # NPC emotes: "%s waves." -> the name goes into the text
-        if sender:                                                # [name]: message  (the name in the class colour)
-            ctag = f"cls_{line.cls}" if (self.cfg.get("class_colors", True) and line.cls in chattext.CLASS_COLORS) else None
-            parts = [(f"{ts}{self._code_prefix(line.channel)}[", None), (sender, ctag), ("]: ", None)]
-        else:
-            parts = [(f"{ts}{self._code_prefix(line.channel)}", None)]
+
+        def head(conf):                                           # [name]: message  (the name in the class colour); each window has its own settings
+            mode = childwin.head_mode(conf)
+            t = now_ts if childwin.opt(conf, self.cfg, "show_time", True) else ""
+            if sender and mode != "body":
+                ctag = f"cls_{line.cls}" if (childwin.opt(conf, self.cfg, "class_colors", True) and line.cls in chattext.CLASS_COLORS) else None
+                return [(f"{t}{self._code_prefix(line.channel, mode)}[", None), (sender, ctag), ("]: ", None)]
+            return [(f"{t}{self._code_prefix(line.channel, mode)}", None)]
+        parts = head(self.cfg)
         # The original names of links (addon option) belong to chat lines that get a translation line below them, where the names
         # in the game's language show up. A loot / system line has no such line: it shows the names in the game's language.
         pieces = [(p, self._link_extra(q, tip))
@@ -1734,7 +1741,7 @@ class App(WindowMixin):
         if route == translator.ROUTE_OFF:                         # option "channel translation": this channel is not translated
             translatable, route = False, None
         if kids:
-            self._kids_line(kids, parts + pieces + [("\n", None)], tag, body, translatable, route)
+            self._kids_line(kids, head, pieces, tag, body, translatable, route)
         if not to_parent:
             return
         if self.cfg.get("swap_trans") and translatable:
@@ -1815,7 +1822,16 @@ class App(WindowMixin):
     def _context_menu(self, e):
         """Right-click on window 1: options, and open / close of the extra windows."""
         m = tk.Menu(self.root, tearoff=0)
+        wid = 0                                                  # the window that was clicked: 0 = this one, else an extra window
+        try:
+            top = e.widget.winfo_toplevel()
+            for w in self.children:
+                if top in (w.root, w.back):
+                    wid = w.conf["id"]
+        except (tk.TclError, AttributeError):
+            pass
         m.add_command(label=tr("옵션…"), command=self.open_options)
+        m.add_command(label=tr("이 창의 옵션…"), command=lambda: self.open_options(window=wid))
         m.add_separator()
         for c in self.cfg.get("child_windows", []):
             name = c.get("name") or (tr("음성 인식 창") if c["id"] == childwin.VOICE_ID else tr("창 {n}", n=c["id"]))
@@ -1830,7 +1846,7 @@ class App(WindowMixin):
         self.kid_override[c["id"]] = not is_open
         self.sync_children()
 
-    def _kids_line(self, kids, pieces, tag, body, translatable, route):
+    def _kids_line(self, kids, head, pieces, tag, body, translatable, route):
         """The line goes to the extra windows too; their translation is requested like the main window's (the same text and
         method share one request through the translator's memory)."""
         try:
@@ -1840,7 +1856,10 @@ class App(WindowMixin):
                 token = next(self.tokens)
                 self.kid_tokens[token] = (kids, names, chattext.link_qualities(body), chattext.link_tips(body))
             for w in kids:
-                w.add_line(pieces, tag, token)
+                if token is not None and childwin.opt(w.conf, self.cfg, "swap_trans", False):
+                    w.add_swapped(head(w.conf), pieces, tag, body, token, names, chattext.link_qualities(body), chattext.link_tips(body))
+                else:
+                    w.add_line(head(w.conf) + pieces + [("\n", None)], tag, token)
             if token is not None and not self.translations.submit(token, text, route):
                 self.kid_tokens.pop(token, None)
                 for w in kids:
@@ -1972,12 +1991,15 @@ class App(WindowMixin):
             self._unknown_commands.add(line.channel)
             log.info("알 수 없는 명령 줄을 무시합니다: %s (새 버전의 애드온일 수 있음)", line.channel)
 
-    def _code_prefix(self, ch):
+    def _code_prefix(self, ch, mode=None):
         """What stands in front of a line: nothing, like the game's chat, except "(1)" for numbered channels and an arrow
         for a whisper you sent. The option "show channel codes in detail" brings back  (S) (W→) (C1) (!LT)."""
+        mode = mode or childwin.head_mode(self.cfg)
+        if mode in ("nochan", "body"):                            # no channel mark at all ("(1)", "(음성)", the arrow of a sent whisper)
+            return ""
         if ch == "!VC":
             return tr("(음성)") + " "
-        if self.cfg.get("channel_detail", False):
+        if mode == "detail":
             return f"({SHOWN_CODE.get(ch, ch)}) "
         if ch in ("WT", "BT"):
             return "→ "
@@ -2259,6 +2281,7 @@ class App(WindowMixin):
         self.font_trans.configure(family=self._font_family(), size=self._trans_size())
         self.text.configure(**self._spacing())
         self._configure_layout_tags(self.text)
+        self._bottom_soon()
         top = bool(self.cfg["topmost"]) and not self.cfg.get("topmost_wow_only")
         self.root.attributes("-topmost", top)
         self.back.attributes("-topmost", top)
@@ -2343,7 +2366,10 @@ class App(WindowMixin):
         gap = max(0, min(40, int(self.cfg.get("line_spacing", 0))))
         group = max(0, min(60, int(self.cfg.get("group_spacing", 4))))
         widget.tag_configure("gstart", spacing1=gap // 2 + group)
-        widget.tag_configure("ind", lmargin1=self.font_trans.measure("    "))      # the width the four spaces had
+        al = self.cfg.get("text_align")
+        # the translation line is pushed in (the width of four spaces) - not when centred: it would sit off the middle
+        widget.tag_configure("ind", lmargin1=0 if al == "center" else self.font_trans.measure("    "))
+        widget.tag_configure("al", justify=al if al in childwin.ALIGNS else "left")
         widget.tag_configure("faded", elide=True)                            # lines older than the fade time (see _fade_update)
         widget.tag_configure("ghost", foreground=str(widget.cget("bg")), selectforeground=str(widget.cget("bg")))   # all lines faded
         if colors:
@@ -2428,7 +2454,7 @@ class App(WindowMixin):
                 log.info("fade| 그림자 창 %s", "숨김" if hide else "다시 보임")
             segs, active = [], set()                          # the text with the layout tags (translation size, group gap, hidden lines)
             for key, val, _idx in ([] if self._fade_end == "all" else self.text.dump("1.0", "end-1c", text=True, tag=True)):
-                if key == "tagon" and val in ("trans", "gstart", "ind", "faded", "fpad", "ghost"):
+                if key == "tagon" and val in ("trans", "gstart", "ind", "faded", "fpad", "ghost", "bot"):
                     active.add(val)
                 elif key == "tagoff":
                     active.discard(val)
@@ -2441,13 +2467,19 @@ class App(WindowMixin):
             if sp:
                 self.stext.tag_configure("fpad", spacing1=sp)
                 self.stext.tag_raise("fpad")
-            if (segs, sp) != self._shadow_last:
+            try:                                                # the room above the first line (option "stick to the bottom")
+                bsp = self.text.tag_cget("bot", "spacing1") or "0"
+            except tk.TclError:
+                bsp = "0"
+            self.stext.tag_configure("bot", spacing1=bsp)
+            self.stext.tag_raise("bot")
+            if (segs, sp, bsp) != self._shadow_last:
                 if self._fade_end is not None or (self._shadow_last or ([], ""))[1]:
                     log.info("fade| 그림자 다시 그림: 상태 %s, 조각 %d개, %d자, 여백 %s", self._fade_end, len(segs), sum(len(v) for v, _t in segs), sp)
                 self.stext.delete("1.0", "end")
                 for val, tags in segs:
                     self.stext.insert("end", val, tags)
-                self._shadow_last = (segs, sp)
+                self._shadow_last = (segs, sp, bsp)
             if self._fade_end == "all" and getattr(self, "_fd_all_seen", None) is not self._shadow_last:
                 self._fd_all_seen = self._shadow_last
                 log.info("fade| 그림자 창 확인(전부 사라짐): 그림자 글자 수 %d, 창 보임=%s", len(self.stext.get("1.0", "end-1c")),
@@ -2494,15 +2526,36 @@ class App(WindowMixin):
 
     def _on_yscroll(self, first, last):
         self.sb.set(first, last)
+        if not getattr(self, "_clamp_job", False):               # no blank row below the last line (see childwin.clamp_end)
+            self._clamp_job = True
+            self.root.after_idle(self._clamp_end)
         if self._shadow_active():
             self._sync_shadow()
 
+
+    def _bottom_soon(self):
+        if not getattr(self, "_bottom_job", False):
+            self._bottom_job = True
+            self.root.after_idle(self._bottom_now)
+
+    def _bottom_now(self):
+        self._bottom_job = False
+        childwin.bottom_fill(self.text, bool(self.cfg.get("bottom_stick")))
+        if self._shadow_active():
+            self._shadow_refresh()                              # the shadow copies the new room above the first line
+            self._sync_shadow()
+
+    def _clamp_end(self):
+        self._clamp_job = False
+        childwin.clamp_end(self.text)
+        if self._shadow_active():
+            self._sync_shadow()
 
     def set_click_through(self, on):
         self._interactive = False
         self._set_passthrough(bool(on) and not self._suspend_ct)
 
-    def open_options(self, select_voice=False):
+    def open_options(self, select_voice=False, window=None):
         dump = getattr(self, "_state_dump", None)
         if dump:                                   # if the window had vanished, this shows why (before saving repairs it)
             try:
@@ -2515,6 +2568,8 @@ class App(WindowMixin):
             self.opt = OptionsWindow(self)
         if select_voice:
             self.opt.select_voice()
+        if window is not None:                                   # "options of this window": the windows tab with this window chosen
+            self.opt.select_window(window)
 
     def reopen_options(self, select_tab=None):
         """Rebuild the options window (after a language change)."""

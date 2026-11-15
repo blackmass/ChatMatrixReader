@@ -17,9 +17,11 @@ KNOWN = ("S", "Y", "E", "P", "PL", "R", "RL", "RW", "I", "IL", "G", "O", "W", "B
          *[f"C{n}" for n in range(1, 11)], "!NPC", "!VC")
 UI = {}                                        # colours / sizes / the scrollbar class, filled in by app.py (they live there)
 VOICE_ID = 2                                   # the window that cannot be deleted
+ALIGNS = ("left", "center", "right")           # where the text of the lines sits in the window
+HEADS = ("detail", "basic", "nochan", "body")   # what stands before a line: channel code too | as the game | no channel mark | only the text
 MODES = ("always", "voice", "never")         # when the window is open: always | only while the voice recognition runs (window 2) | never (opened by hand)
 KEYS = {"id": 0, "name": "", "open_mode": "never", "channels": [], "geometry": "", "font_family": "", "font_size": 0,
-        "bg_opacity": 1.0, "text_opacity": 1.0, "topmost": True, "topmost_wow_only": False, "click_through": False, "hover_clear": False}
+        "bg_opacity": 1.0, "text_opacity": 1.0, "topmost": True, "topmost_wow_only": False, "click_through": False, "hover_clear": False, "head_mode": "basic", "align": "left", "bottom": False}
 
 
 def chan_key(code: str) -> str:
@@ -64,8 +66,21 @@ def normalize(items):
         except (TypeError, ValueError):
             d["bg_opacity"] = d["text_opacity"] = 1.0
             d["font_size"] = 0
-        for k in ("topmost", "topmost_wow_only", "click_through", "hover_clear"):
+        for k in ("topmost", "topmost_wow_only", "click_through", "hover_clear", "bottom"):
             d[k] = bool(d[k])
+        if d["align"] not in ALIGNS:
+            d["align"] = "left"
+        if d["head_mode"] not in HEADS:
+            d["head_mode"] = "basic"
+        for k, (lo, hi) in OPT_NUM.items():                      # (only those the window has: the others follow the main window)
+            if k in it:
+                try:
+                    d[k] = max(lo, min(hi, int(it[k])))
+                except (TypeError, ValueError):
+                    pass
+        for k in OPT_BOOL:
+            if k in it:
+                d[k] = bool(it[k])
         if d["topmost_wow_only"]:
             d["topmost"] = False                                 # the two modes exclude each other (like the main window's options)
         d["name"] = d["name"] if isinstance(d["name"], str) else ""
@@ -78,6 +93,64 @@ def normalize(items):
 
 def next_id(items) -> int:
     return max([VOICE_ID] + [d["id"] for d in items]) + 1
+
+
+# Settings an extra window may have of its own; one it does not have (yet) is taken from the main window.
+OPT_NUM = {"max_lines": (50, 5000), "trans_font_size": (0, 32), "line_spacing": (0, 40), "group_spacing": (0, 60)}
+OPT_BOOL = ("show_time", "class_colors", "swap_trans")
+
+
+def opt(conf, cfg, key, default=None):
+    """The value of a setting for the window `conf`: its own when it has one, else the main window's (`cfg`)."""
+    v = conf.get(key)
+    return cfg.get(key, default) if v is None else v
+
+
+def clamp_end(text):
+    """The last real line may sit at the bottom edge of the window, not higher: every line ends with a line break, so the text
+    has an empty line after the last one, and scrolling (wheel, scroll bar) could bring it into view as a blank row."""
+    try:
+        if text.yview()[0] <= 0:                                 # at the top: nothing to pull back
+            return
+        info = text.dlineinfo("end-1c")                          # the empty last line (None: not on screen)
+        if not info:
+            return
+        edge = text.winfo_height() - int(text.cget("pady")) - int(text.cget("borderwidth")) - int(text.cget("highlightthickness"))
+        if info[1] < edge:
+            text.yview_scroll(info[1] - edge, "pixels")
+    except Exception:
+        pass
+
+
+def bottom_fill(text, on):
+    """Option "stick to the bottom": a window with few lines shows them at its bottom edge, not at the top. The room that is left
+    becomes space above the first line (tag "bot"), so every new line pushes the older ones up."""
+    try:
+        had = bool(text.tag_ranges("bot"))
+        text.tag_configure("bot", spacing1=0)                    # (measured without the old space)
+        text.tag_remove("bot", "1.0", "end")
+        if not on:
+            if had:                                              # switched off: the old view still shows the space that is gone
+                text.update_idletasks()
+                text.yview_moveto(1.0)                           # (Tk keeps a content shorter than the window at the top)
+            return
+        real = text.tk.call(text._w, "count", "-update", "-ypixels", "1.0", "end-1c")
+        real = int(real[0] if isinstance(real, (tuple, list)) else real)
+        pad = 2 * (int(text.cget("pady")) + int(text.cget("borderwidth")) + int(text.cget("highlightthickness")))
+        free = max(0, text.winfo_height() - pad - real)
+        text.tag_add("bot", "1.0", "1.0+1c")
+        text.tag_raise("bot")
+        text.tag_configure("bot", spacing1=free)
+    except Exception:
+        pass
+
+
+def head_mode(conf) -> str:
+    """The "line head" setting of a window (the main window: the settings; the old option "channel codes in detail" counts)."""
+    m = conf.get("head_mode")
+    if m in HEADS:
+        return m
+    return "detail" if conf.get("channel_detail") else "basic"
 
 
 def accepts(conf, code: str) -> bool:
@@ -105,6 +178,7 @@ class ChildWindow:
         U = UI
         self.tk, self.app, self.conf, self.plat, self.U = tk, app, conf, plat, U
         self.marks = {}
+        self.swap = {}                                           # token -> the top line of a "translation above" line
         self._geo_job = None
         self._tick_job = None
         self._dead = False
@@ -114,6 +188,7 @@ class ChildWindow:
         self._n = 0
         self._interactive = False
         self._hover_cleared = False
+        self._ct_lifted = False
         wid = conf["id"]
         # the text window (front) and the background window (back), like the main window's root / back
         self.root = tk.Toplevel(app.root)
@@ -171,7 +246,7 @@ class ChildWindow:
             w.bind("<ButtonRelease-1>", self._drag_end)
         # scrollbar and resize grip
         self.sb = U["Scrollbar"](self.body, lambda *a: self.text.yview(*a))
-        self.text.configure(yscrollcommand=self.sb.set)
+        self.text.configure(yscrollcommand=self._on_yscroll)
         self.sb.bind("<MouseWheel>", self._wheel)
         self.grip = tk.Label(self.body, text="◢", bg=BG, fg="#5a5f69", font=("Segoe UI Symbol", 9), cursor=self.plat.RESIZE_CURSOR)
         self.grip.bind("<ButtonPress-1>", self._resize_start)
@@ -187,6 +262,7 @@ class ChildWindow:
         self.text.bind("<Key>", on_key)
         self.text.bind("<Button-1>", lambda e: self.text.focus_set())
         self.text.bind("<MouseWheel>", self._wheel)
+        self.text.bind("<Configure>", lambda e: self._bottom_soon(), add="+")
         self.back.bind("<MouseWheel>", self._wheel)
         for seq in self.plat.RIGHT_CLICKS:                       # the main window's menu (options, open / close the windows)
             self.root.bind(seq, app._context_menu)
@@ -211,15 +287,21 @@ class ChildWindow:
         fam = c.get("font_family")
         fam = fam if fam and fam in app.custom_fonts else app._font_family()
         self.font.configure(family=fam, size=size)
-        self.font_trans.configure(family=fam, size=size)
-        self.text.configure(**app._spacing())
-        self.text.tag_configure("gstart", spacing1=app._spacing()["spacing1"] + max(0, min(60, int(app.cfg.get("group_spacing", 4)))))
-        self.text.tag_configure("ind", lmargin1=self.font_trans.measure("    "))
+        tsz = int(opt(c, app.cfg, "trans_font_size", 0) or 0)           # the translation / the lower line: its own size, or the size above
+        self.font_trans.configure(family=fam, size=tsz if 8 <= tsz <= 32 else size)
+        gap = max(0, min(40, int(opt(c, app.cfg, "line_spacing", 0))))
+        self.text.configure(spacing1=gap // 2, spacing2=gap // 2, spacing3=gap - gap // 2)
+        self.text.tag_configure("gstart", spacing1=gap // 2 + max(0, min(60, int(opt(c, app.cfg, "group_spacing", 4)))))
+        al = c.get("align") if c.get("align") in ALIGNS else "left"
+        self.text.tag_configure("ind", lmargin1=0 if al == "center" else self.font_trans.measure("    "))
+        self.text.tag_configure("al", justify=al)
+        self._bottom_soon()
         self.text.tag_configure("trans", foreground=app._trans_color(), font=self.font_trans)
         self.lbl_title.configure(text=self.title_text())
         top = bool(c.get("topmost", True)) and not c.get("topmost_wow_only")
         self.root.attributes("-topmost", top)
         self.back.attributes("-topmost", top)
+        self._ct_lifted = False
         self._hover_cleared = False                              # (re)applying brings the window back; the next tick clears it again
         self.apply_opacity()
         self._interactive = False
@@ -317,6 +399,12 @@ class ChildWindow:
                 p, n = u.GetWindow(p, 2), n + 1                  # GW_HWNDNEXT
             return p == b
 
+        if self._nogame():                                       # no game window: like the main window, everything goes on top and stays
+            if not is_top(me):                                   # visible (otherwise a window set to "above the game" would hide
+                put(-1)                                          # behind the other programs, with nothing to stack above)
+                self._stack()
+                self._log_fix("게임 창 없음: 맨 위로")
+            return
         if c.get("topmost_wow_only"):
             fg = u.GetForegroundWindow()
             if not g or u.IsIconic(g):
@@ -350,6 +438,10 @@ class ChildWindow:
         elif is_top(me):
             put(-2)
             self._stack()
+
+    def _nogame(self):
+        """The main window found no game window (it raised all windows for that): the extra windows do the same."""
+        return bool(getattr(self.app, "_nogame_top", False))
 
     def _log_fix(self, why):
         import logging
@@ -429,6 +521,17 @@ class ChildWindow:
         """Like the main window's _hover_tick: click-through lets the mouse pass while the interact key is not held."""
         app = self.app
         inside = self._inside()
+        nogame = self._nogame()
+        if self.conf.get("click_through") and nogame:            # nothing to look through at: an ordinary window until the game is back
+            if not self._ct_lifted:
+                self._ct_lifted, self._interactive = True, False
+                self._set_passthrough(False)
+            self._set_hover_clear(False)
+            self.set_chrome(True)
+            return
+        if self._ct_lifted:
+            self._ct_lifted = False
+            self._set_passthrough(bool(self.conf.get("click_through")))
         if self.conf.get("click_through"):
             keep = self._interactive and (self.dragging or app._key_down(0x01))      # 0x01 = left button
             interactive = (app._interact_down() and inside) or keep
@@ -506,6 +609,27 @@ class ChildWindow:
         x0, y0, w0, h0 = self._rs
         self.root.geometry(f"{max(self.MIN_W, w0 + e.x_root - x0)}x{max(self.MIN_H, h0 + e.y_root - y0)}")
 
+    def _bottom_soon(self):
+        if not getattr(self, "_bottom_job", False):
+            self._bottom_job = True
+            self.root.after_idle(self._bottom_now)
+
+    def _bottom_now(self):
+        self._bottom_job = False
+        if not self._dead:
+            bottom_fill(self.text, bool(self.conf.get("bottom")))
+
+    def _on_yscroll(self, first, last):
+        self.sb.set(first, last)
+        if not getattr(self, "_clamp_job", False):               # (once per idle moment, not once per change)
+            self._clamp_job = True
+            self.root.after_idle(self._clamp)
+
+    def _clamp(self):
+        self._clamp_job = False
+        if not self._dead:
+            clamp_end(self.text)
+
     def _wheel(self, e):
         self.text.yview_scroll(-3 if e.delta > 0 else 3, "units")
         return "break"
@@ -533,7 +657,7 @@ class ChildWindow:
     # ---- the lines
     def _copy_tag(self, name):
         """A tag of the main window (a colour ...) in this window too; the main window owns the colours."""
-        if not name or name in ("gstart", "ind", "trans", "faded", "ghost", "fpad"):
+        if not name or name in ("gstart", "ind", "trans", "faded", "ghost", "fpad", "al"):
             return
         src = self.app.text
         for opt in ("foreground", "underline"):
@@ -555,27 +679,28 @@ class ChildWindow:
     def _at_bottom(self):
         try:
             self.text.update_idletasks()
-            if self.text.bbox("end-1c") is not None:
+            if self.text.bbox("end-2c") is not None:
                 return True
         except Exception:
             pass
         return self.text.yview()[1] >= 0.999
 
     def _scroll_to_end(self):
-        self.text.see("end")
-        self.root.after(30, lambda: self.text.see("end") if not self._dead else None)
+        self.text.see("end-2c")
+        self.root.after(30, lambda: self.text.see("end-2c") if not self._dead else None)
 
     def insert(self, pieces, tag, index="end", group=True, indent=False):
         at_bottom = self._at_bottom()
-        base = (tag, "gstart") if group else (tag,)
+        base = (tag, "gstart", "al") if group else (tag, "al")
         start = self.text.index("end-1c" if index == "end" else index)
         args = []
         for piece, extra in (pieces if not isinstance(pieces, str) else [(pieces, None)]):
             args += [piece, self._tags(base, extra)]
         self.text.insert(index, *args)
+        self._bottom_soon()
         if indent:
             self.text.tag_add("ind", start, f"{start}+1c")
-        keep = int(self.app.cfg.get("max_lines", 500))
+        keep = int(opt(self.conf, self.app.cfg, "max_lines", 500))
         n = int(self.text.index("end-1c").split(".")[0])
         if n > keep:
             self.text.delete("1.0", f"{n - keep}.0")
@@ -590,11 +715,56 @@ class ChildWindow:
             self.text.mark_gravity(mark, "left")
             self.marks[token] = mark
 
+    def add_swapped(self, head, orig, tag, body, token, names, quals, tips):
+        """Option "translation above, original below": the top line has "…" until the translation comes (like the main window)."""
+        from chattext import plain
+        self.insert(head, tag)
+        self._mark(f"trb{token}")
+        self.insert([("…", None), ("\n", None)], tag, group=False)
+        self._mark(f"trl{token}")
+        self.insert(self.app._guild([(plain(body, True) + "\n", None)]), "trans", group=False, indent=True)
+        self._mark(f"tr{token}")
+        self.marks[token] = f"tr{token}"
+        self.swap[token] = {"tag": tag, "orig": orig}
+
+    def _mark(self, name):
+        self.text.mark_set(name, "end-1c")
+        self.text.mark_gravity(name, "left")
+
+    def _swap_done(self, token, pieces):
+        """The translation (or, without one, the original) takes the place of the "…" in the top line."""
+        info = self.swap.pop(token, None)
+        if not info:
+            return False
+        trb, trl = f"trb{token}", f"trl{token}"
+        try:
+            if self.text.get(trb, f"{trb}+1c") != "…":
+                return True                                      # that line is gone
+            self.text.delete(trb, f"{trb}+1c")
+            if pieces:
+                self.insert(pieces, info["tag"], index=trb, group=False)
+            else:                                                # no translation: the original above, the lower copy goes away
+                self.insert(info["orig"], info["tag"], index=trb, group=False)
+                if "ind" in self.text.tag_names(trl):
+                    self.text.delete(trl, f"{trl} lineend+1c")
+        except tk.TclError:
+            pass
+        return True
+
     def add_translation(self, token, pieces, err=None, tag="trans"):
         mark = self.marks.pop(token, None)
         if mark is None:
             return
         try:
+            if token in self.swap:
+                self._swap_done(token, None if err else pieces)
+                for m in (f"trb{token}", f"trl{token}"):
+                    try:
+                        self.text.mark_unset(m)
+                    except Exception:
+                        pass
+                if not err:
+                    return
             if err:
                 self.insert("⚠ " + err + "\n", "error", index=mark, group=False, indent=True)
             elif pieces:
@@ -606,6 +776,8 @@ class ChildWindow:
                 pass
 
     def drop(self, token):
+        if token in self.swap:
+            self._swap_done(token, None)
         mark = self.marks.pop(token, None)
         if mark:
             try:

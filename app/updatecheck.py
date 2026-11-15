@@ -25,11 +25,23 @@ def is_newer(latest, current):
     return bool(a and b and a > b)
 
 
-def fetch_latest(url=None, timeout=5.0):
-    """-> 'v1.3.0' (the newest release tag, validated). Raises translator.TranslateError / ValueError."""
+def fetch_latest(url=None, timeout=5.0, major=None):
+    """-> 'v1.8.2': the newest release tag OF THIS MAJOR VERSION (a 1.x program does not announce 2.0), validated. Drafts and
+    pre-releases are skipped. Raises translator.TranslateError / ValueError."""
+    major = version.MAJOR if major is None else major
     data = translator._http_json(url or version.LATEST_API, None, {"Accept": "application/vnd.github+json"}, timeout)
-    tag = data.get("tag_name") if isinstance(data, dict) else None
-    v = parse(tag if isinstance(tag, str) else "")
-    if not v:
-        raise ValueError("unexpected release tag: %r" % (str(tag)[:40],))
-    return fmt(v)
+    items = data if isinstance(data, list) else [data]          # (one release object works too)
+    best, seen = None, []
+    for it in items:
+        if not isinstance(it, dict) or it.get("draft") or it.get("prerelease"):
+            continue
+        tag = it.get("tag_name")
+        v = parse(tag if isinstance(tag, str) else "")
+        if not v:
+            seen.append(str(tag)[:40])
+            continue
+        if v[0] == major and (best is None or v > best):
+            best = v
+    if best is None:
+        raise ValueError("no release of version %d.x found (tags seen: %r)" % (major, seen[:3]))
+    return fmt(best)
