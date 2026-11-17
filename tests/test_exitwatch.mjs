@@ -1,0 +1,12 @@
+import { ExitWatch, GRACE_SEC } from '../app/core/exitwatch.js';
+import { check } from './helpers.mjs';
+let w = new ExitWatch();
+check(w.tick(0, true, false) === '' && w.tick(100, true, false) === '', 'the game was never seen: never quits');
+w.tick(101, true, true);
+check(w.tick(102, true, false) === '' && w.tick(102 + GRACE_SEC - 1, true, false) === '', 'game gone: waits');
+check(w.tick(102 + GRACE_SEC, true, false) === 'quit', 'game gone for the grace time: quit');
+w = new ExitWatch(); w.tick(0, true, true); w.tick(1, true, false); w.tick(3, true, true);
+check(w.tick(4, true, false) === '' && w.tick(8, true, false) === '' && w.tick(9, true, false) === 'quit', 'the game came back: the count starts again');
+w = new ExitWatch(); w.tick(0, false, true);
+check(w.tick(50, false, false) === '', 'option off: never quits');
+check(w.tick(60, true, false) === '' && w.tick(65, true, false) === 'quit', 'option switched on later: counts from then');

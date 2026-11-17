@@ -1,0 +1,8 @@
+# long params={} flush=True
+input in_long.pcm
+params 
+flush 1
+chunks 1000 3200 777 480 9600 160 2048
+seg 188640 0.247467 -0.002502 0.002228
+seg 131040 -0.251862 0.002075 -0.000977
+end speaking=0

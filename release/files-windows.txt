@@ -1,0 +1,12 @@
+# The files of the Windows release zip (made by tools/make_release.py). One entry per line, relative to the project folder.
+#   name/   a whole folder (what .gitignore leaves out stays out: config.json, logs, webview-data ...)
+#   name    one file, taken as it is (also when .gitignore hides it, like the program: *.exe)
+# Not in the zip on purpose: the engine (a separate download, engine/stt), the models, the user's fonts (only fonts/README.txt, which tells where they go), src-tauri/, tools/, tests/, docs/.
+ChatMatrixReader.exe
+app/
+locale/
+Glossary.sample.txt
+fonts/README.txt
+README.md
+LICENSE
+THIRD-PARTY-NOTICES.txt

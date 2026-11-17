@@ -1,0 +1,75 @@
+ChatMatrix Reader.app/Contents/Info.plist
+ChatMatrix Reader.app/Contents/MacOS/launch
+ChatMatrixReader.vbs
+Glossary.sample.txt
+LM Studio.md
+README.en.md
+README.md
+app/app.py
+app/capture.py
+app/capture_dxgi.py
+app/capture_mac.py
+app/capture_win.py
+app/chattext.py
+app/childwin.py
+app/config.py
+app/credit.json
+app/credits.py
+app/decoder.py
+app/fonts.py
+app/glossary.py
+app/hotkeys.py
+app/i18n.py
+app/joiner.py
+app/logsetup.py
+app/migrate.py
+app/options.py
+app/outgoing.py
+app/paths.py
+app/plat/__init__.py
+app/plat/mac.py
+app/plat/macutil.py
+app/plat/win.py
+app/plat/winutil.py
+app/proto2.py
+app/proto3.py
+app/resmeter.py
+app/scaled.py
+app/translator.py
+app/updatecheck.py
+app/usage.py
+app/version.py
+app/voice.py
+app/voiceinstall.py
+app/voicemeter.py
+docs/MAC.md
+docs/PROTOCOL.md
+extensions/stt/README.md
+extensions/stt/requirements-gpu.txt
+extensions/stt/requirements.txt
+extensions/stt/stt_main.py
+extensions/stt/sttcore/__init__.py
+extensions/stt/sttcore/audio.py
+extensions/stt/sttcore/capture.py
+extensions/stt/sttcore/engines/__init__.py
+extensions/stt/sttcore/engines/base.py
+extensions/stt/sttcore/engines/fake.py
+extensions/stt/sttcore/engines/openai_http.py
+extensions/stt/sttcore/engines/whisper_fw.py
+extensions/stt/sttcore/filters.py
+extensions/stt/sttcore/nvml.py
+extensions/stt/sttcore/pipeline.py
+extensions/stt/sttcore/probe.py
+extensions/stt/sttcore/protocol.py
+extensions/stt/sttcore/segmenter.py
+extensions/stt/sttcore/sessions.py
+fonts/README.txt
+github upload.bat
+locale/en-US.txt
+requirements-mac.txt
+requirements.txt
+run 3.11.bat
+run 3.15.bat
+run.bat
+run.command
+run_debug.bat

@@ -1,0 +1,9 @@
+# basic params={} flush=True
+input in_basic.pcm
+params 
+flush 1
+chunks 1000 3200 777 480 9600 160 2048
+seg 32640 0.178802 -0.002411 -0.004272
+seg 56640 0.309937 -0.000458 0.001038
+seg 24480 -0.042969 -0.002075 0.000122
+end speaking=0

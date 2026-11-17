@@ -1,0 +1,72 @@
+:root { --bg-alpha: 0.6; --text-alpha: 1; --font-size: 15px; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif; }
+
+/* ---------- overlay (translation window) ---------- */
+body.overlay, body.input { background: transparent; overflow: hidden; user-select: none; }
+body.overlay #bg { position: fixed; inset: 0; background: rgba(30, 31, 34, var(--bg-alpha)); border-radius: 4px; }
+body.overlay #bar { position: fixed; left: 0; right: 0; top: 0; height: 22px; display: none; align-items: center; padding: 0 6px;
+       background: rgba(60, 63, 70, 0.95); color: #ddd; font-size: 12px; cursor: move; }
+body.overlay #bar span { flex: 1; }
+body.overlay #bar button { border: 0; background: none; color: #ddd; font-size: 14px; cursor: pointer; }
+/* the speaker of the voice recognition: a drawing (not a character: symbol characters can come out as colour emoji that ignore the colour), the colour says the state */
+body.overlay #bar #voice { display: inline-flex; align-items: center; padding: 0 4px; }
+body.overlay #bar #voice svg { display: block; }
+body.overlay #bar #voice .waves { display: none; }
+body.overlay #bar #voice[data-state="on"], body.overlay #bar #voice[data-state="starting"] { color: #5fd07a; }
+body.overlay #bar #voice[data-state="on"] .waves, body.overlay #bar #voice[data-state="starting"] .waves { display: inline; }
+body.overlay #bar #voice[data-state="starting"] { animation: voice-pulse 1s ease-in-out infinite; }
+body.overlay #bar #voice[data-state="error"] { color: #ffb36b; }
+@keyframes voice-pulse { 50% { opacity: .45; } }
+body.overlay #grip { position: fixed; right: 0; bottom: 0; width: 14px; height: 14px; display: none; cursor: nwse-resize;
+        background: linear-gradient(135deg, transparent 50%, #9aa 50%); }
+body.overlay #lines { position: fixed; inset: 4px 8px; color: #fff; }
+/* the edges for resizing (overlay.js edges()): none at the top, that is the title bar */
+.edge { position: fixed; z-index: 20; display: none; }
+body.interactive .edge { display: block; }
+.edge.e-l { left: 0; top: 22px; bottom: 14px; width: 5px; cursor: ew-resize; }
+.edge.e-r { right: 0; top: 22px; bottom: 14px; width: 5px; cursor: ew-resize; }
+.edge.e-b { left: 14px; right: 14px; bottom: 0; height: 5px; cursor: ns-resize; }
+.edge.e-bl { left: 0; bottom: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+body.interactive #bar { display: flex; }
+body.interactive #grip { display: block; }
+body.interactive #bg { outline: 1px solid #3c3f46; outline-offset: -1px; }      /* (the colour of the title bar) */
+/* reading the earlier chat while the window is click-through (the wheel up over it): a coloured frame and a way back down */
+body.review #bg { outline: 2px solid #e0a030; outline-offset: -2px; }
+body.overlay #toBottom { position: fixed; right: 18px; bottom: 18px; z-index: 30; display: none; padding: 4px 10px; border: 1px solid #e0a030; border-radius: 12px;
+                         background: rgba(40, 34, 20, 0.95); color: #f0c060; font: 12px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; cursor: pointer; }
+body.review #toBottom { display: block; }
+/* (the title bar floats over the text: the lines must not move or change size when it appears) */
+
+/* ---------- send box (the look of the game's own chat line: dark, thin rounded outlines, the language in gold) ---------- */
+body.input #box { position: fixed; inset: 0; display: flex; gap: 5px; align-items: stretch; padding: 5px; background: rgba(6, 6, 8, 0.94);
+                  border: 1px solid #5a5a60; border-radius: 7px; }
+body.input .field { min-width: 0; border: 1px solid #7a7a80; border-radius: 5px; outline: 0; background: #000; color: #fff; padding: 0 9px;
+                    font: 15px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+body.input .field:focus { border-color: #e0c060; }
+body.input #cmd { flex: 2; }
+body.input #text { flex: 7; }
+body.input #lang { flex: none; display: flex; align-items: center; padding: 0 11px; border: 1px solid #7a7a80; border-radius: 5px; background: #0a0a0c;
+                   color: #f3c619; font: bold 14px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; white-space: nowrap; }
+
+/* ---------- test window ---------- */
+body.control { background: #1e1f22; color: #ddd; padding: 14px; font-size: 14px; overflow: auto; }
+body.control h2 { font-size: 15px; margin: 18px 0 6px; color: #6cf; }
+body.control button { background: #3a3d44; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 5px 10px; margin: 2px 4px 2px 0; cursor: pointer; }
+body.control button:hover { background: #4a4d55; }
+body.control label { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
+body.control p { margin: 4px 0; color: #aab; }
+#log { white-space: pre-wrap; font: 12px Consolas, monospace; background: #111; padding: 8px; border-radius: 4px; min-height: 120px; max-height: 260px; overflow: auto; }
+#view { max-width: 100%; border: 1px solid #444; image-rendering: pixelated; display: block; margin-top: 6px; }
+.err { color: #f66; }
+body.input #cmd::placeholder { color: rgba(255, 255, 255, 0.22); font-size: 12px; }
+body.hover-clear { opacity: 0; }
+
+/* ---------- the right-click menu of a translation window ---------- */
+#ctx { position: fixed; z-index: 50; min-width: 150px; max-height: 96vh; overflow-y: auto; padding: 4px 0; background: #25272c; border: 1px solid #3c3f46; border-radius: 6px;
+       box-shadow: 0 4px 14px rgba(0, 0, 0, .5); font: 12px "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif; color: #dcdde0; user-select: none; }
+#ctx div { padding: 5px 14px 5px 22px; white-space: nowrap; cursor: default; position: relative; }
+#ctx div:hover:not(.off):not(.sep) { background: #3a3d44; }
+#ctx div.off { color: #6c6f77; }
+#ctx div.sep { height: 1px; padding: 0; margin: 4px 0; background: #3c3f46; }
+#ctx div.on::before { content: '✔'; position: absolute; left: 6px; color: #e0b84a; }

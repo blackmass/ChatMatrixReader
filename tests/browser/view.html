@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="/app/chatview.css">
+<style>html,body{margin:0;height:100%;background:#1e1f22;color:#fff} #lines{position:fixed;inset:6px 10px;}</style></head>
+<body><div id="lines"></div>
+<script type="module">
+import { ChatView, lookFrom } from '/app/chatview.js';
+import { WindowFeed } from '/app/core/windowfeed.js';
+import { MAIN } from '/app/core/pipeline.js';
+const data = await (await fetch('/tests/browser/sample_events.json')).json();
+window.cmr = { ChatView, lookFrom, WindowFeed, MAIN, data };
+window.ready = true;
+</script></body></html>

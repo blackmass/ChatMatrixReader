@@ -1,0 +1,8 @@
+# flush params={} flush=True
+input in_flush.pcm
+params 
+flush 1
+chunks 1000 3200 777 480 9600 160 2048
+seg 40320 -0.221527 -0.001190 -0.000427
+seg 26880 0.841919 0.004395 0.020782
+end speaking=0

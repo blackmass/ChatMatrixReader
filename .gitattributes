@@ -1,1 +1,13 @@
-*.vbs text eol=crlf
+# line endings: Windows bat files need CRLF, shell scripts for the Mac need LF, the rest is normalised by git
+* text=auto
+*.bat text eol=crlf
+*.command text eol=lf
+*.sh text eol=lf
+*.png binary
+*.ico binary
+*.bin binary
+*.pcm binary
+*.wav binary
+*.ttf binary
+*.otf binary
+*.woff2 binary

@@ -1,0 +1,66 @@
+ChatMatrix Reader.app/Contents/Info.plist
+ChatMatrix Reader.app/Contents/MacOS/launch
+ChatMatrixReader.vbs
+Glossary.sample.txt
+MAC.md
+PROTOCOL.md
+app.py
+capture.py
+capture_diag.py
+capture_mac.py
+chattext.py
+config.py
+credit.json
+credits.py
+decoder.py
+diag_google.py
+diag_google2.py
+diag_google3.py
+diag_google4.py
+diag_google5.py
+fonts.py
+fonts/README.txt
+glossary.py
+hotkeys.py
+i18n.py
+locale/en-US.txt
+logsetup.py
+make zip.bat
+make_zip.py
+options.py
+outgoing.py
+plat/__init__.py
+plat/mac.py
+plat/macutil.py
+plat/win.py
+plat/winutil.py
+proto2.py
+requirements-mac.txt
+requirements.txt
+run 3.11.bat
+run 3.15.bat
+run.bat
+run.command
+run_debug.bat
+scaled.py
+test_cache.py
+test_capture.py
+test_chattext.py
+test_custom.py
+test_decoder.py
+test_glossary.py
+test_i18n.py
+test_outgoing.py
+test_plat_mac.py
+test_proto2.py
+test_route.py
+test_scaled.py
+test_translator.py
+test_updatecheck.py
+test_usage.py
+tk_diag.py
+tk_diag2.py
+translator.py
+updatecheck.py
+usage.py
+version.py

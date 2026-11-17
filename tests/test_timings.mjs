@@ -1,0 +1,21 @@
+import { T, TUNE, applyTuning, every } from '../app/core/timings.js';
+import { take, timed } from '../app/core/perf.js';
+import { check } from './helpers.mjs';
+check(TUNE.every(([n, d, min, max]) => T[n] === d && d >= min && d <= max), 'every timer starts at its default, inside its range');
+applyTuning({ OVERLAY_POLL_MS: 250, PLACE_MS: 1, SEND_TICK_MS: 'x', NOPE: 3 });
+check(T.OVERLAY_POLL_MS === 250 && T.PLACE_MS === 100 && T.SEND_TICK_MS === 25, 'tuning: a good value is used; out of range / not a number / unknown: the default');
+applyTuning(null);
+check(T.OVERLAY_POLL_MS === 100, 'tuning: nothing saved = defaults');
+// every(): reads its period each round, measures each run, stops
+take();
+let n = 0; const t = every('SEND_TICK_MS', async () => { n++; });
+await new Promise(r => setTimeout(r, 200));
+const mid = n; applyTuning({ SEND_TICK_MS: 500 });
+await new Promise(r => setTimeout(r, 200));
+check(mid >= 4 && n - mid <= 2, `every: the new period is used at once (${mid} runs at 25 ms, then ${n - mid} at 500 ms)`);
+t.stop(); const after = n; await new Promise(r => setTimeout(r, 100));
+check(n === after, 'every: stop');
+const s = take();
+check(s.stats.SEND_TICK_MS && s.stats.SEND_TICK_MS.n >= mid, 'perf: the runs were counted');
+const f = timed('x', async () => 5); check(await f() === 5 && take().stats.x.n === 1, 'perf: timed() passes the result on and counts');
+applyTuning(null);
