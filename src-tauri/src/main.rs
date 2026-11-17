@@ -127,6 +127,13 @@ fn serve(path: &str) -> tauri::http::Response<Vec<u8>> {
     }
 }
 
+/// Is this the folder of a version 1.x (the Python program: app.py in the main folder, or app/app.py since 1.6)? Then only the page that
+/// puts those files away is opened (app/legacy.html): the program starts after that. 3.0 has neither file.
+fn legacy_present() -> bool {
+    let base = base_dir();
+    base.join("app.py").is_file() || base.join("app").join("app.py").is_file()
+}
+
 fn page_url(page: &str) -> tauri::Url {
     // On Windows a custom scheme "cmr" is reached as http://cmr.localhost/, on macOS as cmr://localhost/
     #[cfg(windows)]
@@ -174,6 +181,7 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             .resizable(false)
             .visible(false)
             .inner_size(520.0, 46.0),
+        "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),
         // the control window is the program's brain, not something to look at: it is never shown. An empty file "show_control" next to app/
         // shows it as a normal test window.
@@ -537,6 +545,18 @@ fn fs_mkdir(path: String) -> Result<(), String> {
     files::make_dir(&base_dir(), &path)
 }
 
+/// Puts a file or folder of an earlier version into old_version_backup/ (never anywhere else, never the user's data: files.rs).
+#[tauri::command(async)]
+fn fs_move(from: String, to: String) -> Result<(), String> {
+    files::move_to_backup(&base_dir(), &from, &to)
+}
+
+/// Starts the program again (after the files of an earlier version were put away).
+#[tauri::command]
+fn restart_app(app: AppHandle) {
+    app.restart();
+}
+
 /// Deletes one file (never a folder).
 #[tauri::command(async)]
 fn fs_remove(path: String) -> Result<(), String> {
@@ -757,6 +777,8 @@ fn main() {
             ext_remove,
             fs_mkdir,
             fs_remove,
+            fs_move,
+            restart_app,
             app_folder,
             quit_app,
             quit_request,
@@ -776,6 +798,8 @@ fn main() {
                 match window.label() {
                     // closing the control window or the main translation window ends the program (the other translation windows only close themselves)
                     "control" | "main" => { api.prevent_close(); request_quit(window.app_handle()); }
+                    // the window of the earlier-version files: closing it is "cancel" = the program ends (nothing else is running yet)
+                    "legacy" => window.app_handle().exit(0),
                     // the options window: its place and size are told to the program at the moment it closes (the page only tells them after the window
                     // stood still for a while, so a window moved and closed with the X a moment later would be forgotten)
                     "options" => {
@@ -792,6 +816,10 @@ fn main() {
         })
         .setup(|app| {
             let handle = app.handle().clone();
+            if legacy_present() {
+                make_window(&handle, "legacy", "legacy.html", "legacy")?;
+                return Ok(());
+            }
             make_window(&handle, "control", "control.html", "control")?;
             make_window(&handle, "main", "overlay.html", "overlay")?;
             make_window(&handle, "input", "input.html", "input")?;

@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ChatMatrixReader</title>
+<style>
+  :root { --bg: #f4f5f7; --fg: #1d1f23; --sub: #5b6068; --card: #fff; --line: #d5d8de; --btn: #2563eb; --btnfg: #fff; --warn: #b42318; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1e1f22; --fg: #e8e9eb; --sub: #a0a4ab; --card: #2a2c30; --line: #3d4046; --btn: #4f83f0; --warn: #ff8a80; } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.55 "Malgun Gothic", "Segoe UI", system-ui, sans-serif; }
+  body { box-sizing: border-box; padding: 22px 26px; display: flex; flex-direction: column; gap: 12px; }
+  h1 { font-size: 18px; margin: 0; }
+  p { margin: 0; }
+  .sub { color: var(--sub); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+  details { max-height: 150px; overflow: auto; }
+  summary { cursor: pointer; }
+  #list { margin: 6px 0 0; padding: 0; list-style: none; font: 12px/1.5 Consolas, monospace; color: var(--sub); }
+  #err { color: var(--warn); white-space: pre-wrap; font-size: 12px; }
+  #cancelNote { font-size: 13px; }
+  .row { display: flex; gap: 10px; margin-top: auto; justify-content: flex-end; }
+  button { font: inherit; padding: 8px 18px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+  button.main { background: var(--btn); color: var(--btnfg); border-color: var(--btn); }
+  button:disabled { opacity: .55; cursor: default; }
+</style>
+</head>
+<body>
+  <h1>이전 버전(1.x)의 파일이 있습니다</h1>
+  <p>이 폴더에 이전 버전의 프로그램 파일이 남아 있습니다. 3.0은 그 파일을 쓰지 않고, 함께 두면 서로 설정을 덮어쓸 수 있습니다.</p>
+  <p>아래 파일을 old_version_backup 폴더로 옮긴 뒤 시작합니다. 지우지 않습니다. 설정(config.json), 단어장, 글꼴(fonts)은 그대로 둡니다.</p>
+  <div class="card">
+    <details id="det"><summary id="sum"></summary><ul id="list" data-notr></ul></details>
+  </div>
+  <p id="cancelNote" class="sub">[취소]하면 프로그램이 끝납니다. 옮기고 싶지 않다면 새 폴더에 이 프로그램을 풀고 config.json과 fonts 폴더만 복사해서 거기서 실행하세요.</p>
+  <p id="err" data-notr></p>
+  <div class="row">
+    <button id="cancel">취소 (프로그램 끝내기)</button>
+    <button id="go" class="main" disabled>옮기고 시작</button>
+  </div>
+  <script src="common.js"></script>
+  <script type="module" src="legacy.js"></script>
+</body>
+</html>

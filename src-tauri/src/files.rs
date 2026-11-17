@@ -129,6 +129,38 @@ pub fn remove_file(root: &Path, rel: &str) -> Result<(), String> {
     }
 }
 
+/// Moves a file or a whole folder into `old_version_backup/` (the files of an earlier version are put away, never deleted). Both paths are
+/// relative to the program folder; the target must be under `old_version_backup/` and must not exist yet (the folders above it are made);
+/// the source must exist, must not be the program folder, `app`, the user's data (config, glossary, usage, fonts, locale, extensions, logs)
+/// or the backup folder itself, and must not be a link. One rename: on the same disk it is instant, whatever the size.
+pub fn move_to_backup(root: &Path, from: &str, to: &str) -> Result<(), String> {
+    const BACKUP: &str = "old_version_backup";
+    const PROTECTED: [&str; 11] = ["", "app", "config.json", "config.1x.json", "glossary.txt", "usage.json", "fonts", "locale", "extensions", "logs", BACKUP];
+    let norm = |s: &str| s.replace('\\', "/").split('/').filter(|x| !x.is_empty() && *x != ".").collect::<Vec<_>>().join("/");
+    let (nf, nt) = (norm(from), norm(to));
+    if PROTECTED.contains(&nf.to_lowercase().as_str()) {
+        return Err(format!("this is never moved: {from}"));
+    }
+    if !nt.to_lowercase().starts_with(&format!("{BACKUP}/")) {
+        return Err(format!("the target must be in {BACKUP}: {to}"));
+    }
+    if nf.to_lowercase().starts_with(&format!("{BACKUP}/")) {
+        return Err(format!("the backup itself is not moved: {from}"));
+    }
+    let (src, dst) = (resolve(root, &nf)?, resolve(root, &nt)?);
+    let meta = fs::symlink_metadata(&src).map_err(|e| format!("{from}: {e}"))?;
+    if meta.file_type().is_symlink() {
+        return Err(format!("a link is not moved: {from}"));
+    }
+    if dst.exists() {
+        return Err(format!("the target exists: {to}"));
+    }
+    if let Some(dir) = dst.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&src, &dst).map_err(|e| format!("{from}: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +226,32 @@ mod tests {
         assert!(read_text(&root, "out/secret.txt").is_err());
         assert!(write_text(&root, "out/new.txt", "x").is_err());
         assert!(!outside.join("new.txt").exists());
+    }
+
+    #[test]
+    fn move_to_backup_rules() {
+        let root = temp("move");
+        write_text(&root, "app/app.py", "x").unwrap();
+        write_text(&root, "old/a.py", "x").unwrap();
+        write_text(&root, "old/sub/b.py", "x").unwrap();
+        write_text(&root, "config.json", "{}").unwrap();
+        move_to_backup(&root, "old/a.py", "old_version_backup/m/old/a.py").unwrap();
+        assert!(root.join("old_version_backup/m/old/a.py").is_file() && !root.join("old/a.py").exists());
+        move_to_backup(&root, "old", "old_version_backup/m/old2").unwrap(); // a whole folder
+        assert!(root.join("old_version_backup/m/old2/sub/b.py").is_file());
+        move_to_backup(&root, "app/app.py", "old_version_backup/m/app/app.py").unwrap();
+        for (f, t) in [("config.json", "old_version_backup/c.json"), ("app", "old_version_backup/app"), ("", "old_version_backup/x"), ("FONTS", "old_version_backup/f"),
+                       ("extensions", "old_version_backup/e"), ("old_version_backup", "old_version_backup/y"), ("old_version_backup/m", "old_version_backup/z")] {
+            assert!(move_to_backup(&root, f, t).is_err(), "{f} must not move");
+        }
+        write_text(&root, "x.py", "x").unwrap();
+        assert!(move_to_backup(&root, "x.py", "elsewhere/x.py").is_err(), "only into the backup folder");
+        assert!(move_to_backup(&root, "x.py", "old_version_backup/../x.py").is_err());
+        assert!(move_to_backup(&root, "../x.py", "old_version_backup/x.py").is_err());
+        assert!(move_to_backup(&root, "nothing.py", "old_version_backup/n.py").is_err(), "missing source");
+        move_to_backup(&root, "x.py", "old_version_backup/m/x.py").unwrap();
+        write_text(&root, "y.py", "x").unwrap();
+        assert!(move_to_backup(&root, "y.py", "old_version_backup/m/x.py").is_err(), "an existing target is never replaced");
+        assert!(root.join("config.json").is_file());
     }
 }
