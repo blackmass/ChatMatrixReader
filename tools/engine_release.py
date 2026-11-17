@@ -74,6 +74,48 @@ def git_commit():
         return "unknown (this folder is not a git checkout)", False
 
 
+def whisper_license_path(kind):
+    """The LICENSE of the whisper.cpp the engine was built from: the folder given to build.bat when there was one (it is in CMakeCache.txt), else the copy
+    CMake fetched into the build folder."""
+    build = os.path.join(HERE, "engine", "stt", f"build-{kind}")
+    try:
+        for line in open(os.path.join(build, "CMakeCache.txt"), encoding="utf-8", errors="replace"):
+            if line.startswith("CMR_WHISPER_DIR:PATH=") and line.strip().split("=", 1)[1]:
+                return os.path.join(line.strip().split("=", 1)[1], "LICENSE")
+    except OSError:
+        pass
+    return os.path.join(build, "_deps", "whisper-src", "LICENSE")
+
+
+def fill_missing(kind, folder):
+    """An engine that was built before build.bat wrote the license files and version.json: they are made here from what the build left (the engine itself
+    is not built again: it would be the same program from the same source)."""
+    made = []
+    exe = os.path.join(folder, "cmr-stt.exe")
+    if not os.path.isfile(exe):
+        return made
+    wanted = {
+        "LICENSE-whisper.cpp.txt": whisper_license_path(kind),
+        "LICENSE.txt": os.path.join(HERE, "LICENSE"),
+    }
+    for name, src in wanted.items():
+        dest = os.path.join(folder, name)
+        if not os.path.isfile(dest):
+            if not os.path.isfile(src):
+                raise SystemExit(f"{folder}: {name} is missing and its source is not there either ({src}): build the engine again with build.bat.")
+            shutil.copyfile(src, dest)
+            made.append(name)
+    dest = os.path.join(folder, "version.json")
+    if not os.path.isfile(dest):
+        try:
+            out = subprocess.run([exe, "--version"], capture_output=True, timeout=20).stdout.decode("utf-8", "replace")
+        except (OSError, subprocess.SubprocessError) as e:
+            raise SystemExit(f"{folder}: version.json is missing and cmr-stt.exe --version could not be run ({e}): build the engine again with build.bat.")
+        open(dest, "w", encoding="utf-8", newline="").write(out)
+        made.append("version.json")
+    return made
+
+
 def check_folder(kind, folder):
     for n in NEEDED:
         if not os.path.isfile(os.path.join(folder, n)):
@@ -158,6 +200,9 @@ def main(argv):
         os.makedirs(out_dir, exist_ok=True)
     for kind in kinds:
         folder = os.path.join(dist, f"engine-{kind}")
+        made = fill_missing(kind, folder)
+        if made:
+            print(f"engine-{kind}: made from what the build left: {', '.join(made)}")
         ver, exe_sha = check_folder(kind, folder)
         for n, asset in (("LICENSE-whisper.cpp.txt", "LICENSE-whisper.cpp.txt"), ("LICENSE.txt", "LICENSE-ChatMatrixReader.txt")):
             sha = sha256_of(os.path.join(folder, n))

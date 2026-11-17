@@ -44,6 +44,8 @@ docs/*
 !docs/plugin-guide*.md
 
 # ---- editors and systems ----
+__pycache__/
+*.pyc
 .DS_Store
 Thumbs.db
 .vscode/
