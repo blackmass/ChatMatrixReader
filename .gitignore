@@ -6,7 +6,7 @@ src-tauri/gen/
 *.exe
 # the helper bats of the maintainer (release, git, zips ...) stay on his PC; build.bat (how to build from the sources) is part of the repository
 *.bat
-!*build.bat
+!build.bat
 # the Mac app made by tools/mac_make_app.command
 ChatMatrix Reader.app/
 # zip files made for sending / the release
