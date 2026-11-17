@@ -1,28 +1,52 @@
-# 개인/생성 파일
+# ---- built or made by the tools (never committed) ----
+# build output of Rust (can grow to several GB) and files Tauri generates again on every build
+src-tauri/target/
+src-tauri/gen/
+# the program built by build.bat (any name)
+*.exe
+# the helper bats of the maintainer (release, git, zips ...) stay on his PC; build.bat (how to build from the sources) is part of the repository
+*.bat
+!*build.bat
+# the Mac app made by tools/mac_make_app.command
+ChatMatrix Reader.app/
+# zip files made for sending / the release
+*.zip
+release-out/
+THIRD-PARTY-NOTICES*.txt
+# the engine (engine/stt): what its build leaves
+engine/stt/build*/
+engine/stt/dist/
+tests/browser/out/
+
+# ---- what the program leaves next to itself while it runs (the user's own data) ----
 config.json
+config.1x.json
 usage.json
-*.log*
 Glossary.txt
-git upload*.bat
-old_version_backup/
+logs/
+chatmatrix.log*
+webview-data/
+# marker files for development (an empty file next to the program)
+show_control
+mac_no_panel
 
-# 개발 전용 (사용자 zip에도 안 들어감)
-make_zip.py
-make zip.bat
-test*.py
-capture_diag.py
-tk_diag*.py
-diag_google*.py
-
-# 폰트: 안내문만 올림
+# the user's fonts: the folder stays (fonts/README.txt tells how to use it), what is put into it does not
 fonts/*
 !fonts/README.txt
 
-# 생성물
-*.zip
-__pycache__/
-.pytest_cache/
-.venv*/
+# the voice recognition installed by the program: engine, models, sounds of the speed test, temporary files
+extensions/
+*.part
+
+# ---- docs: only what users read is published (the plugin guide). The notes of the maintainer are kept by him, not in this repository ----
+docs/*
+!docs/README.md
+!docs/plugin-guide*.md
+
+# ---- editors and systems ----
 .DS_Store
-extensions/stt/models/
-extensions/stt/.tmp/
+Thumbs.db
+.vscode/
+.idea/
+.vs/
+node_modules/

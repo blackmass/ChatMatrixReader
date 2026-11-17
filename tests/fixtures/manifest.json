@@ -1,0 +1,1823 @@
+[
+{
+"name": "v1_cols32",
+"kind": "v1",
+"width": 128,
+"height": 16,
+"expect": {
+"seq": 12345,
+"cols": 32,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v1_cols16",
+"kind": "v1",
+"width": 64,
+"height": 32,
+"expect": {
+"seq": 12345,
+"cols": 16,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L2_c32_plain",
+"kind": "v2",
+"width": 128,
+"height": 112,
+"expect": {
+"seq": 424242,
+"levels": 2,
+"cols": 32,
+"rows": 28,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L2_c32_gamma",
+"kind": "v2",
+"width": 128,
+"height": 112,
+"expect": {
+"seq": 424242,
+"levels": 2,
+"cols": 32,
+"rows": 28,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L2_c16_plain",
+"kind": "v2",
+"width": 64,
+"height": 224,
+"expect": {
+"seq": 424242,
+"levels": 2,
+"cols": 16,
+"rows": 56,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L2_c16_gamma",
+"kind": "v2",
+"width": 64,
+"height": 224,
+"expect": {
+"seq": 424242,
+"levels": 2,
+"cols": 16,
+"rows": 56,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L2_p3",
+"kind": "v2",
+"width": 128,
+"height": 112,
+"expect": {
+"seq": 9,
+"levels": 2,
+"cols": 32,
+"rows": 28,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L4_c32_plain",
+"kind": "v2",
+"width": 128,
+"height": 60,
+"expect": {
+"seq": 424242,
+"levels": 4,
+"cols": 32,
+"rows": 15,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L4_c32_bright",
+"kind": "v2",
+"width": 128,
+"height": 60,
+"expect": {
+"seq": 424242,
+"levels": 4,
+"cols": 32,
+"rows": 15,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L4_c32_dark",
+"kind": "v2",
+"width": 128,
+"height": 60,
+"expect": {
+"seq": 424242,
+"levels": 4,
+"cols": 32,
+"rows": 15,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L4_c32_gamma",
+"kind": "v2",
+"width": 128,
+"height": 60,
+"expect": {
+"seq": 424242,
+"levels": 4,
+"cols": 32,
+"rows": 15,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L4_c32_night",
+"kind": "v2",
+"width": 128,
+"height": 60,
+"expect": {
+"seq": 424242,
+"levels": 4,
+"cols": 32,
+"rows": 15,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L4_c16_plain",
+"kind": "v2",
+"width": 64,
+"height": 116,
+"expect": {
+"seq": 424242,
+"levels": 4,
+"cols": 16,
+"rows": 29,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L4_c16_gamma",
+"kind": "v2",
+"width": 64,
+"height": 116,
+"expect": {
+"seq": 424242,
+"levels": 4,
+"cols": 16,
+"rows": 29,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L4_p3",
+"kind": "v2",
+"width": 128,
+"height": 60,
+"expect": {
+"seq": 9,
+"levels": 4,
+"cols": 32,
+"rows": 15,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L8_c32_plain",
+"kind": "v2",
+"width": 128,
+"height": 40,
+"expect": {
+"seq": 424242,
+"levels": 8,
+"cols": 32,
+"rows": 10,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L8_c32_bright",
+"kind": "v2",
+"width": 128,
+"height": 40,
+"expect": {
+"seq": 424242,
+"levels": 8,
+"cols": 32,
+"rows": 10,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L8_c32_dark",
+"kind": "v2",
+"width": 128,
+"height": 40,
+"expect": {
+"seq": 424242,
+"levels": 8,
+"cols": 32,
+"rows": 10,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L8_c32_gamma",
+"kind": "v2",
+"width": 128,
+"height": 40,
+"expect": {
+"seq": 424242,
+"levels": 8,
+"cols": 32,
+"rows": 10,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L8_c32_night",
+"kind": "v2",
+"width": 128,
+"height": 40,
+"expect": {
+"seq": 424242,
+"levels": 8,
+"cols": 32,
+"rows": 10,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L8_c16_plain",
+"kind": "v2",
+"width": 64,
+"height": 80,
+"expect": {
+"seq": 424242,
+"levels": 8,
+"cols": 16,
+"rows": 20,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L8_c16_gamma",
+"kind": "v2",
+"width": 64,
+"height": 80,
+"expect": {
+"seq": 424242,
+"levels": 8,
+"cols": 16,
+"rows": 20,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L8_p3",
+"kind": "v2",
+"width": 128,
+"height": 40,
+"expect": {
+"seq": 9,
+"levels": 8,
+"cols": 32,
+"rows": 10,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L16_c32_plain",
+"kind": "v2",
+"width": 128,
+"height": 32,
+"expect": {
+"seq": 424242,
+"levels": 16,
+"cols": 32,
+"rows": 8,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L16_c32_gamma",
+"kind": "v2",
+"width": 128,
+"height": 32,
+"expect": {
+"seq": 424242,
+"levels": 16,
+"cols": 32,
+"rows": 8,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L16_c16_plain",
+"kind": "v2",
+"width": 64,
+"height": 64,
+"expect": {
+"seq": 424242,
+"levels": 16,
+"cols": 16,
+"rows": 16,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L16_c16_gamma",
+"kind": "v2",
+"width": 64,
+"height": 64,
+"expect": {
+"seq": 424242,
+"levels": 16,
+"cols": 16,
+"rows": 16,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L16_p3",
+"kind": "v2",
+"width": 128,
+"height": 32,
+"expect": {
+"seq": 9,
+"levels": 16,
+"cols": 32,
+"rows": 8,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+}
+},
+{
+"name": "v2_L8_longline",
+"kind": "v2",
+"width": 128,
+"height": 40,
+"expect": {
+"seq": 99,
+"levels": 8,
+"cols": 32,
+"rows": 10,
+"lines": [
+[
+"S",
+77,
+"Averylongcharactername-Someserver",
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+"W"
+]
+]
+}
+},
+{
+"name": "v2_L8_clipped",
+"kind": "v2_reject",
+"width": 128,
+"height": 40,
+"expect": {
+"seq": 5
+}
+},
+{
+"name": "v3_L4_h",
+"kind": "v3",
+"width": 832,
+"height": 4,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": false,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": false
+},
+{
+"name": "v3_L4_h_gain",
+"kind": "v3",
+"width": 832,
+"height": 4,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": false,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": false
+},
+{
+"name": "v3_L4_h_dark",
+"kind": "v3",
+"width": 832,
+"height": 4,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": false,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": false
+},
+{
+"name": "v3_L4_h_gamma",
+"kind": "v3",
+"width": 832,
+"height": 4,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": false,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": false
+},
+{
+"name": "v3_L4_h_night",
+"kind": "v3",
+"width": 832,
+"height": 4,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": false,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": false
+},
+{
+"name": "v3_L4_v",
+"kind": "v3",
+"width": 4,
+"height": 832,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": true,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": true
+},
+{
+"name": "v3_L4_v_gain",
+"kind": "v3",
+"width": 4,
+"height": 832,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": true,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": true
+},
+{
+"name": "v3_L4_v_dark",
+"kind": "v3",
+"width": 4,
+"height": 832,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": true,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": true
+},
+{
+"name": "v3_L4_v_gamma",
+"kind": "v3",
+"width": 4,
+"height": 832,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": true,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": true
+},
+{
+"name": "v3_L4_v_night",
+"kind": "v3",
+"width": 4,
+"height": 832,
+"expect": {
+"seq": 777,
+"levels": 4,
+"cells": 208,
+"vertical": true,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": true
+},
+{
+"name": "v3_L8_h",
+"kind": "v3",
+"width": 600,
+"height": 4,
+"expect": {
+"seq": 777,
+"levels": 8,
+"cells": 150,
+"vertical": false,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": false
+},
+{
+"name": "v3_L8_v",
+"kind": "v3",
+"width": 4,
+"height": 600,
+"expect": {
+"seq": 777,
+"levels": 8,
+"cells": 150,
+"vertical": true,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": true
+},
+{
+"name": "v3_L4_p3",
+"kind": "v3",
+"width": 832,
+"height": 4,
+"expect": {
+"seq": 9,
+"levels": 4,
+"cells": 208,
+"vertical": false,
+"lines": [
+[
+"P",
+1,
+"Anna",
+"안녕하세요 hello",
+"A"
+],
+[
+"G",
+2,
+"Bob",
+"LFM tank for mythic, need inv pls",
+"K"
+],
+[
+"S",
+3,
+"Çağrı",
+"ñ é ü ✓",
+"M"
+],
+[
+"C1",
+4,
+"",
+"server announcement",
+""
+]
+]
+},
+"vertical": false
+},
+{
+"name": "v3_L8_longline",
+"kind": "v3",
+"width": 1192,
+"height": 4,
+"expect": {
+"seq": 5,
+"levels": 8,
+"cells": 298,
+"vertical": false,
+"lines": [
+[
+"S",
+77,
+"Averylongcharactername-Someserver",
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+"W"
+]
+]
+},
+"vertical": false
+},
+{
+"name": "v3_L4_short",
+"kind": "v3",
+"width": 196,
+"height": 4,
+"expect": {
+"seq": 3,
+"levels": 4,
+"cells": 49,
+"vertical": false,
+"lines": [
+[
+"P",
+1,
+"A",
+"short",
+""
+]
+]
+},
+"vertical": false
+},
+{
+"name": "v3_bad_cell",
+"kind": "v3_reject",
+"width": 832,
+"height": 4,
+"expect": {},
+"vertical": false
+},
+{
+"name": "v3_cut",
+"kind": "v3_reject",
+"width": 792,
+"height": 4,
+"expect": {},
+"vertical": false
+}
+]

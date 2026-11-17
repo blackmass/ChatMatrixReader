@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head>
+<body class="control">
+  <b>ChatMatrix 프로토타입 - 테스트 창</b>
+  <p id="folder"></p>
+
+  <h2>1. 번역창 모양 (CSS만으로)</h2>
+  <label>배경 <input type="range" id="bg" min="0" max="1" step="0.05"></label>
+  <label>글자 <input type="range" id="text" min="0.1" max="1" step="0.05"></label>
+  <label>크기 <input type="range" id="size" min="10" max="28" step="1"></label><br>
+  <label><input type="checkbox" id="shadow"> 그림자</label>
+  <label><input type="checkbox" id="clickThrough"> 클릭 관통 (Shift+마우스로 조작)</label>
+  <label><input type="checkbox" id="autoPaste"> 보내기 후 자동 Ctrl+V</label>
+<br>
+  <label><input type="checkbox" id="blur"> 블러 (배경 슬라이더 = 색 진하기)</label>
+  <label>방식 <select id="blurState"><option value="3">블러 (기존 리더와 같음)</option><option value="4">강한 블러 (창을 옮길 때 끌림)</option></select></label>
+
+  <p id="fg">활성 창: -</p>
+
+  <button id="openOptions">옵션 창 열기</button>
+
+  <h2>2. 번역창 / 메모리</h2>
+  <button id="feed">가짜 채팅 흘리기 (시작/정지)</button>
+  <button id="add">번역창 하나 더 열기</button>
+  <p>창을 3개까지 열고 작업 관리자에서 이 프로그램 묶음의 메모리 합계를 확인하세요.</p>
+
+  <h2>3. 와우 채팅 (매트릭스)</h2>
+  <p id="matrix">매트릭스: 찾는 중...</p>
+  <button id="research">매트릭스 다시 찾기</button>
+  <button id="timer">백그라운드 타이머 (10초)</button>
+
+  <h2>4. 번역 요청 (exe가 대신 보냄)</h2>
+  <button id="tr">"LF2M tank and healer for +12" 번역</button>
+
+  <h2>결과</h2>
+  <button id="copy">결과 복사</button>
+  <div id="log" data-notr></div>
+
+  <script src="common.js"></script>
+  <script type="module" src="hub.js"></script>
+  <script src="control.js"></script>
+</body>
+</html>

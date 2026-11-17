@@ -1,0 +1,44 @@
+# text<TAB>audio_s<TAB>avg_logprob|-<TAB>no_speech_prob|-<TAB>ok<TAB>reason
+Hello there	3.0	-	-	1	
+	1.0	-	-	0	empty
+   	1.0	-	-	0	empty
+...	1.0	-	-	0	empty
+♪♪	2.0	-0.2	0.1	0	empty
+Thank you.	1.2	-0.7	0.1	0	phantom phrase
+Thank you.	1.2	-0.3	0.1	1	
+Thank you.	3.0	-0.9	0.1	1	
+Thank you.	1.2	-	-	0	phantom phrase
+Thanks for watching!	2.0	-1.0	0.2	0	phantom phrase
+You	1.0	-0.6	0.0	0	phantom phrase
+okay	2.4	-	-	0	phantom phrase
+Okay	2.6	-	-	1	
+The end	1.0	-1.2	0.3	0	phantom phrase
+Subtitles by the Amara.org community	2.0	-0.8	0.2	1	
+I think so	2.0	-1.7	0.1	0	unsure (logprob -1.70)
+I think so	2.0	-1.6	0.1	1	
+I think so	2.0	-1.59	0.1	1	
+something	2.0	-1.2	0.7	0	no speech (0.70, logprob -1.20)
+something	2.0	-0.8	0.9	1	
+something	2.0	-1.0	0.7	1	
+something	2.0	-1.01	0.61	0	no speech (0.61, logprob -1.01)
+something	2.0	-1.01	0.6	1	
+안녕하세요	1.5	-0.4	0.1	1	
+네	0.6	-0.9	0.2	1	
+こんにちは	1.0	-0.5	0.1	1	
+你好	1.0	-0.5	0.1	1	
+…	1.0	-0.5	0.1	0	empty
+！？	1.0	-	-	0	empty
+😀	1.0	-	-	0	empty
+a	1.0	-	-	1	
+_	1.0	-	-	1	
+1	1.0	-	-	1	
+“”	1.0	-	-	0	empty
+—	1.0	-	-	0	empty
+  Thank you  	1.0	-0.8	0.1	0	phantom phrase
+THANK YOU!!!	1.0	-0.8	0.1	0	phantom phrase
+Bye-bye	1.0	-0.8	0.1	1	
+Mm.	1.0	-	-	0	phantom phrase
+Uh... um	1.0	-0.9	0.1	1	
+Ünïcödé	1.0	-	-	1	
+Привет	1.0	-0.3	0.1	1	
+مرحبا	1.0	-0.3	0.1	1	

@@ -1,0 +1,16 @@
+{
+  "productName": "ChatMatrixReader",
+  "version": "3.0.0",
+  "identifier": "com.chatmatrix.reader",
+  "build": {},
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.ico"]
+  }
+}

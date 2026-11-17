@@ -1,0 +1,10 @@
+# The official whisper.cpp this engine is built with (https://github.com/ggml-org/whisper.cpp). It is fetched from there when the engine is built,
+# never copied into this repository. Change it only after running the tests and the speed test (README.md), and write down why.
+#
+# tag      the release (checked: a release page without "nightly" in its notes)
+# commit   what that tag points to; the build fetches THIS commit, so a moved tag cannot change what is built
+# zip_sha256  SHA-256 of "Source code (zip)" of that release on GitHub (to check a copy that was downloaded by hand: build.bat -DCMR_WHISPER_DIR=...)
+repository=https://github.com/ggml-org/whisper.cpp
+tag=v1.9.2
+commit=306c88f4d1286aec1bf96e544632897886af5501
+zip_sha256=2aca1e1a8a8569968b4067a56a153abeabff41bca97d4f2e601fdc15325c3f25

@@ -1,0 +1,8 @@
+# noisy params={} flush=True
+input in_noisy.pcm
+params 
+flush 1
+chunks 1000 3200 777 480 9600 160 2048
+seg 162720 5.811310 -0.024963 0.007019
+seg 30720 0.194427 -0.019470 -0.016235
+end speaking=0

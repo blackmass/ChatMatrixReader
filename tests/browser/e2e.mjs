@@ -1,0 +1,961 @@
+// The real pages (control.html = hub, overlay.html = translation windows) in headless Chromium with a stand-in for the exe:
+// fake `__TAURI__` (events between pages, files in memory, a fake Google). Checks that a line goes hub -> pipeline -> translation ->
+// every window's ChatView, that settings reach config.json and the other windows, and that nothing leaves the program's own paths.
+//   node tests/browser/e2e.mjs      (needs Playwright; screenshots go to tests/browser/out/)
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { loadFixtures, flatScreen, put, sfntWith } from '../helpers.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const APP = path.join(ROOT, 'app'), OUT = path.join(ROOT, 'tests', 'browser', 'out');
+fs.mkdirSync(OUT, { recursive: true });
+const MIME = { '.js': 'text/javascript', '.html': 'text/html', '.css': 'text/css', '.json': 'application/json' };
+const server = http.createServer((req, res) => {
+  const p = path.join(APP, decodeURIComponent(req.url.split('?')[0]));
+  if (!p.startsWith(APP) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end(); return; }
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(p)] || 'application/octet-stream' });
+  fs.createReadStream(p).pipe(res);
+}).listen(0);
+const base = `http://localhost:${server.address().port}`;
+
+let failed = 0;
+const ok = (c, msg) => { if (!c) { failed++; console.log('  FAIL: ' + msg); } };
+
+// ---- the stand-in for the exe
+const files = new Map([['Glossary.sample.txt', 'LFM = 구인\n'], ['fonts/나눔 고딕.ttf', 'x'], ['locale/en-US.txt', fs.readFileSync(path.join(ROOT, 'locale', 'en-US.txt'), 'utf8')]]);
+const requests = [], calls = [], clip = [];
+let osKind = 'windows';                                   // what the command os_kind answers (a test can switch it to 'macos' before it opens a page)
+const kb = { shift: false, enter: false, fg: 77 };       // the keyboard and the window in front (77 = the game, 99 = this program)
+// the fake screen: flat, until `matrixOn`, then a v1 matrix at 200,100 (the game window is the left top 1280x720 of it)
+const SW = 1920, SH = 1080;
+const screen = flatScreen(SW, SH), v1fx = loadFixtures().find(f => f.name === 'v1_cols32');
+let matrixOn = false, grabCount = 0;
+function grabBytes(x, y, w, h) {
+  grabCount++;
+  const base = matrixOn ? put(flatScreen(SW, SH), v1fx.img, 200, 100) : screen;
+  const out = Buffer.alloc(8 + w * h * 4);
+  out.writeUInt32LE(w, 0); out.writeUInt32LE(h, 4);
+  for (let r = 0; r < h; r++) Buffer.from(base.px.buffer, ((y + r) * SW + x) * 4, w * 4).copy(out, 8 + r * w * 4);
+  return out.toString('base64');
+}
+const BY_OWNER = true;                                              // (the default way of "just above the game")
+const topCalls = [], raised = [];
+const opened = [], owners = [], placed = [], watched = [], trayTexts = [];
+let gameGone = false;
+const wheel = [];                                    // wheel turns the fake exe tells (up = positive)
+async function invoke(cmd, a = {}) {
+  calls.push(cmd);
+  switch (cmd) {
+    case 'fs_read': return files.has(a.path) ? files.get(a.path) : null;
+    case 'fs_write': files.set(a.path, a.text); return null;
+    case 'fs_append': files.set(a.path, (files.get(a.path) || '') + a.text); return null;
+    case 'fs_kind': return files.has(a.path) ? 'file' : '';
+    case 'fs_mkdir': return null;
+    case 'fs_list': { const pre = a.path.replace(/\/$/, '') + '/'; return [...files.keys()].filter(k => k.startsWith(pre) && !k.slice(pre.length).includes('/')).map(k => k.slice(pre.length)); }
+    case 'app_folder': return 'C:\\fake\\ChatMatrixReader';
+    case 'open_url': opened.push(a.url); return null;
+    case 'http_request': {
+      if (new URL(a.url).hostname === 'api.github.com') return { status: 200, body: JSON.stringify([{ tag_name: 'v4.0.0' }, { tag_name: 'v3.0.1' }, { tag_name: 'v3.0.0', prerelease: true }]) };
+      requests.push(a);
+      const q = new URL(a.url).searchParams.get('q') || '';
+      return { status: 200, body: JSON.stringify([[[(new URL(a.url).searchParams.get('tl') === 'en' ? 'EN: ' : '번역: ') + q, q, null, null, 10]], null, 'en']) };
+    }
+    case 'os_state': return { cursor: [kb.cx ?? 0, kb.cy ?? 0], win: [0, 0, 500, 300], shift: kb.shift, ctrl: false, alt: false, keys: (a.keys || []).map(() => kb.enter), fg: kb.fg, fgTitle: kb.fg === 77 ? 'World of Warcraft' : 'ChatMatrix', fgExe: kb.fg === 77 ? 'wow.exe' : 'chatmatrix.exe', fgMine: !!kb.mine };
+    case 'show_input': kb.fg = 99; return null;
+    case 'focus_window': kb.fg = a.hwnd; return true;
+    case 'send_paste': return true;
+    case 'set_blur': return true;
+    case 'screen_rect': return [0, 0, SW, SH];
+    case 'wheel_zone': return null;
+    case 'raise_top': raised.push(1); return null;
+    case 'set_topmost': topCalls.push(a.on); return null;
+    case 'os_kind': return osKind;
+    case 'options_hotkey_ok': return true;
+    case 'wheel_since': return { seq: wheel.length, delta: wheel.slice(a.seq) };
+    case 'quit_request': return null;
+    case 'set_owner': owners.push(a.owner); return null;
+    case 'place_watch': watched.push(a.game); return null;
+    case 'place_above': placed.push(a.game); return null;
+    case 'quit_app': return null;
+    case 'system_fonts': return ['Arial', 'Malgun Gothic'];
+    case 'audio_apps': return [
+      { pid: 4, ppid: 3, exe: 'Discord.exe', role: 'renderer', sub: '', device: 'Headset', default: false, system: false, state: 1, active: true, peak: 0.2 },
+      { pid: 5, ppid: 3, exe: 'Discord.exe', role: 'utility', sub: 'AudioService', device: 'Speakers', default: true, system: false, state: 1, active: true, peak: 0.05 },
+      { pid: 9, ppid: 1, exe: 'wow.exe', role: 'main', sub: '', device: 'Speakers', default: true, system: false, state: 0, active: false, peak: 0 }];
+    case 'audio_probe': return { ok: true, pid: a.pid, build: '10.0.19045', tried: 5, works: ['mode0 i16/44100 LB+EV'], errors: [{ error: '0x88890021 bad flag', count: 4, example: 'x' }], activate_errors: [], used: 'mode0 i16/44100 LB+EV', seconds: 4, frames: 176400, rate: 44100, capture_peak: 0.3, capture_rms: 0.05, device_peak: 0.4, wav: 'extensions/stt/tmp/probe-4.wav' };
+    case 'audio_probe_device': return { ok: true, device: a.device, build: '10.0.19045', format: '2 ch 48000 Hz 32 bit float', frames: 192000, rate: 48000, capture_peak: 0.5, capture_rms: 0.1, device_peak: 0.5, wav: 'extensions/stt/tmp/probe-device.wav' };
+    case 'set_tray_text': trayTexts.push([a.options, a.quit]); return null;
+    case 'find_game': if (gameGone) return null; return { hwnd: 77, rect: [0, 0, 1280, 720], exe: 'wow.exe', title: 'World of Warcraft', front: true };
+    case 'capture': return { base64: grabBytes(a.x, a.y, a.w, a.h) };
+    default: return null;
+  }
+}
+
+const { chromium } = createRequire(import.meta.url)('playwright');
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ viewport: { width: 560, height: 420 }, deviceScaleFactor: 2, locale: 'ko-KR' });
+// Waiting for the program's own timers (the settings are saved 0.3 s after a change, the game is looked for every second ...) is the slow part of this test:
+// the pages run on a clock that is pushed forward instead of waited for (Playwright's clock: it still runs by itself, and `runFor` jumps ahead and fires what
+// is due on the way). A little real time between the steps lets the messages between the pages arrive.
+await ctx.clock.install();
+const STEP = 200;
+const tick = async ms => { for (let left = ms; left > 0; left -= STEP) { await ctx.clock.runFor(Math.min(left, STEP)); await new Promise(r => setTimeout(r, 6)); } };
+for (const pattern of ['http://cmr.localhost/fonts/*', `${base}/fonts/*`]) await ctx.route(pattern, r => r.fulfill({ status: 200, contentType: 'font/ttf', body: Buffer.from(sfntWith('Nano Test')) }));      // (the pages ask their own address: the program's on Windows, the test server's here)
+await ctx.exposeBinding('__invoke', (_, cmd, args) => invoke(cmd, args));
+await ctx.exposeBinding('__clip', (_, t) => { clip.push(t); });
+await ctx.addInitScript(() => {
+  const label = new URLSearchParams(location.search).get('label') || 'control';
+  const bc = new BroadcastChannel('tauri-events'), handlers = new Map();
+  bc.onmessage = e => (handlers.get(e.data.event) || []).forEach(h => h({ payload: e.data.payload }));
+  window.__TAURI__ = {
+    core: { invoke: async (cmd, args) => {
+      const r = await window.__invoke(cmd, args);
+      if (r && r.base64) { const bin = atob(r.base64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8.buffer; }
+      return r;
+    } },
+    event: {
+      listen: async (name, fn) => { if (!handlers.has(name)) handlers.set(name, []); handlers.get(name).push(fn); return () => {}; },
+      emit: async (name, payload) => { bc.postMessage({ event: name, payload: JSON.parse(JSON.stringify(payload ?? null)) }); },
+    },
+    window: { getCurrentWindow: () => ({ label, setTitle: async t => { window.__title = t; }, setAlwaysOnTop: async v => { window.__top = v; }, show: async () => {}, setIgnoreCursorEvents: async () => {}, startResizeDragging() {}, close() {}, hide: async () => {} }) },
+    clipboardManager: { writeText: async t => window.__clip(t) },
+  };
+});
+const errors = [];
+const open = async (url, size) => {
+  const p = await ctx.newPage();
+  p.waitForTimeout = tick;
+  await p.setViewportSize(size || { width: 560, height: 420 });
+  p.on('pageerror', e => errors.push(url + ': ' + e));
+  p.on('console', m => { if (m.type() === 'error' && !m.location().url.includes('/fonts/')) errors.push(url + ': ' + m.text()); });
+  await p.goto(base + '/' + url);
+  return p;
+};
+const control = await open('control.html?label=control', { width: 700, height: 900 });
+const main = await open('overlay.html?label=main');
+const newId = await control.evaluate(() => 0);
+await control.waitForFunction(() => window.cmrHub && window.cmrHub.windows);
+ok(JSON.stringify(trayTexts.at(-1)) === '["옵션","종료"]', 'tray: the menu texts are given to the exe: ' + JSON.stringify(trayTexts));
+const id3 = await control.evaluate(() => window.cmrHub.windows.add('둘째'));
+const extra = await open('overlay.html?label=win' + id3, { width: 420, height: 300 });
+await control.waitForFunction(() => window.cmrHub);
+ok(files.has('Glossary.txt'), 'Glossary.txt was made from the sample');
+// ---- the widgets of a window: drawn from the settings, fed by the hub, the tip under the pointer
+{
+  const W = 'core:voice-level', at = a => `#widgets .wa-${a} .widget[data-id="${W}"]`;
+  await control.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'inside', anchor: 'bottom-right', dx: 0, dy: 0, style: 'bar', show: 'always', scale: 1, opacity: 1, opts: {} } } })), W);
+  await control.waitForTimeout(600);
+  ok(await main.locator(at('bottom-right')).count() === 1 && await extra.locator('#widgets .widget').count() === 0, 'widgets: drawn in the place of the settings, only in the window that has it');
+  ok(await main.locator(at('bottom-right')).getAttribute('data-tone') === 'idle' && await main.locator(at('bottom-right') + ' .w-bar').count() === 1, 'widgets: off: idle, a thin bar');
+  await control.evaluate(() => { const c = window.cmrHub.voice.control; c.set({ state: 'on', engine: 'cpu', model: 'small', device: 'cpu', capture: { mode: 'process', program: 'Wow.exe', pid: 3, status: 'listening' }, texts: { count: 2, last: Date.now() } }); c.onLevel({ source: 'engine', db: -35, peak: 0.1, speech: true, thr: -45 }); });
+  await control.waitForTimeout(500);
+  const fill = await main.locator(at('bottom-right') + ' .w-fill').evaluate(e => e.style.width), mark = await main.locator(at('bottom-right') + ' .w-mark').evaluate(e => e.style.left);
+  ok(await main.locator(at('bottom-right')).getAttribute('data-tone') === 'hot' && Math.abs(parseFloat(fill) - 50) < 1 && Math.abs(parseFloat(mark) - 35.7) < 1, 'widgets: the hub\'s state: speech is heard: hot, the bar at -35 dB, the speech limit as the mark: ' + fill + ' ' + mark);
+  const colour = await main.locator(at('bottom-right') + ' .w-fill').evaluate(e => getComputedStyle(e).backgroundColor);
+  ok(colour !== 'rgba(0, 0, 0, 0)' && colour !== await main.locator(at('bottom-right')).evaluate(e => { e.dataset.tone = 'idle'; const c = getComputedStyle(e.querySelector('.w-fill')).backgroundColor; e.dataset.tone = 'hot'; return c; }), 'widgets: the colour follows the tone');
+  await main.screenshot({ path: path.join(OUT, 'widget_in_window.png'), clip: { x: 0, y: 330, width: 560, height: 90 } });
+  // the tip: the pointer comes from the window loop (also while click-through), here it is given by hand
+  const tipNow = await main.evaluate(() => { const r = document.querySelector('#widgets .widget').getBoundingClientRect(); const hit = window.__cmrWidgets.pointer(r.left + 2, r.top + 2); const t = document.querySelector('.w-tip'); return { hit, shown: !t.hidden, text: t.textContent }; });       // (one go: the window loop takes the pointer away again)
+  ok(tipNow.hit === W && tipNow.shown && tipNow.text.includes('켜져 있음 · Whisper · CPU · small') && tipNow.text.includes('Wow.exe') && tipNow.text.includes('인식된 글 2개'), 'widgets: the pointer over it shows the state in words: ' + JSON.stringify(tipNow.text));
+  await main.evaluate(() => window.__cmrWidgets.pointer(null, null));
+  ok(await main.locator('.w-tip').isHidden(), 'widgets: the pointer away: no tip');
+  await control.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'inside', anchor: 'top', dx: 5, dy: 0, style: 'battery', show: 'always', scale: 1.5, opacity: 1, opts: {} } } })), W);
+  await control.waitForTimeout(600);
+  ok(await main.locator(at('top')).count() === 1 && await main.locator(at('bottom-right')).count() === 0 && await main.locator(at('top') + ' .w-cell.on').count() === 3 && await main.locator(at('top')).evaluate(e => e.style.getPropertyValue('--ws') === '1.5' && e.style.transform.includes('5px')), 'widgets: another place and look: moved, a battery of 5 cells (3 are lit at -35 dB), scaled and moved');
+  await control.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'inside', anchor: 'top', style: 'bar', show: 'active' } } })), W);
+  await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'off', capture: null, texts: { count: 0, last: 0 } }));
+  await control.waitForTimeout(500);
+  ok(await main.locator(at('top')).isHidden(), 'widgets: "only while it is on": hidden when it is off');
+  await control.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'outside', anchor: 'top' } } })), W);
+  await control.waitForTimeout(500);
+  await control.waitForTimeout(500);
+  ok(await main.locator('#widgets .widget').count() === 0 && JSON.parse(files.get('config.json') || '{}').widgets?.[W]?.place === 'outside', 'widgets: an outside place is saved but not drawn yet');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: {} })));
+  await control.waitForTimeout(400);
+}
+// the speaker of the voice recognition: in the bar of every window, a drawing, its colour says the state, a click turns it on / off
+for (const [name, page] of [['main', main], ['extra', extra]]) {
+  const order = await page.evaluate(() => [...document.querySelectorAll('#bar > button')].map(b => b.id).join());
+  ok(order === 'research,voice,options,close', `speaker (${name}): between the refresh and the options icon: ` + order);
+}
+{
+  const look = page => page.evaluate(() => { const b = document.querySelector('#voice'), w = b.querySelector('.waves');
+    return { state: b.dataset.state, color: getComputedStyle(b).color, waves: getComputedStyle(w).display, title: b.title, text: b.textContent.trim(), svg: !!b.querySelector('svg') }; });
+  const off = await look(main), others = await main.evaluate(() => getComputedStyle(document.querySelector('#options')).color);
+  ok(off.svg && off.text === '' && off.state === 'off' && off.color === others && off.waves === 'none' && off.title === '음성인식 켜기', 'speaker: a drawing (no symbol character), off: the colour of the other icons, no sound waves: ' + JSON.stringify(off));
+  await control.waitForTimeout(800);                                // (the window finishes its start: fonts, listeners)
+  await control.evaluate(() => window.__TAURI__.event.emit('voice-lamp', { state: 'on', text: '' }));
+  await control.waitForTimeout(200);
+  const on = await look(main), on2 = await look(extra);
+  ok(on.state === 'on' && on.color !== off.color && on.waves !== 'none' && on.title.includes('끄기') && on2.state === 'on', 'speaker: on: green, with sound waves, in every window: ' + JSON.stringify(on));
+  await control.evaluate(() => window.__TAURI__.event.emit('voice-lamp', { state: 'error', text: '모델이 없습니다' }));
+  await control.waitForTimeout(200);
+  const bad = await look(main);
+  await main.evaluate(() => document.body.classList.add('interactive'));                  // (the bar shows while the pointer is on the window)
+  for (const st of ['off', 'on', 'error']) {
+    await control.evaluate(s2 => window.__TAURI__.event.emit('voice-lamp', { state: s2, text: s2 === 'error' ? '모델이 없습니다' : '' }), st);
+    await control.waitForTimeout(150);
+    await main.locator('#bar').screenshot({ path: path.join(OUT, 'speaker_' + st + '.png') });
+  }
+  await main.evaluate(() => document.body.classList.remove('interactive'));
+  await control.evaluate(() => window.__TAURI__.event.emit('voice-lamp', { state: 'error', text: '모델이 없습니다' }));
+  await control.waitForTimeout(150);
+  ok(bad.state === 'error' && bad.color !== off.color && bad.color !== on.color && bad.title.includes('모델이 없습니다'), 'speaker: error: its own colour, the reason as the tip: ' + JSON.stringify(bad));
+  await control.evaluate(() => window.__TAURI__.event.emit('voice-lamp', { state: 'off', text: '' }));
+  // a click: the hub turns the voice recognition on with the saved options (here nothing is installed: it says so)
+  await main.evaluate(() => document.querySelector('#voice').click());
+  await control.waitForTimeout(600);
+  const clicked = await look(main);
+  ok(clicked.state === 'error' && clicked.title.includes('설치되어 있지 않습니다'), 'speaker: a click turns it on like the button of the options (not installed: error, with the reason): ' + JSON.stringify(clicked));
+  await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'off', code: '', msg: '' }));
+  await control.waitForTimeout(200);
+}
+await control.evaluate(() => {                                       // the extra window is known to the pipeline (the exe would open it)
+  window.cmrHub.fakeLine({ channel: 'party', name: 'Thrallson', text: 'LF2M tank and healer for +12' });
+  window.cmrHub.fakeLine({ channel: 'guild', name: 'Moonpaw', text: 'LFM raid tonight, anyone?' });
+  window.cmrHub.fakeLine({ channel: 'sys', name: '', text: '[SERVER] restart in 5 minutes' });
+});
+const texts = page => page.evaluate(() => [...document.querySelectorAll('.cv-blk')].map(e => e.textContent));
+const hasText = (page, t) => page.waitForFunction(t => [...document.querySelectorAll('.cv-blk')].some(e => e.textContent.includes(t)), t, { timeout: 15000 }).catch(() => {});
+await hasText(main, '번역: LFM(구인) raid tonight');
+const m = await texts(main);
+console.log('  main window:', JSON.stringify(m));
+ok(m.some(t => t.includes('[Thrallson]') && t.includes('LF2M tank')), 'the chat line is in the main window');
+ok(m.some(t => t.includes('번역: LF2M tank and healer for +12')), 'its translation follows');
+ok(m.some(t => t.includes('LFM')), 'the guild line is there');
+ok(requests.length >= 2 && requests.every(r => /^https:\/\/translate\.googleapis\.com\//.test(r.url)), `${requests.length} requests, all to Google through the exe`);
+console.log('  requests:', JSON.stringify(requests.map(r => decodeURIComponent(r.url).slice(-70))));
+ok(requests.some(r => decodeURIComponent(r.url).replace(/\+/g, ' ').includes('raid tonight')), 'the request carried the line');
+ok(requests.every(r => (r.headers || []).some(([k]) => k === 'User-Agent')), 'requests carry the program\'s headers');
+
+// the hub's history reaches a window that opens later
+const late = await open('overlay.html?label=main');
+await hasText(late, '번역: LFM(구인) raid tonight');
+const lt = await texts(late); console.log('  late window:', JSON.stringify(lt));
+ok(lt.length >= 5 && lt.some(t => t.includes('LF2M')), 'a window opened later catches up with the history');
+
+// a setting changed in the hub: saved to config.json and drawn by the other windows
+await control.evaluate(() => { const el = document.getElementById('size'); el.value = 20; el.dispatchEvent(new Event('input')); document.getElementById('shadow').click(); });
+await main.waitForFunction(() => getComputedStyle(document.querySelector('#lines')).getPropertyValue('--cv-size').trim() === '20px', null, { timeout: 4000 }).catch(() => {});
+ok(await main.evaluate(() => getComputedStyle(document.querySelector('#lines')).getPropertyValue('--cv-size').trim()) === '20px', 'the font size reaches the main window');
+ok(await main.evaluate(() => getComputedStyle(document.querySelector('.cv-blk')).textShadow !== 'none'), 'the shadow reaches the main window');
+await control.waitForTimeout(1500);
+const saved = JSON.parse(files.get('config.json') || '{}');
+ok(saved.font_size === 20 && saved.shadow_on === true && saved.config_version === 2, 'config.json has the new settings: ' + JSON.stringify([saved.font_size, saved.shadow_on, saved.config_version]));
+ok(!calls.includes('fs_write') || [...files.keys()].every(k => !k.startsWith('/') && !k.includes('..')), 'only paths inside the program folder were used');
+ok(files.has('logs/chatmatrix.log') && files.get('logs/chatmatrix.log').includes('google OK'), 'the log is in logs/ and records the translations');
+
+// ---- the real chain: the capture loop finds the matrix on the fake screen, its lines are shown and translated
+matrixOn = true;
+await control.evaluate(() => window.cmrHub.capture.research());       // (the user presses ⟳: the whole screen is looked at now, not at the next 30-second scan)
+await hasText(main, '번역: LFM(구인) tank for mythic');
+const cap = await texts(main);
+if (process.env.DBG) console.log(await control.evaluate(() => JSON.stringify({ pos: window.cmrHub.capture.worker.pos, fails: window.cmrHub.capture.worker.fails, mode: window.cmrHub.capture.worker.mode, game: window.cmrHub.capture.game, log: document.getElementById('log').innerText.slice(-600), cfgpoll: window.cmrHub.capture.worker.getCfg().poll_hz })));
+console.log('  after the matrix:', JSON.stringify(cap.slice(-5)));
+ok(cap.some(t => t.includes('[Anna]') && t.includes('안녕하세요 hello')), 'a line read from the matrix is shown');
+ok(cap.some(t => t.includes('[Bob]') && t.includes('LFM')), 'the second line is shown');
+ok(cap.some(t => t.includes('번역: LFM(구인) tank for mythic')), 'and translated');
+ok(!cap.some(t => t.includes('매트릭스를 찾지 못했습니다')), 'the hint "matrix not found" is gone once it is found');
+ok(await control.evaluate(() => window.cmrHub.capture.worker.mode + '@' + window.cmrHub.capture.worker.pos.join(',')) === 'v1@200,100', 'the loop is connected: v1@200,100');
+await control.waitForTimeout(600);
+const lp = JSON.parse(files.get('config.json') || '{}').last_pos;
+ok(Array.isArray(lp) && lp[0] === 200 && lp[1] === 100, 'the position is remembered in config.json: ' + JSON.stringify(lp));
+await control.waitForTimeout(800);
+const noInfo = a => a.filter(t => !t.startsWith('ℹ'));   // a notice (e.g. the glossary was read again) may come at any time
+const n1 = noInfo(await texts(main)).length;
+await control.waitForTimeout(1200);
+ok(noInfo(await texts(main)).length === n1, 'the same picture adds no line twice');
+
+// ---- the send box: the hotkey in the game opens the line, Enter translates, the translation goes to the clipboard, the game gets the keyboard back
+const input = await open('input.html?label=input', { width: 500, height: 46 });
+await control.waitForTimeout(300);
+kb.shift = true; kb.enter = true;                                  // Shift+Enter in the game
+await input.waitForFunction(() => document.getElementById('lang').textContent.length > 0, null, { timeout: 5000 }).catch(() => {});
+ok(calls.includes('show_input') && kb.fg === 99, 'the hotkey opens the input line (it has the keyboard)');
+kb.shift = false; kb.enter = false;                                // the keys are let go
+await control.waitForTimeout(400);
+await input.fill('#cmd', '/w Bob Smith');
+await input.press('#cmd', 'Tab');
+ok(await input.evaluate(() => document.activeElement.id) === 'text', 'Tab moves to the sentence field');
+await input.fill('#text', '파티 구합니다 힐러 탱커');
+await input.screenshot({ path: path.join(OUT, 'input.png') });
+await input.press('#text', 'Enter');
+await control.waitForFunction(() => true);
+for (let i = 0; i < 40 && !clip.length; i++) await control.waitForTimeout(100);
+ok(clip.length === 1 && clip[0] === '/w Bob Smith EN: 파티 구합니다 힐러 탱커', 'the translation is on the clipboard: ' + JSON.stringify(clip));
+for (let i = 0; i < 40 && kb.fg !== 77; i++) await control.waitForTimeout(100);
+ok(kb.fg === 77 && calls.includes('focus_window'), 'the keyboard went back to the game');
+ok(!(await input.evaluate(() => document.getElementById('text').value)), 'the input line is empty again');
+
+// ---- the options window: rows, default button, changed marker, search, revert; every change is saved at once and reaches the other windows
+const opt = await open('options.html?label=options', { width: 940, height: 680 });
+await opt.waitForSelector('.row');
+const cfgFile = () => JSON.parse(files.get('config.json') || '{}');
+const rowOf = label => opt.locator('.row', { has: opt.locator('b.label', { hasText: new RegExp('^' + label + '$') }) });
+const settle = () => control.waitForTimeout(700);
+ok(await opt.locator('#tabs li.active .name').textContent() === '일반', 'options: the first tab is open');
+ok(await rowOf('초당 읽기 횟수').locator('button.def').isDisabled(), 'options: the default button is dim while the value is the default');
+await rowOf('초당 읽기 횟수').locator('input').fill('20');
+await rowOf('초당 읽기 횟수').locator('input').press('Enter');
+await settle();
+ok(cfgFile().poll_hz === 20, 'options: a change is saved at once: poll_hz=' + cfgFile().poll_hz);
+ok(await control.evaluate(() => window.cmrHub.capture.worker.getCfg().poll_hz) === 20, 'options: the running program uses it');
+ok(!(await rowOf('초당 읽기 횟수').locator('button.def').isDisabled()), 'options: the default button is clear when the value differs from the default');
+ok(await rowOf('초당 읽기 횟수').evaluate(e => e.classList.contains('changed')), 'options: the row is marked as changed');
+ok(await opt.locator('#changed').isVisible() && (await opt.locator('#changedCount').textContent()) === '1', 'options: "바꾼 것 1개"');
+ok((await opt.locator('#tabs li').first().locator('.badge').textContent()) === '1', 'options: the tab shows how many were changed');
+await rowOf('초당 읽기 횟수').locator('input').fill('999');
+await rowOf('초당 읽기 횟수').locator('input').press('Enter');
+await settle();
+ok(cfgFile().poll_hz === 20 && (await rowOf('초당 읽기 횟수').locator('.err').textContent()).includes('5'), 'options: a value out of range is refused (nothing saved)');
+await rowOf('초당 읽기 횟수').locator('button.def').click();
+await settle();
+ok(cfgFile().poll_hz === 30 && (await opt.locator('#changed').isHidden()), 'options: the default button resets (and it is the value of the opening again: nothing changed)');
+
+await opt.fill('#q', '정규식');
+ok(await opt.locator('.row b.label', { hasText: '제외 패턴' }).count() === 1 && await opt.locator('.row b.label', { hasText: '초당' }).count() === 0, 'options: search finds the rows of another tab');
+const rx = opt.locator('.row', { has: opt.locator('b.label', { hasText: '제외 패턴' }) }).locator('input');
+await rx.fill('[');
+await rx.press('Enter');
+await settle();
+ok(!cfgFile().skip_regex && (await opt.locator('.row.bad .err').textContent()).includes('정규식'), 'options: a broken regular expression is refused');
+await rx.fill('[가-힣]');
+await rx.press('Enter');
+await settle();
+ok(cfgFile().skip_regex === '[가-힣]', 'options: a good one is saved');
+ok(await opt.locator('.row b.label', { hasText: '일치하면 숨김' }).count() === 0, '(the hide row follows only after the search is left)');
+await opt.fill('#q', '');
+await opt.locator('#tabs li', { hasText: '예외' }).click();
+ok(await opt.locator('.row b.label', { hasText: '일치하면 숨김' }).isVisible(), 'options: the row that depends on the pattern appears');
+await opt.locator('#changedBtn').click();
+ok(await opt.locator('#head').textContent() === '이번에 바꾼 것' && await opt.locator('.row').count() === 1, 'options: only what was changed');
+await opt.screenshot({ path: path.join(OUT, 'options_changed.png') });
+await opt.locator('#revertAll').click();
+await settle();
+ok(!cfgFile().skip_regex && await opt.locator('#changed').isHidden(), 'options: revert all');
+ok(await control.evaluate(() => window.cmrHub.capture.worker.getCfg().skip_regex === ''), 'options: the program follows the revert');
+await opt.locator('#tabs li', { hasText: '일반' }).click();
+await opt.screenshot({ path: path.join(OUT, 'options_general.png') });
+
+// ---- the 창 tab: one window at a time; the main window's keys, an extra window's entry, "follows window 1"
+await opt.locator('#tabs li', { hasText: '창' }).first().click();
+await opt.waitForSelector('.wintool');
+ok(await opt.locator('.wintool select option').count() >= 3, 'options/windows: the picker lists the main window and the extra ones');
+await rowOf('글자 크기').locator('input').fill('14'); await rowOf('글자 크기').locator('input').dispatchEvent('change');
+await opt.locator('.row', { has: opt.locator('b.label', { hasText: '아래쪽에 붙이기' }) }).locator('.switch').click();
+await control.waitForTimeout(300);
+const shadow0 = !!cfgFile().shadow_on;
+await opt.locator('.row', { has: opt.locator('b.label', { hasText: '글자 그림자' }) }).locator('.switch').click();
+await opt.locator('.chbox', { hasText: '길드 관리' }).locator('input').uncheck();
+await control.waitForTimeout(1500);
+ok(cfgFile().font_size === 14 && cfgFile().bottom_stick === true && cfgFile().shadow_on === !shadow0, 'options/windows: window 1 writes its own keys (font_size, bottom_stick, shadow_on)');
+ok((cfgFile().win1_off || []).includes('O') && !(cfgFile().win1_off || []).includes('G'), 'options/windows: window 1 channels are stored as the list that is left out: ' + JSON.stringify(cfgFile().win1_off));
+ok(await opt.locator('.row b.label', { hasText: '그림자 가로' }).isVisible() === !shadow0, 'options/windows: shadow rows follow the shadow switch');
+// above everything / just above the game
+const sw = label => rowOf(label).locator('.switch');
+ok(await main.evaluate(() => window.__top) === true && placed.length === 0, 'topmost: on by default, nothing is placed');
+await sw('와우 위에만').click();
+await control.waitForTimeout(800);
+ok(cfgFile().topmost_wow_only === true && cfgFile().topmost === false, 'topmost: "just above the game" is on, "always on top" off');
+{ // owner way: two states by the program in front
+  const fg0 = kb.fg;
+  kb.fg = 5; await control.waitForTimeout(700);
+  ok(owners.at(-1) === 77 && topCalls.at(-1) === false, 'above the game, another program in front: the game is the owner, not topmost: ' + JSON.stringify([owners.at(-1), topCalls.slice(-3)]));
+  kb.fg = 77; await control.waitForTimeout(700);
+  ok(topCalls.at(-1) === true && owners.at(-1) === 0, 'above the game, the game in front: topmost, no owner: ' + JSON.stringify([owners.at(-1), topCalls.slice(-3)]));
+  kb.fg = 5; await control.waitForTimeout(700);
+  ok(owners.at(-1) === 77 && topCalls.at(-1) === false, 'and back: owner again, not topmost');
+  kb.fg = 5; kb.mine = true; await control.waitForTimeout(700);
+  ok(topCalls.at(-1) === true && owners.at(-1) === 0, 'above the game, our own window (options / send box) in front: topmost like the game in front: ' + JSON.stringify([owners.at(-1), topCalls.slice(-3)]));
+  kb.mine = false; await control.waitForTimeout(700);
+  ok(owners.at(-1) === 77 && topCalls.at(-1) === false, 'and when it is not in front any more: owner again');
+  kb.fg = fg0;
+}
+const placedBefore = placed.length;
+await sw('항상 맨 위에').click();
+await control.waitForTimeout(800);
+ok(cfgFile().topmost === true && cfgFile().topmost_wow_only === false && await main.evaluate(() => window.__top) === true && (BY_OWNER ? owners.at(-1) === 0 : !owners.at(-1)), 'topmost: "always on top" takes the other one off: ' + JSON.stringify([cfgFile().topmost, cfgFile().topmost_wow_only, await main.evaluate(() => window.__top), owners.slice(-3)]));
+{ // neither on top nor above the game: an ordinary window, a touch brings it up over the others
+  const n0 = raised.length;
+  await main.locator('#lines').click({ force: true }); await control.waitForTimeout(200);
+  ok(raised.length === n0, 'always on top: a click does not need to raise the window');
+  await sw('항상 맨 위에').click(); await control.waitForTimeout(800);
+  await main.locator('#lines').click({ force: true }); await control.waitForTimeout(200);
+  ok(raised.length > n0, 'ordinary window (both off): a click raises it over the other windows');
+  await sw('항상 맨 위에').click(); await control.waitForTimeout(800);
+}
+// the font list: the files of fonts/ and the way back to the default
+const fontSel = rowOf('글꼴').locator('select');
+ok((await fontSel.locator('option').allTextContents()).join('|').startsWith('기본 (맑은 고딕)|Nano Test  —  나눔 고딕.ttf|────────── 윈도우에 설치된 글꼴|Arial|Malgun Gothic'), 'options/windows: the font list: ' + (await fontSel.locator('option').allTextContents()).join('|'));
+await fontSel.selectOption('Nano Test'); await control.waitForTimeout(500);
+ok(cfgFile().font_family === 'Nano Test', 'options/windows: a font of the folder is chosen');
+await fontSel.selectOption(''); await control.waitForTimeout(500);
+ok(cfgFile().font_family === '', 'options/windows: back to the default font');
+// the mouse over a click-through window clears it (the fake window always has the mouse over it)
+await sw('클릭 관통').click(); await control.waitForTimeout(500);
+ok(await main.evaluate(() => document.body.classList.contains('hover-clear')) === false, 'hover clear: off by default');
+// the wheel up over a click-through window: the frame shows (the old chat is read); when the mouse leaves, it goes through again
+await control.evaluate(() => import('./settings.js').then(m => m.set({ wheel_through: true }))); await control.waitForTimeout(500);
+wheel.push(120); await control.waitForTimeout(500);
+ok(await main.evaluate(() => document.body.classList.contains('interactive')) === true, 'wheel review: the wheel up over a click-through window makes it usable');
+kb.cx = 9999; await control.waitForTimeout(500);
+ok(await main.evaluate(() => document.body.classList.contains('interactive')) === true, 'wheel review: it stays in view while the old chat is shown, also when the mouse left');
+ok(await main.evaluate(() => document.body.classList.contains('review') && getComputedStyle(document.getElementById('toBottom')).display !== 'none'), 'wheel review: the frame is marked and the way back down is there');
+await main.evaluate(() => { const l = document.getElementById('lines'); l.scrollTop = l.scrollHeight; });
+await control.waitForTimeout(600);
+ok(await main.evaluate(() => !document.body.classList.contains('review')), 'wheel review: scrolled to the newest line, the review ends at once');
+await control.waitForTimeout(300);
+ok(await main.evaluate(() => document.body.classList.contains('interactive')) === false, 'wheel review: at the newest line and the mouse away, the window goes through again');
+kb.cx = 0; await control.waitForTimeout(300);
+wheel.push(120); await control.waitForTimeout(500);
+ok(await main.evaluate(() => document.body.classList.contains('review')), 'wheel review: again');
+await main.locator('#toBottom').click({ force: true }); await control.waitForTimeout(500);
+ok(await main.evaluate(() => !document.body.classList.contains('review')), 'wheel review: the way back down ends it');
+wheel.push(120); await control.waitForTimeout(400);
+ok(await main.evaluate(() => document.body.classList.contains('review')), 'wheel review: again (for the wheel down)');
+await main.mouse.move(100, 100); await main.mouse.wheel(0, 900);
+await control.waitForTimeout(600);
+ok(await main.evaluate(() => !document.body.classList.contains('review')), 'wheel review: the wheel down to the newest line ends it');
+// the lines get shorter by themselves (a translation line hidden): the browser moves the position, that is no review
+await main.evaluate(() => { const l = document.getElementById('lines'); const pad = document.createElement('div'); pad.id = 'tpad'; pad.style.height = '900px'; l.firstChild.append(pad); l.scrollTop = l.scrollHeight; });
+await control.waitForTimeout(300);
+await main.evaluate(() => document.getElementById('tpad').remove());
+await control.waitForTimeout(500);
+ok(await main.evaluate(() => !document.body.classList.contains('review')), 'wheel review: lines getting shorter by themselves do not start it');
+await control.evaluate(() => import('./settings.js').then(m => m.set({ font_weight: 700 }))); await control.waitForTimeout(500);
+ok(await main.evaluate(() => getComputedStyle(document.querySelector('.cv-blk')).fontWeight) === '700', 'font weight: 700 reaches the lines');
+await control.evaluate(() => import('./settings.js').then(m => m.set({ font_weight: 400 }))); await control.waitForTimeout(400);
+await sw('관통 창 숨기기').click(); await control.waitForTimeout(600);
+ok(await main.evaluate(() => document.body.classList.contains('hover-clear')) === true, 'hover clear: cleared while the mouse is over it');
+kb.shift = true; await control.waitForTimeout(500);
+ok(await main.evaluate(() => document.body.classList.contains('hover-clear')) === false, 'hover clear: not while the interact key is held');
+kb.shift = false;
+// the tip of a link (item ...) under the cursor of a click-through window: the page gets no mouse events, so the window loop shows it from the cursor position
+{
+  await main.evaluate(() => {
+    const s = document.createElement('span'); s.className = 'cv-tipped'; s._tip = ['[Test Item]', 'Binds when picked up']; s.id = 'tiptest'; s.textContent = '[Test Item]';
+    s.style.cssText = 'position:fixed; left:60px; top:50px; padding:2px 8px; color:#fff; z-index:1;';
+    document.querySelector('.cv-blk').append(s);
+  });
+  const dpr = await main.evaluate(() => window.devicePixelRatio);
+  const at = async sel => { const r = await main.evaluate(s => { const b = document.querySelector(s).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }, sel); kb.cx = Math.round(r[0] * dpr); kb.cy = Math.round(r[1] * dpr); };
+  const tip = () => main.evaluate(() => { const t = document.querySelector('.cv-tip'); return { shown: getComputedStyle(t).display !== 'none', text: t.textContent }; });
+  await at('#tiptest'); await control.waitForTimeout(500);
+  ok((await tip()).shown === false, 'link tip: not while the window is cleared by the mouse (hover clear is on)');
+  await sw('관통 창 숨기기').click(); await control.waitForTimeout(600);
+  let t1 = await tip();
+  ok(t1.shown && t1.text.includes('Test Item') && t1.text.includes('Binds when picked up'), 'link tip: a click-through window shows the tip of the link under the cursor: ' + JSON.stringify(t1));
+  kb.cx = 400; kb.cy = 250; await control.waitForTimeout(500);
+  ok((await tip()).shown === false, 'link tip: the cursor leaves the link: the tip goes away');
+  await at('#tiptest'); await control.waitForTimeout(500);
+  ok((await tip()).shown === true, 'link tip: back on the link');
+  ok(await sw('관통 중 링크 보기 허용').isVisible(), 'link tip: the option is in the 창 tab, under the wheel one');
+  await sw('관통 중 링크 보기 허용').click(); await control.waitForTimeout(600);
+  ok((await tip()).shown === false && (await control.evaluate(() => import('./settings.js').then(m => m.cfg().through_tips))) === false, 'link tip: the option off: no tip while click-through');
+  await sw('관통 중 링크 보기 허용').click(); await control.waitForTimeout(600);
+  ok((await tip()).shown === true, 'link tip: the option on again');
+  kb.shift = true; await control.waitForTimeout(500);
+  ok((await tip()).shown === false, 'link tip: the interact key is held (the window is usable): the one of the mouse events takes over, not this one');
+  kb.shift = false; await control.waitForTimeout(500);
+  ok((await tip()).shown === true, 'link tip: the key released: click-through again, the tip is back');
+  kb.cx = 0; kb.cy = 0; await sw('관통 창 숨기기').click(); await control.waitForTimeout(500);       // (as it was)
+  await main.evaluate(() => document.getElementById('tiptest').remove());
+}
+await sw('관통 창 숨기기').click(); await sw('클릭 관통').click(); await control.waitForTimeout(500);
+// ---- the look rows (outline / heavier glyphs / spacing / no kerning, in tenths of a pixel): they reach the lines
+{
+  const look = () => main.evaluate(() => { const b = document.querySelector('.cv-blk'), c = getComputedStyle(b), sc = getComputedStyle(document.querySelector('.cv-scroll')); return { shadow: c.textShadow, stroke: c.webkitTextStrokeWidth, spacing: sc.letterSpacing, kern: sc.fontKerning }; });
+  const before = await look();
+  ok(before.shadow === 'none' && before.stroke === '0px', 'look: nothing by default: ' + JSON.stringify(before));
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ outline: 5, bold_fix: 3, letter_spacing: 2, plain_text: true }))); await control.waitForTimeout(700);
+  const a = await look();
+  ok(a.shadow.split('rgb(0, 0, 0)').length - 1 === 8 && Math.abs(parseFloat(a.stroke) - 0.3) < 0.01 && parseFloat(a.spacing) > 0.1 && a.kern === 'none', 'look: applied to the lines (0.5px outline, 0.3px heavier): ' + JSON.stringify(a));
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ outline: 20 }))); await control.waitForTimeout(500);
+  ok((await look()).shadow.split('rgb(0, 0, 0)').length - 1 === 16, 'look: a thick outline uses more copies');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ outline: 0, bold_fix: 0, letter_spacing: 0, plain_text: false }))); await control.waitForTimeout(700);
+  const z = await look();
+  ok(z.shadow === 'none' && z.stroke === '0px' && z.kern === 'auto', 'look: back to the defaults: ' + JSON.stringify(z));
+}
+// ---- the widgets of the 창 tab: turn on, pick the place on the picture, the looks
+{
+  const card = opt.locator('.wp').first(), cfgW = () => (cfgFile().widgets || {})['core:voice-level'];
+  await card.waitFor();
+  ok(await card.locator('.wp-top input').isChecked() === false && await card.locator('.wp-dot.in').count() === 8 && await card.locator('.wp-dot.out').count() === 8 && !cfgW(), 'options/widgets: off at first, a picture with 8 places inside and 8 outside');
+  await card.locator('.wp-top .switch').click(); await control.waitForTimeout(800);
+  ok(cfgW() && cfgW().place === 'inside' && cfgW().anchor === 'bottom-right' && cfgW().style === 'bar' && await card.locator('.wp-dot.in.sel').getAttribute('title').then(t => t.startsWith('아래 오른쪽')), 'options/widgets: turned on with the place it suggests (and saved)');
+  await card.locator('.wp-dot.in[title^="위 왼쪽"]').click(); await control.waitForTimeout(800);
+  ok(cfgW().anchor === 'top-left' && await card.locator('.wp-dot.in.sel').getAttribute('title').then(t => t.startsWith('위 왼쪽')) && await card.locator('.wp-layer .wa-top-left .widget').count() === 1, 'options/widgets: a dot on the picture is the place; the little widget is shown there');
+  ok(await card.locator('.wp-dot.out').first().getAttribute('title').then(t => t.includes('준비 중')) && cfgW().place === 'inside', 'options/widgets: the outside places say they are not ready');
+  await card.locator('.wp-field:has(span:text-is("모양")) select').selectOption('battery'); await control.waitForTimeout(800);
+  ok(cfgW().style === 'battery' && await card.locator('.wp-layer .w-battery').count() === 1, 'options/widgets: the look is chosen from the ones the widget declares');
+  await card.locator('.wp-field:has(span:text-is("보이는 때")) select').selectOption('active');
+  await card.locator('.wp-field:has(span:text-is("가로 이동 (x)")) input').fill('12'); await card.locator('.wp-field:has(span:text-is("가로 이동 (x)")) input').dispatchEvent('change');
+  await control.waitForTimeout(800);
+  ok(cfgW().show === 'active' && cfgW().dx === 12, 'options/widgets: when it is shown, the move in x');
+  await opt.locator('.wp').first().screenshot({ path: path.join(OUT, 'options_widget.png') });
+  // the list on the left: every widget, with its own switch; a second widget (as a plugin would register it) joins the list
+  ok(await opt.locator('.wl-item').count() === 1 && await opt.locator('.wl-item.sel .wl-name').textContent() === '음성인식 음량바' && await opt.locator('.wl-badge').count() === 0, 'options/widgets: the list has the one widget there is (selected, no "플러그인" mark: it is the program\'s)');
+  await opt.evaluate(() => import('./widgets/defaults.js').then(m => m.registry.register({ id: 'demo:status', label: 'Demo 상태', kind: 'light', styles: [{ id: 'dot', label: '점' }], settings: [{ key: 'blink', type: 'check', label: '깜빡임', def: true }, { key: 'size', type: 'number', label: '굵기', min: 1, max: 9, def: 3 }] })));
+  await control.waitForTimeout(300);
+  ok(await opt.locator('.wl-item').count() === 2 && await opt.locator('.wl-item').nth(1).locator('.wl-badge').textContent() === '플러그인', 'options/widgets: a widget that is registered later joins the list, marked as a plugin\'s');
+  await opt.locator('.wl-item').nth(1).click(); await control.waitForTimeout(300);
+  ok(await opt.locator('.wp-title').textContent() === 'Demo 상태' && await opt.locator('.wp-form').isHidden() && await opt.locator('.wp-top input').isChecked() === false, 'options/widgets: the right side is the chosen one; it is off for this window: its choices wait (hidden until it is on)');
+  await opt.locator('.wl-item').nth(1).locator('.switch').click(); await control.waitForTimeout(800);
+  ok(cfgFile().widgets && cfgFile().widgets['demo:status'] && cfgFile().widgets['demo:status'].opts.blink === true && cfgFile().widgets['demo:status'].opts.size === 3, 'options/widgets: the switch in the list turns it on, with the defaults of its own choices');
+  await opt.locator('.wp .wp-field:has(span:text-is("굵기")) input').fill('6'); await opt.locator('.wp .wp-field:has(span:text-is("굵기")) input').dispatchEvent('change'); await control.waitForTimeout(800);
+  ok(cfgFile().widgets['demo:status'].opts.size === 6, 'options/widgets: a choice the widget declares is saved with the others');
+  ok(await opt.locator('.wl-item').first().locator('input').isChecked() && await opt.locator('.wl-item').nth(1).locator('input').isChecked(), 'options/widgets: both switches of the list are on');
+  ok(await opt.locator('.wp-layer .widget').count() === 2 && await opt.locator('.wp-layer .widget.picked').count() === 1 && await opt.locator('.wp-layer .widget.other').count() === 1 && (await opt.locator('.wl-item.sel').count()) === 1, 'options/widgets: the picture shows every widget of the window together, the chosen one marked');
+  await opt.screenshot({ path: path.join(OUT, 'options_widgets_list.png'), clip: await opt.locator('.wm').boundingBox() });
+  // settings of a widget nobody provides any more are kept and shown, with a way to take them away
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: { ...m.cfg().widgets, 'gone:thing': { place: 'inside', anchor: 'top' } } })));
+  await control.waitForTimeout(600);
+  ok(await opt.locator('.wl-item.orphan').count() === 1 && await opt.locator('.wl-item.orphan .wl-badge').textContent() === '없음', 'options/widgets: settings of a widget nobody provides are listed, dim, marked "없음"');
+  await opt.locator('.wl-item.orphan').click(); await control.waitForTimeout(300);
+  await opt.locator('button', { hasText: '이 설정 지우기' }).click(); await control.waitForTimeout(800);
+  ok(!cfgFile().widgets['gone:thing'] && await opt.locator('.wl-item.orphan').count() === 0, 'options/widgets: deleting them');
+  await opt.evaluate(() => import('./widgets/defaults.js').then(m => m.registry.unregister('demo:status')));
+  await control.waitForTimeout(300);
+  ok(await opt.locator('.wl-item').count() === 2 && await opt.locator('.wl-item.orphan').count() === 1, 'options/widgets: a widget whose plugin goes away stays in the list as "없음" while its settings are there');
+  await opt.locator('.wl-item.orphan').click(); await opt.locator('button', { hasText: '이 설정 지우기' }).click(); await control.waitForTimeout(600);
+  await opt.locator('.wl-item').first().click(); await control.waitForTimeout(300);
+  await card.locator('.wp-top .switch').click(); await control.waitForTimeout(800);
+  ok(!cfgW() && await card.locator('.wp-form').isHidden(), 'options/widgets: turned off: its settings are gone');
+}
+await opt.selectOption('.wintool select', '3');
+await opt.waitForSelector('.row b.label:text-is("이름")');
+// an extra window leaves what can follow window 1 EMPTY: the empty input says so (small, dim, with window 1's value), no "창 1 따르기" button
+const ph = label => rowOf(label).locator('input').first().getAttribute('placeholder');
+ok((await ph('줄 간격')).startsWith('창 1을 따름 · ') && (await ph('글자 크기')).startsWith('창 1을 따름 · ') && await rowOf('줄 간격').locator('button.def').isHidden(), 'options/windows: an extra window shows what it follows in the empty input; no button: ' + await ph('줄 간격'));
+ok((await rowOf('글 정렬').locator('select option').first().textContent()).startsWith('창 1을 따름') && (await rowOf('줄 머리말').locator('select option').first().textContent()).startsWith('창 1을 따름') && (await rowOf('배경 흐림').locator('select option').first().textContent()).startsWith('창 1을 따름') && (await rowOf('글자 굵기').locator('select option').first().textContent()).startsWith('창 1을 따름'), 'options/windows: every choice list has "창 1을 따름" on top, with what window 1 has');
+ok((await rowOf('글꼴').locator('select option').first().textContent()).startsWith('창 1을 따름') && await rowOf('글꼴').locator('select').inputValue() === '', 'options/windows: the font list has it on top, and a new window follows');
+ok(await rowOf('배경 진하기').locator('button.def').isVisible() && await rowOf('시간 표시').locator('button.def').isVisible() && await rowOf('시간 표시').locator('button.def').textContent() === '기본값', 'options/windows: sliders and on / off switches have the "기본값" button, they do not follow');
+ok(await rowOf('시간 표시').locator('input[type=checkbox]').isChecked() && await rowOf('시간 표시').locator('button.def').isDisabled(), 'options/windows: a switch an extra window has no value for shows its default (on) and the 기본값 button is dim');
+await rowOf('줄 간격').locator('input').fill('5'); await rowOf('줄 간격').locator('input').dispatchEvent('change');
+await control.waitForTimeout(1500);
+ok(cfgFile().child_windows.find(c => c.id === 3).line_spacing === 5 && cfgFile().line_spacing !== 5, 'options/windows: an extra window gets its own value');
+await rowOf('줄 간격').locator('input').fill(''); await rowOf('줄 간격').locator('input').dispatchEvent('change');
+await control.waitForTimeout(1500);
+ok(!('line_spacing' in cfgFile().child_windows.find(c => c.id === 3)) && (await ph('줄 간격')).startsWith('창 1을 따름'), 'options/windows: emptying the input takes the own value away: it follows window 1 again');
+// the arrows start from window 1's value
+{
+  const main = cfgFile().font_size;
+  await rowOf('글자 크기').locator('input').first().focus();
+  await rowOf('글자 크기').locator('input').first().press('ArrowUp');
+  await control.waitForTimeout(1200);
+  ok(cfgFile().child_windows.find(c => c.id === 3).font_size === main + 1 && await rowOf('글자 크기').locator('input').first().inputValue() === String(main + 1), `options/windows: ArrowUp on the empty font size starts from window 1's ${main}: ${main + 1}`);
+  await rowOf('글자 크기').locator('.step').last().click();
+  await rowOf('글자 크기').locator('.step').last().click();
+  await control.waitForTimeout(1200);
+  ok(cfgFile().child_windows.find(c => c.id === 3).font_size === main - 1, 'options/windows: the ▾ button steps one at a time');
+  await rowOf('글자 크기').locator('input').first().fill(''); await rowOf('글자 크기').locator('input').first().dispatchEvent('change');
+  await control.waitForTimeout(1200);
+  ok(!cfgFile().child_windows.find(c => c.id === 3).font_size && await rowOf('글자 크기').locator('input').first().inputValue() === '', 'options/windows: emptied: follows window 1 (font_size 0)');
+}
+await opt.selectOption('.row:has(b.label:text-is("글 정렬")) select', 'center');
+await control.waitForTimeout(1200);
+ok(cfgFile().child_windows.find(c => c.id === 3).align === 'center', 'options/windows: a choice of its own');
+await opt.selectOption('.row:has(b.label:text-is("글 정렬")) select', '');
+await control.waitForTimeout(1200);
+ok(cfgFile().child_windows.find(c => c.id === 3).align === null, 'options/windows: "창 1을 따름" in a choice list: null (it follows window 1)');
+await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
+ok((await opt.locator('#tabs li', { hasText: '창' }).first().locator('.badge').textContent()) !== '', 'options/windows: the tab counts the changes');
+await opt.click('#revertAll');
+await control.waitForTimeout(1500);
+ok(cfgFile().font_size !== 14 && !cfgFile().bottom_stick && !(cfgFile().win1_off || []).includes('O'), 'options/windows: revert all takes the window settings back');
+await opt.locator('#tabs li', { hasText: '일반' }).click();
+
+// ---- the 번역 tab: rows depend on the method; a choice per channel
+await opt.locator('#tabs li', { hasText: '번역' }).first().click();
+await opt.waitForSelector('.row b.label:text-is("번역 방식")');
+ok(await opt.locator('h3', { hasText: 'AI 서버' }).isVisible() && await opt.locator('.row b.label', { hasText: '서버 주소' }).isHidden(), 'options/translation: the AI server card is there but folded while it is not the method');
+await opt.locator('h3', { hasText: 'AI 서버' }).click();
+ok(await opt.locator('.row b.label', { hasText: '서버 주소' }).isVisible(), 'options/translation: unfolding shows its rows');
+await opt.selectOption('.row:has(b.label:text-is("번역 방식")) select', 'openai');
+await control.waitForTimeout(1200);
+ok(cfgFile().translator === 'openai' && await opt.locator('h3', { hasText: '직접 설정한 서버' }).isVisible(), 'options/translation: all server cards stay when the method changes');
+await opt.locator('h3', { hasText: '직접 설정한 서버' }).click();
+await opt.selectOption('.row:has(b.label:text-is("서비스")) select', 'DeepL Free');
+await control.waitForTimeout(1200);
+ok(cfgFile().custom_preset === 'DeepL Free' && cfgFile().custom_url.includes('deepl.com') && cfgFile().custom_path === 'translations.0.text', 'options/translation: a service preset fills the custom server rows');
+ok(await opt.locator('.row', { hasText: '고른 서비스의 안내' }).isVisible() && await opt.locator('.row:has(b.label:text-is("주소")) input').inputValue().then(v => v.includes('deepl.com')), 'options/translation: the preset note and the address show');
+await opt.selectOption('.routebox:has-text("길드 관리") select', 'off');
+await control.waitForTimeout(1200);
+ok(JSON.stringify(cfgFile().channel_route.O) === '"off"', 'options/translation: a channel can be set to "번역 안 함": ' + JSON.stringify(cfgFile().channel_route));
+await opt.screenshot({ path: path.join(OUT, 'options_translation.png') });
+await opt.click('#revertAll');
+await control.waitForTimeout(1200);
+ok(cfgFile().translator !== 'openai' && !cfgFile().channel_route.O, 'options/translation: revert all');
+await opt.locator('#tabs li', { hasText: '일반' }).click();
+
+// ---- the 음성인식 tab: the state and what its button does, the card of the chosen method opens, nothing installed says so
+await opt.locator('#tabs li', { hasText: '음성인식' }).click();
+ok(await opt.locator('.vsource').count() === 4 && (await opt.locator('.vsources').textContent()).includes('huggingface.co/ggerganov/whisper.cpp'), 'options/voice: the places the engine and the models come from are listed');
+await opt.locator('.vsource', { hasText: 'Hugging Face' }).locator('button').click();
+ok(opened.at(-1) === 'https://huggingface.co/ggerganov/whisper.cpp', 'options/voice: the model repository opens in the browser: ' + opened.at(-1));
+await opt.waitForSelector('.vstatus');
+await control.waitForTimeout(400);
+ok((await opt.locator('.vstatus .vtext').textContent()).startsWith('꺼져 있음') && await opt.locator('.vtoggle').textContent() === '켜기', 'options/voice: off, and the button says what it will do');
+ok(await opt.locator('.vinstall .vnone').textContent() === '설치되지 않음' && await opt.locator('.vbtns button', { hasText: '설치 (CPU)' }).isVisible(), 'options/voice: nothing installed, the install button is there');
+ok(await opt.locator('.row b.label:text-is("계산 장치")').isVisible() && await opt.locator('.row b.label:text-is("서버 주소")').isHidden(), 'options/voice: Whisper is the method: its card is open, the server card folded');
+await opt.locator('.vtoggle').click();
+await control.waitForTimeout(500);
+ok(await opt.locator('.vstatus').getAttribute('data-state') === 'error' && (await opt.locator('.vstatus .vtext').textContent()).includes('설치되어 있지 않습니다'), 'options/voice: turned on with nothing installed: the reason is shown');
+await opt.locator('.vbtns button', { hasText: '설치 (CPU)' }).click();
+await opt.waitForFunction(() => /올라와/.test(document.querySelector('.vmsg')?.textContent || ''));
+ok(true, 'options/voice: installing an engine that is not published says so (no crash, the buttons come back)');
+ok(await control.evaluate(() => window.cmrHub.voice.control.state.code) === 'not_installed', 'options/voice: the hub has the same state');
+// a long line about the sound (a warning) stays on a line of its own under the button; it does not push the label away
+await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'on', engine: 'cpu', model: 'small', device: 'cpu',
+  capture: { mode: 'none', status: 'waiting' }, warn: '프로그램에서 8초 동안 소리가 나지 않았습니다. 프로그램이 켜져 있고 소리가 나는지 확인하세요. (이 프로그램이 내는 소리만 듣습니다)' }));
+await control.waitForTimeout(300);
+{
+  const b = n => opt.locator(n).first().boundingBox();
+  const [btn, cap, label, row] = await Promise.all([b('.vstatus .vtoggle'), b('.vstatus .vcap'), b('.row:has(.vstatus) b.label'), b('.row:has(.vstatus)')]);
+  ok(cap && btn && cap.y >= btn.y + btn.height - 1, 'options/voice: the sound line is under the on/off button, not beside it');
+  ok(label.width > 20 && label.x < row.x + 60, 'options/voice: a long sound line does not squeeze the label');
+  ok(btn.x + btn.width <= row.x + row.width + 1 && cap.x + cap.width <= row.x + row.width + 1, 'options/voice: nothing runs out of the option');
+  await opt.locator('.row:has(.vstatus)').screenshot({ path: path.join(OUT, 'options_voice_status.png') });
+}
+await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'off', capture: null, warn: '', engine: '', model: '', device: '' }));
+await control.waitForTimeout(200);
+// every option of the voice recognition says whether a change is applied while it runs
+{
+  const chip = (label, kind) => opt.locator(`.row:has(> .text b.label:text-is("${label}")) .apply.${kind}`).count();
+  const none = label => opt.locator(`.row:has(> .text b.label:text-is("${label}")) .apply`).count();
+  ok(await chip('소리 대상', 'live') === 1 && await chip('소리 받는 방식', 'live') === 1 && await chip('말하는 언어', 'live') === 1 && await chip('표시 방식', 'live') === 1, 'options/voice: target, method, language, display mode say "바로 적용"');
+  ok(await chip('모델', 'restart') === 1 && await chip('계산 장치', 'restart') === 1 && await chip('음성인식 방식', 'restart') === 1, 'options/voice: model, compute device, method say "다시 시작해야 적용"');
+  ok(await none('시작할 때 자동으로 켜기') === 0 && await none('상태') === 0, 'options/voice: the options that have nothing to do with it have no mark');
+  ok((await opt.locator('.apply.live').first().textContent()) === '바로 적용' && (await opt.locator('.apply.restart').first().textContent()) === '다시 시작해야 적용' && (await opt.locator('.card', { hasText: '표시 방식' }).count()) >= 1, 'options/voice: the marks read right');
+}
+// what waits for a restart, the loudness bar and the sentences (it is on)
+await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'on', engine: 'cpu', model: 'small', device: 'cpu', capture: { mode: 'device', device: 'Headset', program: 'Discord.exe', status: 'listening' },
+  warn: '', pending: ['model', 'device'], texts: { count: 3, last: Date.now() - 4000 } }));
+await control.waitForTimeout(300);
+ok(await opt.locator('.vpending').isVisible() && (await opt.locator('.vpending').textContent()).includes('모델') && (await opt.locator('.vpending').textContent()).includes('계산 장치') && await opt.locator('.vpending button').isVisible(), 'options/voice: what only a restart applies is named, with a button');
+ok(await opt.locator('.vlevel').isVisible() && (await opt.locator('.vtexts').textContent()).includes('인식된 글 3개'), 'options/voice: the loudness bar and the sentences are shown while it is on');
+await control.evaluate(() => window.__TAURI__.event.emit('voice-level', { source: 'engine', db: -35, peak: 0.1, speech: true, thr: -45 }));
+await control.waitForTimeout(250);
+{
+  const w = await opt.locator('.vfill').evaluate(e => e.style.width), left = await opt.locator('.vtick').evaluate(e => e.style.left);
+  ok(Math.abs(parseFloat(w) - 50) < 1 && Math.abs(parseFloat(left) - 35.7) < 1, 'options/voice: the bar follows the engine\'s loudness (-35 dB of -70..0) and shows the speech limit');
+  ok((await opt.locator('.vdb').textContent()) === '-35 dB' && await opt.locator('.vspeech.on').isVisible(), 'options/voice: the number and "speech" light');
+}
+await control.evaluate(() => window.__TAURI__.event.emit('voice-level', { source: 'capture', peak: 0.1, level: 0.1, gate: true }));
+await control.waitForTimeout(200);
+ok((await opt.locator('.vdb').textContent()) === '-35 dB' && (await opt.locator('.vgate').textContent()) === '통과 중', 'options/voice: while the engine reports, its reading is used; the gate shows for the whole-device method');
+await opt.locator('.vstatus').screenshot({ path: path.join(OUT, 'options_voice_level.png') });
+await control.evaluate(() => { window.__restarts = 0; window.__TAURI__.event.listen('voice-restart', () => { window.__restarts++; }); });
+await opt.locator('.vpending button').click();
+await control.waitForTimeout(200);
+ok(await control.evaluate(() => window.__restarts) >= 1, 'options/voice: the button asks the hub to restart');
+await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'off', capture: null, pending: [], texts: { count: 0, last: 0 }, engine: '', model: '', device: '' }));
+await control.waitForTimeout(200);
+ok(await opt.locator('.vlevel').isHidden() && await opt.locator('.vpending').isHidden(), 'options/voice: off: no bar, no notice');
+// the model list: what is on the disk and what is not, the speed numbers, the test button
+const mrow = n => opt.locator('.vmtable tbody tr', { hasText: n }).first();
+ok(await opt.locator('.vmtable tbody tr').count() === 6 && (await mrow('small').locator('td').nth(2).textContent()) === '없음' && await mrow('small').locator('button').textContent() === '받기', 'options/voice: every model is listed, one that is not on the disk says so and can be got');
+await control.evaluate(() => window.cmrHub.voice.control.set({ installed: { engines: ['cpu'], models: ['small'] }, benchFiles: ['talk.wav'],
+  perf: [{ model: 'small', device: 'cpu', live: { n: 8, ratio: 0.42, avgMs: 1500, speech: 30 }, bench: { ratio: 0.3, dur: 20, ms: 6000, file: 'talk.wav', text: 'hello there', load_ms: 700, at: 1 } }] }));
+await control.waitForTimeout(300);
+ok((await mrow('small').locator('td').nth(2).textContent()).startsWith('설치됨') && await mrow('small').locator('button').textContent() === '삭제', 'options/voice: an installed model says so and can be deleted');
+ok((await mrow('small').locator('td').nth(3).textContent()) === '×0.42 (8)' && (await mrow('small').locator('td').nth(4).textContent()).startsWith('×0.30') && (await mrow('small').locator('td').nth(4).textContent()).includes('불러오기 0.7'), 'options/voice: the speed in use and of the test are shown, with the load time apart');
+await control.evaluate(() => window.cmrHub.voice.control.set({ task: '', perf: [{ model: 'small', device: 'cpu', live: null, bench: { ratio: 1.64, dur: 11, ms: 18000, file: 'talk.wav', text: 'hello there', load_ms: 80000, at: 1 } }] }));
+await control.waitForTimeout(300);
+ok((await mrow('small').locator('td').nth(4).textContent()).includes('⚠') && (await opt.locator('.vmodels .vmsg').textContent()).includes('시험 배율이 1을 넘는'), 'options/voice: a test ratio over 1 is marked and explained');
+await control.evaluate(() => window.cmrHub.voice.control.set({ perf: [{ model: 'small', device: 'cpu', live: { n: 8, ratio: 0.42, avgMs: 1500, speech: 30 }, bench: { ratio: 0.3, dur: 20, ms: 6000, file: 'talk.wav', text: 'hello there', load_ms: 700, at: 1 } }] }));
+await control.waitForTimeout(300);
+ok((await opt.locator('.vheard').textContent()).includes('hello there'), 'options/voice: what the model heard in the test is shown');
+ok(await opt.locator('.vbench button', { hasText: '선택한 모델 속도 시험' }).isDisabled(), 'options/voice: the test button waits for a ticked model');
+await mrow('small').locator('input').check();
+ok(await opt.locator('.vbench button', { hasText: '선택한 모델 속도 시험' }).isEnabled(), 'options/voice: ... and is enabled once an installed model is ticked');
+await mrow('small').locator('button').click();
+ok(await mrow('small').locator('button').textContent() === '정말 삭제', 'options/voice: deleting a model asks once more');
+await opt.screenshot({ path: path.join(OUT, 'options_voice_models.png'), fullPage: true });
+await control.evaluate(() => window.cmrHub.voice.control.set({ installed: { engines: [], models: [] }, perf: [], benchFiles: [] }));
+ok(await opt.locator('.row b.label:text-is("소리 대상")').isVisible() && await opt.locator('.row b.label:text-is("프로그램")').isHidden(), 'options/voice: the program picker shows only for "프로그램을 직접 고르기"');
+await opt.selectOption('.row:has(b.label:text-is("소리 대상")) select', 'discord');
+await control.waitForTimeout(1000);
+ok(cfgFile().voice_target === 'discord' && (await opt.locator('.row:has(b.label:text-is("소리 대상")) .hint').textContent()).includes('세션'), 'options/voice: the Discord preset is kept, with its hint');
+await opt.selectOption('.row:has(b.label:text-is("소리 대상")) select', 'app');
+await opt.waitForSelector('.vpicker');
+ok((await opt.locator('.vpicker select option').allTextContents()).join('|').includes('Discord.exe · 렌더러 · Headset') && (await opt.locator('.vpicker select option').allTextContents()).join('|').includes('Discord.exe · AudioService · Speakers · pid 5'), 'options/voice: the programs that make sound are listed per job and device');
+await opt.selectOption('.vpicker select', 'wow.exe');
+await control.waitForTimeout(1000);
+ok(cfgFile().voice_app === 'wow.exe', 'options/voice: a program is picked from the list');
+await opt.fill('.vpicker input', 'chrome.exe');
+await opt.locator('.vpicker input').dispatchEvent('change');
+await control.waitForTimeout(1000);
+ok(cfgFile().voice_app === 'chrome.exe', 'options/voice: a program typed by hand is kept');
+await opt.selectOption('.vpicker select', 'Discord.exe|renderer|');
+await control.waitForTimeout(800);
+ok(cfgFile().voice_app === 'Discord.exe|renderer|', 'options/voice: one job of a program (Discord voice) can be picked');
+await opt.locator('.vpicker .vprobe').waitFor({ state: 'attached' });
+await opt.locator('.vpicker button:text-is("소리 확인 (4초)")').click();
+await opt.waitForFunction(() => document.querySelector('.vpicker .vprobe').textContent.includes('0.3000'));
+ok((await opt.locator('.vpicker .vprobe').textContent()).includes('probe-4.wav') && (await opt.locator('.vpicker .vprobe').textContent()).includes('0x88890021'), 'options/voice: the capture check shows what it heard and the errors');
+await opt.locator('.vpicker button:has-text("장치 소리 확인")').click();
+await opt.waitForFunction(() => document.querySelector('.vpicker .vprobe').textContent.includes('probe-device.wav'));
+ok(true, 'options/voice: the whole-device check works');
+await opt.selectOption('.row:has(b.label:text-is("표시 방식")) select', 'live');
+await control.waitForTimeout(1000);
+ok(cfgFile().voice_mode === 'live' && await opt.locator('.row b.label:text-is("실시간 갱신 간격")').isVisible(), 'options/voice: live mode shows its interval');
+await opt.selectOption('.row:has(b.label:text-is("말하는 언어")) select', 'ja');
+await control.waitForTimeout(1000);
+ok(cfgFile().voice_lang === 'ja', 'options/voice: the spoken language is kept');
+await opt.selectOption('.row:has(b.label:text-is("음성인식 방식")) select', 'openai');
+await control.waitForTimeout(1200);
+ok(cfgFile().voice_engine === 'openai' && await opt.locator('.row b.label:text-is("서버 주소")').isVisible() && await opt.locator('.row b.label:text-is("계산 장치")').isHidden(), 'options/voice: the server method opens the server card and folds Whisper');
+await opt.selectOption('.row:has(b.label:text-is("계산 장치")) select', 'gpu', { timeout: 300 }).catch(() => {});       // (folded: the card of the server is open; this only tries, it used to wait 30 s)
+await opt.screenshot({ path: path.join(OUT, 'options_voice_server.png'), fullPage: true });
+await opt.click('#revertAll');
+await control.waitForTimeout(1200);
+ok(cfgFile().voice_engine === 'whisper' && await opt.locator('.row b.label:text-is("계산 장치")').isVisible(), 'options/voice: revert all (Whisper card open again)');
+await opt.locator('h3', { hasText: '고급' }).click();
+await opt.setViewportSize({ width: 940, height: 1500 });      // (the whole tab in one picture)
+await opt.screenshot({ path: path.join(OUT, 'options_voice.png') });
+await opt.locator('.card', { has: opt.locator('b.label:text-is("말하는 언어")') }).screenshot({ path: path.join(OUT, 'options_voice_marks.png') });
+await opt.setViewportSize({ width: 940, height: 680 });
+await opt.locator('#tabs li', { hasText: '일반' }).click();
+
+// ---- the 단어장·프롬프트 tab: the glossary file is edited and saved here; the prompt has its own default button
+await opt.locator('#tabs li', { hasText: '단어장' }).click();
+await opt.waitForSelector('textarea.filetext');
+await control.waitForTimeout(300);
+ok((await opt.inputValue('textarea.filetext')).includes('LFM = 구인') && await opt.locator('.row.t-file button', { hasText: '저장' }).isDisabled(), 'options/glossary: the glossary file is shown (nothing to save yet)');
+await opt.fill('textarea.filetext', (await opt.inputValue('textarea.filetext')) + '\nZZTOP = 시험용 단어\n');
+ok(await opt.locator('.row.t-file button', { hasText: '저장' }).isEnabled(), 'options/glossary: editing enables "저장"');
+await opt.locator('.row.t-file button', { hasText: '저장' }).click();
+await control.waitForTimeout(300);
+ok((files.get('Glossary.txt') || '').includes('ZZTOP = 시험용 단어'), 'options/glossary: saved to Glossary.txt');
+let sawGloss = false, sawConn = (await texts(main)).some(t => t.includes('번역 서버 연결 양호'));
+for (let i = 0; i < 80 && !sawGloss; i++) { await control.waitForTimeout(100); sawGloss = (await texts(main)).some(t => t.includes('단어장을 다시 읽었습니다')); }
+ok(sawGloss, 'upkeep: saving the glossary shows a note in the window');
+ok(sawConn, 'upkeep: the connection check at start shows its result');
+const promptRow = rowOf('기본 프롬프트');
+ok(await promptRow.locator('button.def').isDisabled(), 'options/glossary: the prompt is the default (dim button)');
+await promptRow.locator('textarea').fill('MY PROMPT {{Glossary.txt}}'); await promptRow.locator('textarea').dispatchEvent('change');
+await control.waitForTimeout(1200);
+ok(cfgFile().prompt === 'MY PROMPT {{Glossary.txt}}' && await promptRow.locator('button.def').isEnabled(), 'options/glossary: a changed prompt is saved');
+await promptRow.locator('button.def').click();
+await control.waitForTimeout(1200);
+ok(cfgFile().prompt.startsWith('You are a real-time chat translator'), 'options/glossary: the default button brings the default prompt back');
+ok((await opt.locator('.row:has(b.label:text-is("단어장 전달 방식")) option').allTextContents()).join() === '전체,선별,복합' && (await opt.locator('.row:has(b.label:text-is("단어장 전달 방식")) .hint').textContent()).includes('전체'), 'options/glossary: three short names, the meaning of the chosen one under the label');
+await rowOf('추가 지시').locator('textarea').fill('');
+await rowOf('추가 지시').locator('textarea').dispatchEvent('change');
+await opt.locator('.ex', { hasText: '해적' }).click();
+await control.waitForTimeout(1200);
+ok(cfgFile().extra_prompt === 'Always write the translated dialogue in the style of a pirate.', 'options/glossary: an example is put into the extra instructions');
+await rowOf('추가 지시').locator('button.def').click();
+await control.waitForTimeout(800);
+// a glossary file name that does not exist yet gets the sample
+await rowOf('단어장 파일 이름').locator('input').fill('Neu.txt'); await rowOf('단어장 파일 이름').locator('input').dispatchEvent('change');
+for (let i = 0; i < 40 && !files.has('Neu.txt'); i++) await control.waitForTimeout(100);
+ok((files.get('Neu.txt') || '').includes('LFM = 구인'), 'options/glossary: a new glossary file name gets the sample content');
+ok((await opt.inputValue('textarea.filetext')).includes('LFM = 구인'), 'options/glossary: and the editor shows it');
+await rowOf('단어장 파일 이름').locator('button.def').click();
+await control.waitForTimeout(800);
+await opt.locator('#tabs li', { hasText: '번역' }).first().click();
+ok(await opt.locator('.row.warn', { hasText: '한국어가 아니면' }).count() === 0 || await opt.locator('.row.warn', { hasText: '한국어가 아니면' }).isHidden(), 'options: no language warning for Korean');
+await opt.selectOption('.row:has(b.label:text-is("목표 언어")) select', 'English');
+await control.waitForTimeout(1000);
+ok(await opt.locator('.row.warn', { hasText: '한국어가 아니면' }).first().isVisible(), 'options: a target language other than Korean warns about the glossary and the prompt');
+await opt.selectOption('.row:has(b.label:text-is("목표 언어")) select', '한국어');
+await control.waitForTimeout(1000);
+
+// ---- the 보내기 tab: the hotkey is taken from the keyboard
+await opt.locator('#tabs li', { hasText: '보내기' }).first().click();
+await opt.waitForSelector('select.hotkeykey');
+await rowOf('단축키').locator('input[value=Shift]').uncheck();
+ok((await rowOf('단축키').locator('.err').textContent()).includes('함께') && cfgFile().send_hotkey === 'Shift+Enter', 'options/send: Enter without Ctrl/Alt/Shift is refused');
+await rowOf('단축키').locator('input[value=Ctrl]').check();
+await control.waitForTimeout(1200);
+ok(cfgFile().send_hotkey === 'Ctrl+Enter', 'options/send: Ctrl+Enter: ' + cfgFile().send_hotkey);
+await rowOf('단축키').locator('select').selectOption('K');
+await rowOf('단축키').locator('input[value=Shift]').check();
+await control.waitForTimeout(1200);
+ok(cfgFile().send_hotkey === 'Ctrl+Shift+K', 'options/send: the key from the list: ' + cfgFile().send_hotkey);
+// languages: a list, and "직접 입력" for the rest
+await opt.selectOption('.row:has(b.label:text-is("보내는 언어")) select', '日本語');
+await control.waitForTimeout(1000);
+ok(cfgFile().send_lang === '日本語', 'options/send: the language comes from the list');
+await opt.selectOption('.row:has(b.label:text-is("보내는 언어")) select', { label: '직접 입력' });
+await opt.fill('.row:has(b.label:text-is("보내는 언어")) input.wide', 'Português'); await opt.locator('.row:has(b.label:text-is("보내는 언어")) input.wide').dispatchEvent('change');
+await control.waitForTimeout(1000);
+ok(cfgFile().send_lang === 'Português' && await opt.locator('.row:has(b.label:text-is("보내는 언어")) input.wide').isVisible(), 'options/send: any other language by hand');
+await rowOf('단축키').locator('button.def').click();
+await control.waitForTimeout(1000);
+ok(cfgFile().send_hotkey === 'Shift+Enter', 'options/send: the default button brings Shift+Enter back');
+await opt.locator('.ex', { hasText: '존댓말' }).click();
+await control.waitForTimeout(1000);
+ok(cfgFile().send_extra_prompt.startsWith('Write in a polite'), 'options/send: an example goes into the extra instructions');
+await opt.click('#revertAll');
+await control.waitForTimeout(1000);
+await opt.locator('#tabs li', { hasText: '일반' }).click();
+
+// ---- the 정보 tab: version, the newest release (of this major version), the log
+await opt.locator('#tabs li', { hasText: '정보' }).click();
+await opt.waitForSelector('.aboutcard .latest');
+ok((await opt.locator('.aboutcard .cur').textContent()).startsWith('v3.0.0'), 'options/about: the version is shown');
+await control.waitForTimeout(3500);
+ok((await opt.locator('.aboutcard .latest').textContent()).includes('v3.0.1') && await opt.locator('.aboutcard .latest.newer').count() === 1, 'options/about: the newest release of this major version (not 4.0), marked as newer: ' + await opt.locator('.aboutcard .latest').textContent());
+ok((await opt.locator('.aboutcard .dir').textContent()).includes('fake'), 'options/about: the program folder');
+await opt.click('.aboutcard button:has-text("릴리스 페이지")');
+await control.waitForTimeout(200);
+ok(opened.at(-1) === 'https://github.com/blackmass/ChatMatrixReader/releases', 'options/about: the release page opens in the browser');
+// the licenses: the technology list is there, the full texts are files of the program folder (read through the exe)
+ok((await opt.locator('.lictech').textContent()).includes('Eternalguard') && (await opt.locator('.lictech').textContent()).includes('whisper.cpp'), 'options/about: the technology and licenses are listed');
+await opt.locator('.licenses button', { hasText: 'LICENSE 보기' }).click();
+await opt.waitForTimeout(200);
+ok(await opt.locator('.licview').isHidden() && (await opt.locator('.licenses small').last().textContent()).includes('LICENSE'), 'options/about: a missing license file is explained (not an empty box)');
+files.set('LICENSE', 'MIT License\n\nCopyright (c) 2026 Eternalguard\n');
+await opt.locator('.licenses button', { hasText: 'LICENSE 보기' }).click();
+await opt.waitForTimeout(200);
+ok(await opt.locator('.licview').isVisible() && (await opt.locator('.licview').inputValue()).includes('MIT License'), 'options/about: the license text is shown when the file is there');
+files.delete('LICENSE');
+
+files.set('logs/chatmatrix.log', Array.from({ length: 600 }, (_, i) => 'LOG LINE ' + i).join('\n'));
+await opt.locator('.row.t-logview button', { hasText: '새로 고침' }).click();
+await control.waitForTimeout(300);
+const logText = await opt.inputValue('textarea.logtext');
+ok(logText.endsWith('LOG LINE 599') && !logText.includes('LOG LINE 100\n') && logText.split('\n').length === 400, 'options/about: the log shows its last 400 lines');
+
+// ---- the display language: the texts of every window follow the setting, and switching back restores them
+await opt.locator('#tabs li', { hasText: '일반' }).click();
+await opt.waitForSelector('.row:has(b.label:text-is("표시 언어"))');
+ok(await opt.locator('.row:has(b.label:text-is("표시 언어")) option').count() === 3, 'language: the list has the system choice, Korean and the locale file');
+await opt.selectOption('.row:has(b.label:text-is("표시 언어")) select', 'en-US');
+await control.waitForTimeout(1500);
+ok(cfgFile().language === 'en-US', 'language: saved');
+ok((await opt.locator('#tabs li .name').allTextContents()).join('|') === 'General|Window|Translation|Glossary & prompt|Exceptions|Send|Voice recognition|Advanced|About' , 'language: the side menu is in English: ' + (await opt.locator('#tabs li .name').allTextContents()).join('|'));
+ok(await opt.locator('#head').textContent() === 'General' && (await opt.getAttribute('#q', 'placeholder')) === 'Search options', 'language: header and placeholder');
+ok(await opt.locator('.row b.label', { hasText: 'Display language' }).count() === 1, 'language: option rows');
+await opt.locator('#tabs li', { hasText: 'Window' }).click();
+await opt.waitForSelector('.wintool');
+ok((await opt.locator('.wintool select option').first().textContent()).includes('Main'), 'language: texts put together while running (the window list): ' + await opt.locator('.wintool select option').first().textContent());
+const chatBefore = await texts(main);
+ok(chatBefore.some(t => /LFM/.test(t)), 'language: the chat itself is never translated by the page');
+await opt.locator('#tabs li', { hasText: 'Translation' }).click();
+await opt.waitForSelector('h3:text-is("Method")');
+await opt.screenshot({ path: path.join(OUT, 'options_english.png') });
+await opt.locator('#tabs li', { hasText: 'General' }).click();
+await opt.selectOption('.row:has(b.label:text-is("Display language")) select', 'ko-KR');
+await control.waitForTimeout(1500);
+ok(await opt.locator('#head').textContent() === '일반' && (await opt.getAttribute('#q', 'placeholder')) === '옵션 검색', 'language: back to Korean restores every text');
+await opt.selectOption('.row:has(b.label:text-is("표시 언어")) select', '');
+await control.waitForTimeout(1200);
+
+await main.bringToFront();                                   // (a page that is not in front gets its scroll events late: the page counts 600 ms from the wheel)
+const plain = await main.evaluate(() => {
+  const ev = (type, init) => { const e = type === 'wheel' ? new WheelEvent(type, { cancelable: true, bubbles: true, ...init }) : new MouseEvent(type, { cancelable: true, bubbles: true, ...init }); document.querySelector('.cv-blk').dispatchEvent(e); return e.defaultPrevented; };
+  const el = document.getElementById('lines'); el.style.height = '40px'; el.style.overflow = 'auto'; el.scrollTop = 0;
+  const r = { menu: ev('contextmenu', { button: 2 }), middle: ev('auxclick', { button: 1 }), ctrlWheel: ev('wheel', { ctrlKey: true, deltaY: 30 }), shiftWheel: ev('wheel', { shiftKey: true, deltaY: 30 }) };
+  r.scrolled = el.scrollTop; return r;
+});
+ok(plain.menu && plain.middle && plain.ctrlWheel && plain.shiftWheel, 'context menu, middle click and Ctrl/Shift+wheel are taken over: ' + JSON.stringify(plain));
+ok(plain.scrolled >= 50, 'Ctrl/Shift+wheel scrolls the lines: ' + plain.scrolled);
+await main.evaluate(() => { document.getElementById('lines').scrollTop = 200; });
+await new Promise(r => setTimeout(r, 200));                      // (real time: the scroll to 200 is its own event first, then the wheel goes up from there; in one go the page sees one move)
+await main.evaluate(() => { document.querySelector('.cv-blk').dispatchEvent(new WheelEvent('wheel', { shiftKey: true, deltaY: -30, cancelable: true, bubbles: true })); });
+for (let i = 0; i < 20 && !(await main.evaluate(() => document.body.classList.contains('review'))); i++) await control.waitForTimeout(100);       // (the window loop takes a round or two)
+ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift+wheel up (the page gets it itself) also starts the review of the old chat: ' + await main.evaluate(() => { const l = document.getElementById('lines'); return JSON.stringify({ top: l.scrollTop, h: l.scrollHeight, c: l.clientHeight, cls: document.body.className, hidden: document.hidden }); }));
+
+// ---- window titles: "ChatMatrix - <name>", the default name when it is empty, and the language
+ok(await main.evaluate(() => document.title) === 'ChatMatrix - 메인' && await main.locator('#title').textContent() === 'ChatMatrix - 메인', 'titles: the main window: ' + await main.evaluate(() => document.title));
+ok(await extra.evaluate(() => document.title) === 'ChatMatrix - 둘째', 'titles: an extra window shows the name it was given: ' + await extra.evaluate(() => document.title));
+// ---- the window manager: the extra window is in the settings and open; its place is saved; the X closes it for good
+ok(id3 === 3 && cfgFile().child_windows.some(c => c.id === 3 && c.name === '둘째' && c.open_mode === 'always'), 'windows: a new window is in config.json: ' + JSON.stringify(cfgFile().child_windows.map(c => [c.id, c.open_mode])));
+ok(calls.includes('open_overlay') && await control.evaluate(() => window.cmrHub.windows.isOpen(3)), 'windows: the hub opened it');
+for (let i = 0; i < 20 && !(cfgFile().child_windows.find(c => c.id === 3) || {}).geometry; i++) await control.waitForTimeout(100);
+ok((cfgFile().child_windows.find(c => c.id === 3) || {}).geometry === '500x300+0+0' && cfgFile().geometry === '500x300+0+0', 'windows: the places of both windows are saved: ' + cfgFile().geometry);
+ok((await texts(extra)).some(t => t.includes('LFM')), 'windows: the extra window shows the chat too');
+await extra.click('#close');
+for (let i = 0; i < 20 && (await control.evaluate(() => window.cmrHub.windows.isOpen(3))); i++) await control.waitForTimeout(100);
+ok(cfgFile().child_windows.find(c => c.id === 3).open_mode === 'always' && !(await control.evaluate(() => window.cmrHub.windows.isOpen(3))), 'windows: the X closes it for now and does not change its setting');
+await control.evaluate(() => window.cmrHub.windows.openWindow(3));
+await control.waitForTimeout(300);
+ok(await control.evaluate(() => window.cmrHub.windows.isOpen(3)), 'windows: opened by hand');
+await control.evaluate(() => window.cmrHub.windows.remove(3));
+await control.waitForTimeout(500);
+ok(!cfgFile().child_windows.some(c => c.id === 3) && !(await control.evaluate(() => window.cmrHub.windows.isOpen(3))), 'windows: removed');
+
+await main.screenshot({ path: path.join(OUT, 'main.png') });
+
+// ---- options: the translation test box (the translation tabs), the 고급 tab, the quit button
+await opt.locator('#tabs li', { hasText: '번역' }).first().click();
+ok(await opt.locator('#tester').isVisible(), 'test box: shown in the translation tab');
+await opt.fill('#testText', 'LFM tank');
+await opt.click('#testBtn');
+await opt.waitForFunction(() => /\(\d+ms/.test(document.getElementById('testOut').textContent), null, { timeout: 8000 });
+const testOut = await opt.locator('#testOut').textContent();
+ok(testOut.includes('LFM') && testOut.includes('Google') && await opt.locator('#testOut.ok').count() === 1, 'test box: the translation and the time: ' + testOut);
+await opt.locator('#tabs li', { hasText: '일반' }).click();
+ok(await opt.locator('#tester').isHidden(), 'test box: not in the other tabs');
+await opt.locator('#tabs li', { hasText: '고급' }).click();
+{
+  const poll = () => opt.locator('.row', { has: opt.locator('b.label', { hasText: '창 상태 확인' }) });
+  ok(await poll().count() === 1 && await poll().locator('input').inputValue() === '100', 'advanced: a timer is a number with its value');
+  ok(await opt.locator('.row', { has: opt.locator('b.label', { hasText: '소리 세션 확인' }) }).locator('.apply.live').count() === 1 && await poll().locator('.apply').count() === 0, 'advanced: the timers of the voice recognition say "바로 적용", the others have no mark');
+  await poll().locator('input').fill('200'); await poll().locator('input').dispatchEvent('change'); await control.waitForTimeout(900);
+  ok(cfgFile().tuning?.OVERLAY_POLL_MS === 200, 'advanced: a changed timer is saved: ' + JSON.stringify(cfgFile().tuning));
+  await poll().locator('input').fill('5'); await poll().locator('input').dispatchEvent('change'); await control.waitForTimeout(500);
+  ok(cfgFile().tuning?.OVERLAY_POLL_MS === 200, 'advanced: a value outside the range is refused');
+  await poll().locator('button.def').click(); await control.waitForTimeout(900);
+  ok(cfgFile().tuning?.OVERLAY_POLL_MS === undefined && await poll().locator('input').inputValue() === '100', 'advanced: the default button takes the timer back to 100');
+  await poll().locator('input').fill('50'); await poll().locator('input').dispatchEvent('change'); await control.waitForTimeout(500);
+  await opt.locator('button.btn', { hasText: '모두 기본값으로' }).click(); await control.waitForTimeout(900);
+  ok(Object.keys(cfgFile().tuning || {}).length === 0, 'advanced: "all back to default" empties the list');
+  await control.waitForTimeout(2500);
+  const rows = await opt.locator('table.perf tbody tr').allTextContents();
+  ok(rows.some(r => r.includes('창 상태 확인')) && rows.some(r => r.startsWith('합계')), 'advanced: the live table shows measured jobs: ' + rows.slice(0, 3).join(' / ').slice(0, 200));
+}
+await opt.click('#quitBtn');
+await control.waitForTimeout(200);
+ok(calls.includes('quit_request'), 'options: the quit button asks the program to end');
+
+ok(cfgFile().options_geometry === '500x300+0+0', 'options: its own place and size are saved: ' + cfgFile().options_geometry);
+ok(await main.locator('.edge').count() === 4 && await main.locator('#grip').count() === 1, 'resizing: edges at the left, right and bottom (none at the top)');
+
+// ---- the right-click menu of a translation window
+await main.mouse.click(60, 60, { button: 'right' });
+const menuItems = await main.locator('#ctx div:not(.sep)').allTextContents();
+ok(await main.locator('#ctx').isVisible() && menuItems[0] === 'Options of this window…' || menuItems[0] === '이 창의 옵션…', 'context menu: the options of this window come first: ' + menuItems.join('|'));
+ok(menuItems.length >= 5 && await main.locator('#ctx div.sep').count() === 1, 'context menu: a line, then the windows: ' + menuItems.join('|'));
+await main.locator('#ctx div').first().click();
+await control.waitForTimeout(300);
+ok(calls.includes('open_options') && await main.evaluate(() => document.getElementById('ctx').hidden), 'context menu: it opens the options and closes itself');
+await main.keyboard.press('Escape');
+await main.evaluate(() => { const l = document.getElementById('lines'); l.scrollTop = l.scrollHeight; });   // earlier tests scrolled up: the review would hold the window
+
+// ---- quit with the game: the game window was seen; it goes away; 5 seconds later the program quits (only when the option is on)
+await control.evaluate(() => import('./settings.js').then(m => m.set({ click_through: true })));
+await control.waitForTimeout(1500);
+ok(await main.evaluate(() => document.body.classList.contains('interactive')) === false, 'no game: (the game is there) a click-through window goes through');
+gameGone = true; await control.waitForTimeout(3500);
+ok(await main.evaluate(() => document.body.classList.contains('interactive')) === true, 'no game: the click-through window is in view, usable');
+await control.waitForTimeout(3500);
+ok(!calls.includes('quit_app'), 'exit with game: the option is off: nothing happens');
+await opt.locator('#tabs li', { hasText: '일반' }).click();
+await rowOf('와우 종료 시 같이 종료').locator('.switch').click();
+await control.waitForTimeout(7000);
+ok(calls.includes('quit_app'), 'exit with game: quits some seconds after the game was gone');
+
+ok(errors.length === 0, 'page errors: ' + errors.join(' | '));
+// ---- macOS: the voice recognition is "planned" there: the options show one note instead of the settings, and the hub never starts it
+{
+  osKind = 'macos';
+  const hubMac = await open('control.html?label=control', { width: 700, height: 900 });
+  await hubMac.waitForFunction(() => window.cmrHub && window.cmrHub.voice);
+  const optMac = await open('options.html?label=options', { width: 940, height: 680 });
+  await optMac.locator('#tabs li', { hasText: '음성인식' }).click();
+  await optMac.waitForTimeout(300);
+  ok((await optMac.locator('#body').textContent()).includes('지원 예정') && await optMac.locator('.row b.label:text-is("소리 대상")').count() === 0, 'macOS: the voice tab says "planned" and has no settings');
+  ok(await hubMac.evaluate(() => window.cmrHub.voice.control.state.unsupported === 'mac' && window.cmrHub.voice.control.state.state === 'off'), 'macOS: the voice recognition stays off (unsupported)');
+  osKind = 'windows';
+}
+await browser.close(); server.close();
+console.log(failed ? `${failed} failed` : '  e2e checks passed');
+process.exit(failed ? 1 : 0);

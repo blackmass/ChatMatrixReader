@@ -1,0 +1,27 @@
+/* ---- the widgets of a window (app/widgets/render.js): 8 places inside the window; the colours come from the tone of the state */
+body.overlay #widgets { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+.wlayer { pointer-events: none; }
+body .wlayer .wa { position: absolute; display: flex; gap: 4px; align-items: center; pointer-events: none; }
+body .wlayer .wa-top-left { top: 4px; left: 6px; } body .wlayer .wa-top { top: 4px; left: 50%; transform: translateX(-50%); } body .wlayer .wa-top-right { top: 4px; right: 6px; }
+body .wlayer .wa-left { top: 50%; left: 6px; transform: translateY(-50%); flex-direction: column; } body .wlayer .wa-right { top: 50%; right: 6px; transform: translateY(-50%); flex-direction: column; }
+body .wlayer .wa-bottom-left { bottom: 4px; left: 6px; } body .wlayer .wa-bottom { bottom: 4px; left: 50%; transform: translateX(-50%); } body .wlayer .wa-bottom-right { bottom: 4px; right: 18px; }
+body .wlayer .widget { --ws: 1; --tone: #7b7f89; --tone-bg: #3a3d45; display: block; }
+body .wlayer .widget[data-tone="busy"] { --tone: #e6c14a; } body .wlayer .widget[data-tone="ok"] { --tone: #3f9a58; } body .wlayer .widget[data-tone="hot"] { --tone: #5fd07a; }
+body .wlayer .widget[data-tone="warn"] { --tone: #ffb36b; } body .wlayer .widget[data-tone="bad"] { --tone: #f0705a; }
+body .wlayer .widget[data-tone="busy"] .w-fill, body .wlayer .widget[data-tone="busy"] .w-dot { animation: w-pulse 1s ease-in-out infinite; }
+body .wlayer .widget.dim { filter: grayscale(1); opacity: .45 !important; }
+body .wlayer .widget[hidden] { display: none; }
+@keyframes w-pulse { 50% { opacity: .45; } }
+.w-bar { position: relative; width: calc(56px * var(--ws)); height: calc(6px * var(--ws)); border-radius: calc(3px * var(--ws)); background: var(--tone-bg); overflow: hidden; box-shadow: 0 0 0 1px #0006; }
+.w-bar .w-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--tone); transition: width 80ms linear; }
+.w-bar .w-mark { position: absolute; top: 0; bottom: 0; width: 1px; background: #fff9; }
+.w-battery { display: flex; align-items: center; }
+.w-battery .w-batt-body { display: flex; gap: calc(1px * var(--ws)); padding: calc(1px * var(--ws)); border: calc(1px * var(--ws)) solid var(--tone); border-radius: calc(2px * var(--ws)); background: #0008; }
+.w-battery .w-cell { display: block; width: calc(4px * var(--ws)); height: calc(7px * var(--ws)); background: var(--tone-bg); }
+.w-battery .w-cell.on { background: var(--tone); }
+.w-battery .w-batt-cap { width: calc(2px * var(--ws)); height: calc(5px * var(--ws)); background: var(--tone); border-radius: 0 1px 1px 0; }
+.w-light { display: flex; align-items: center; gap: 4px; font-size: calc(11px * var(--ws)); color: var(--tone); text-shadow: 0 0 2px #000; }
+.w-light .w-dot { width: calc(8px * var(--ws)); height: calc(8px * var(--ws)); border-radius: 50%; background: var(--tone); box-shadow: 0 0 4px var(--tone); }
+.w-textonly { font-size: calc(11px * var(--ws)); color: var(--tone); text-shadow: 0 0 2px #000; }
+.w-tip { position: fixed; z-index: 9; max-width: 260px; padding: 4px 8px; border-radius: 6px; background: #1f2126f2; color: #e6e6e6; border: 1px solid #4a4d55; font-size: 12px; line-height: 1.5; white-space: pre-line; pointer-events: none; }
+.w-tip[hidden] { display: none; }

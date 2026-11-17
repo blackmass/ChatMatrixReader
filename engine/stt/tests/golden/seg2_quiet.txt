@@ -1,0 +1,8 @@
+# quiet params={} flush=True
+input in_quiet.pcm
+params 
+flush 1
+chunks 1000 3200 777 480 9600 160 2048
+seg 33600 0.060608 -0.001801 0.000610
+seg 40320 0.035553 0.000153 0.000671
+end speaking=0

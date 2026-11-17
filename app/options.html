@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>ChatMatrix 옵션</title><link rel="stylesheet" href="options.css"><link rel="stylesheet" href="widgets.css"></head>
+<body>
+  <nav id="side">
+    <input id="q" type="search" placeholder="옵션 검색" autocomplete="off" spellcheck="false">
+    <ul id="tabs"></ul>
+    <button id="quitBtn" title="ChatMatrix를 끝냅니다 (번역창도 모두 닫힙니다)">프로그램 종료</button>
+  </nav>
+  <main>
+    <header>
+      <div><h1 id="head"></h1><p id="sub"></p></div>
+      <div id="hright">
+        <div id="changed" hidden>
+          <button id="changedBtn" title="바꾼 것만 모아 보기">바꾼 것 <b id="changedCount">0</b><span class="unit">개</span></button>
+          <button id="revertAll" title="이 창을 연 뒤 바꾼 것을 모두 열었을 때 값으로 되돌립니다">모두 되돌리기</button>
+        </div>
+        <div id="tester" hidden>
+          <input id="testText" type="text" placeholder="번역 시험할 문장" spellcheck="false" autocomplete="off">
+          <button id="testBtn" title="지금 설정(번역 방식, 단어장, 프롬프트)으로 번역해 보고 걸린 시간을 봅니다">시험</button>
+        </div>
+        <div id="testOut" hidden></div>
+      </div>
+    </header>
+    <div id="body"></div>
+  </main>
+  <script src="common.js"></script>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
