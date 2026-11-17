@@ -11,7 +11,6 @@ const THREE = ['ChatMatrixReader.exe', 'app/control.html', 'app/hub.js', 'app/co
   'config.json', 'config.1x.json', 'Glossary.txt', 'Glossary.sample.txt', 'usage.json', 'README.md', 'fonts/README.txt', 'fonts/My.ttf', 'logs/chatmatrix.log',
   'webview-data/x', 'extensions/stt/engine-vulkan/cmr-stt.exe', 'extensions/stt/models/ggml-small.bin', 'extensions/stt/models/ggml-medium.bin.part', 'extensions/stt/catalog.json',
   'my notes.txt', 'docs/mine.txt', 'old_version_backup/app.py'];
-const USER_KEEPS = THREE.filter(p => p !== 'app/control.html' || true);
 
 function folder(oldNames, extra = []) {
   const f = memoryFiles(Object.fromEntries([...THREE, ...oldNames, ...extra].map(p => [p, p === 'config.json' ? '{"translator":"openai"}' : ''])));
@@ -29,7 +28,7 @@ function folder(oldNames, extra = []) {
 
 for (const tag of ['1.8.1', '1.5.3.1']) {
   const old = fixture(tag).filter(n => !['README.md', 'Glossary.sample.txt', 'locale/en-US.txt', 'fonts/README.txt'].includes(n));
-  const { f, move } = folder(old);
+  const { f, move } = folder(old, ['chatmatrix.log.1', 'chatmatrix_stt.log.1', 'chatmatrix_stt.log.crash', 'chatmatrix_stt.log']);
   const before = new Set(f.data.keys());
   const s = await scan(f);
   check(s.found, `${tag}: found`);
@@ -42,8 +41,8 @@ for (const tag of ['1.8.1', '1.5.3.1']) {
   eq(lost, [], `${tag}: every file is somewhere (nothing deleted)`);
   for (const k of THREE) check(f.data.has(k), `${tag}: ${k} stays`);
   // no 1.x program file is left in the program folders
-  const left = after.filter(k => !k.startsWith(BACKUP + '/') && /\.(py|bat|vbs|command)$/.test(k));
-  eq(left, [], `${tag}: no program file of 1.x is left`);
+  const left = after.filter(k => !k.startsWith(BACKUP + '/') && (/\.(py|bat|vbs|command)$/.test(k) || /\.log(\.|$)/.test(k) && !k.startsWith('logs/') || k.startsWith('ChatMatrix Reader.app/')));
+  eq(left, [], `${tag}: no program file, log or launcher of 1.x is left`);
   check(f.data.has(`${r.batch}/MOVED.txt`), `${tag}: the list of moved files is written`);
   check(f.data.has(`${r.batch}/app/app.py`) || f.data.has(`${r.batch}/app.py`), `${tag}: the sub-folder of origin is kept`);
 }
@@ -80,4 +79,14 @@ for (const tag of ['1.8.1', '1.5.3.1']) {
   eq(r2.ok, true, 'the second try finishes');
   eq((await scan(f)).found, false, 'then it starts');
   check(f.data.has(`${r2.batch}/app/app.py`) && f.data.has(`${r1.batch}/app/options.py`), 'files of the first try stay in the first folder');
+}
+
+// the app of the same name on the Mac: the 1.x launcher (with `launch`) moves, the 3.0 app (its own program inside) stays
+{
+  const { f, move } = folder(['app/app.py', 'ChatMatrix Reader.app/Contents/MacOS/launch', 'ChatMatrix Reader.app/Contents/Info.plist']);
+  await run(f, move, new Date(2026, 0, 2, 3, 4, 5));
+  check(![...f.data.keys()].some(k => k.startsWith('ChatMatrix Reader.app/')), 'the 1.x launcher app is moved');
+  const g = folder(['app/app.py'], ['ChatMatrix Reader.app/Contents/MacOS/chatmatrix-reader', 'ChatMatrix Reader.app/Contents/Info.plist']);
+  await run(g.f, g.move, new Date(2026, 0, 2, 3, 4, 5));
+  check(g.f.data.has('ChatMatrix Reader.app/Contents/MacOS/chatmatrix-reader'), 'the 3.0 app stays');
 }

@@ -42,6 +42,8 @@ extensions/
 docs/*
 !docs/README.md
 !docs/plugin-guide*.md
+!docs/LM Studio.md
+
 
 # ---- editors and systems ----
 __pycache__/

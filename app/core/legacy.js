@@ -15,7 +15,10 @@ const bare = n => (isDir(n) ? n.slice(0, -1) : n);
 // ---- main folder
 const ROOT_KEEP = new Set(['readme.md', 'license', 'glossary.txt', 'glossary.sample.txt', 'usage.json', 'config.json', 'config.1x.json']);
 const ROOT_DIRS = new Set(['plat', '.venv', '__pycache__', '.pytest_cache']);
-const ROOT_FILE = /(\.py|\.pyc|\.bat|\.vbs|\.command|\.md|\.log)$|^requirements.*\.txt$|^credit\.json$/;
+const ROOT_FILE = /(\.py|\.pyc|\.bat|\.vbs|\.command|\.md)$|\.log(\.[a-z0-9]+)?$|^requirements.*\.txt$|^credit\.json$/;   // (the logs: chatmatrix.log, .log.1, .log.crash)
+// the 1.x launcher for the Mac: an app whose Contents/MacOS has the script `launch`. 3.0 has an app of the same name (its program is
+// there instead of `launch`): that one stays.
+const OLD_APP = 'chatmatrix reader.app';
 const ROOT_DOCS = new Set(['protocol.md', 'mac.md']);                 // (docs/ itself stays: a user may keep notes there)
 
 // ---- app/ (1.6 and later: the program was moved there)
@@ -45,6 +48,7 @@ export async function scan(files) {
   for (const n of await names(files, '')) {
     const l = lc(bare(n));
     if (ROOT_KEEP.has(l)) continue;
+    if (l === OLD_APP && isDir(n)) { if ((await files.kind(`${bare(n)}/Contents/MacOS/launch`)) === 'file') add('', n); continue; }
     if (isDir(n) ? ROOT_DIRS.has(l) : ROOT_FILE.test(l)) add('', n);
   }
   for (const n of await names(files, 'docs')) if (!isDir(n) && ROOT_DOCS.has(lc(n))) add('docs', n);

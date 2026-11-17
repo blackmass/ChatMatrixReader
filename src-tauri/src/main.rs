@@ -551,10 +551,14 @@ fn fs_move(from: String, to: String) -> Result<(), String> {
     files::move_to_backup(&base_dir(), &from, &to)
 }
 
-/// Starts the program again (after the files of an earlier version were put away).
+/// Starts the program again (after the files of an earlier version were put away): a new process that waits a moment first (main), and this
+/// one ends at once. (Tauri's own restart starts the new one while this one still holds the "already running" mark.)
 #[tauri::command]
 fn restart_app(app: AppHandle) {
-    app.restart();
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe).env(RESTART_ENV, "1").spawn();
+    }
+    app.exit(0);
 }
 
 /// Deletes one file (never a folder).
@@ -721,7 +725,14 @@ fn open_url(url: String) -> Result<(), String> {
 
 // ---------------------------------------------------------------------------------------------- start
 
+/// Set by restart_app: the program was started by the previous one that is ending right now.
+const RESTART_ENV: &str = "CMR_RESTARTED";
+
 fn main() {
+    if std::env::var_os(RESTART_ENV).is_some() {
+        std::env::remove_var(RESTART_ENV);
+        std::thread::sleep(Duration::from_millis(2500));           // (until the old process has ended and let go of its "already running" mark)
+    }
     if !win::first_instance() {
         win::message("ChatMatrix", "ChatMatrix가 이미 실행 중입니다. 화면 오른쪽 아래 알림 영역(트레이)의 아이콘에서 옵션을 열 수 있습니다.\n\nChatMatrix is already running. Use its icon in the notification area (tray).");
         return;
