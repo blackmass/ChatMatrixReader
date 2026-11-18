@@ -314,12 +314,14 @@ async function tick() {
     // only a window the mouse goes through needs the exe's wheel; a usable one gets its own. Not for a window that is cleared by the mouse ("관통 창 숨기기"):
     // the game's own chat under it is what is used then, and the wheel is the game's. While lines have faded away, the turns DOWN are taken too (a turn brings them back; also while they fade).
     const wheelOn = !!cfg.wheel_through && !opt('hover_clear', false);
-    const zm = now || !wheelOn ? '' : 'through';
-    const zk = zm + (zm && view.hasFaded() ? ':down' : '');
+    // The wheel over a window the mouse goes through is not for the game: both ways. A Mac keeps it while the earlier chat is read (the window is usable then): a trackpad
+    // gesture belongs to the window that got its first turn, so the rest of it would still go to the game (a zoom) when the hook is taken away at that moment.
+    const zm = !wheelOn ? '' : (isMac ? (opt('click_through', false) && gameFound) : !now) ? 'through' : '';
+    const zk = zm;
     if (zk !== zoneKey) {
       const had = zoneMode;
       zoneKey = zk; zoneMode = zm;
-      try { await invoke('wheel_zone', { on: !!zm, usable: false, down: zk.endsWith(':down') }); if (zm && !had) wheelSeq = (await invoke('wheel_since', { seq: 0 })).seq; } catch (e) { zoneMode = ''; zoneKey = ''; /* no hook: no review */ if (!wheelWarned) { wheelWarned = true; emit('hub-log', { level: 'warn', msg: `window ${wid}: the wheel over a click-through window is not available: ${e}` }); } }
+      try { await invoke('wheel_zone', { on: !!zm, usable: false, down: true }); if (zm && !had) wheelSeq = (await invoke('wheel_since', { seq: 0 })).seq; } catch (e) { zoneMode = ''; zoneKey = ''; /* no hook: no review */ if (!wheelWarned) { wheelWarned = true; emit('hub-log', { level: 'warn', msg: `window ${wid}: the wheel over a click-through window is not available: ${e}` }); } }
     }
   }
 }
@@ -466,6 +468,14 @@ async function start() {
   };
   await listen('voice-lamp', e => lamp(e.payload));
   await listen('widget-state', e => widgetLayer.state(e.payload.id, e.payload.state));
+  // macOS: the turns of the wheel the exe took for this window arrive one by one as they happen (Windows: asked for with wheel_since, every round of the loop)
+  await listen('wheel-turn', e => {
+    const u = Number(e.payload);
+    if (!Number.isFinite(u) || !u) return;
+    wheelCount++;
+    document.getElementById('lines').scrollTop -= u * 100 / 120; view.touch();
+    userScrolled(u > 0 ? -1 : 1);
+  });
   emit('voice-lamp-hello', {});
   // the main window: the exe ends the program; the others: only that window (the hub keeps it closed: open mode "직접 열 때만")
   document.getElementById('close').onclick = async () => { await reportGeometry(); if (wid !== MAIN) await emit('win-closed', { id: wid }); thisWin.close(); };

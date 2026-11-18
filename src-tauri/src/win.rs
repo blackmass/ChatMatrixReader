@@ -447,7 +447,7 @@ pub fn find_game(known: isize, title: &str) -> Option<GameWindow> {
 
 // ---------------------------------------------------------------------------------------------- the wheel over a click-through window
 // A click-through window gets no mouse messages, so the wheel over it would go to the game. A low-level mouse hook (its own thread) sees every
-// wheel turn: a window that asked for it (wheel_zone) has the turns UP over it taken away from the game (the hook swallows them) and told
+// wheel turn: a window that asked for it (wheel_zone) has the turns over it taken away from the game (the hook swallows them) and told
 // to the window (wheel_since), which then lets the user scroll back through the chat.
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -483,7 +483,9 @@ unsafe extern "system" fn wheel_proc(code: i32, w: usize, l: isize) -> isize {
         let modifier = GetAsyncKeyState(0x10) < 0 || GetAsyncKeyState(0x11) < 0 || GetAsyncKeyState(0x12) < 0;
         if let Ok(zones) = ZONES.try_lock() {
             for &(h, usable, down) in zones.iter() {
-                if !(if usable { modifier } else { delta > 0 || down }) {
+                // (a window the mouse goes through takes the turns both ways: the wheel over it is not for the game; `down` is no longer asked)
+                let _ = down;
+                if !(if usable { modifier } else { true }) {
                     continue;
                 }
                 let mut r = RECT::default();

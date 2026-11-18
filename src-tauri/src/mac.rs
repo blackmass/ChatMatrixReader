@@ -603,7 +603,8 @@ pub fn installed_fonts() -> Vec<String> {
 
 // ------------------------------------------------------------------------------------------------- the wheel over a click-through window
 // A click-through window gets no mouse events, so the wheel over it would go to the game. An event tap (its own thread) sees every wheel turn of the session: a window
-// that asked for it (wheel_zone) has the turns UP over it taken away from the game (the tap swallows them) and told to the window (wheel_since). Same job as the
+// that asked for it (wheel_zone) has the turns over it taken away from the game (the tap swallows them) and told to the window at once (the sink: main.rs emits
+// 'wheel-turn' to it; wheel_since is the other way, as on Windows). Same job as the
 // mouse hook of win.rs. The tap can change events, so it needs the permission "Accessibility" (the one the auto-paste asks for) and may ask for "Input Monitoring":
 // it is made when the first window asks for the wheel (not at the start), and tried again every 3 s while it cannot be made.
 static ASKED_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -613,6 +614,13 @@ static ZONES: Mutex<Vec<(isize, bool, [f64; 4])>> = Mutex::new(Vec::new());     
 static TAP: std::sync::atomic::AtomicPtr<c_void> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 static HOOK: Mutex<Option<(bool, Instant)>> = Mutex::new(None);                        // (made?, when it was tried): None = never tried
 static ASKED_LISTEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SINK: std::sync::OnceLock<Box<dyn Fn(isize, i16) + Send + Sync>> = std::sync::OnceLock::new();
+/// A turn of the wheel that was taken for a window is passed to this function at once (the window, the delta in Windows units).
+pub fn set_wheel_sink(f: impl Fn(isize, i16) + Send + Sync + 'static) { let _ = SINK.set(Box::new(f)); }
+// A trackpad gesture belongs to the window that got its first event, to the end (the fingers up and the glide after it): once a turn was taken, the events that
+// follow within 0.25 s are taken for the same window wherever the cursor is, else the rest of a gesture goes to the game (a zoom) the moment the window changes.
+static LOCK: Mutex<Option<(isize, Instant)>> = Mutex::new(None);
+const GESTURE_GAP: Duration = Duration::from_millis(250);
 
 type TapCallback = extern "C" fn(proxy: *mut c_void, kind: u32, event: *mut c_void, info: *mut c_void) -> *mut c_void;
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -655,19 +663,27 @@ extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _inf
         // the page scrolls units x 100 / 120 pixels: a wheel notch (about 10 points) is a notch of Windows, a trackpad moves as far as the fingers do
         let units = (delta as f64 * if continuous { 1.2 } else { 12.0 }).round().clamp(-32000.0, 32000.0) as i16;
         let at = CGEventGetLocation(event);
-        if let Ok(zones) = ZONES.try_lock() {
-            for &(h, down, r) in zones.iter() {
-                if !(delta > 0 || down) { continue; }
-                if at.x >= r[0] && at.x < r[2] && at.y >= r[1] && at.y < r[3] {
-                    if let Ok(mut list) = WHEEL.try_lock() {
-                        list.push((WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, h, units));
-                        if list.len() > 200 { list.remove(0); }
-                    }
-                    return std::ptr::null_mut();                                  // the program in front does not get this turn
+        let mut target: Option<isize> = None;
+        if let Ok(lock) = LOCK.try_lock() {
+            if let Some((h, at_t)) = *lock { if at_t.elapsed() < GESTURE_GAP { target = Some(h); } }
+        }
+        if target.is_none() {
+            if let Ok(zones) = ZONES.try_lock() {
+                for &(h, _down, r) in zones.iter() {
+                    if at.x >= r[0] && at.x < r[2] && at.y >= r[1] && at.y < r[3] { target = Some(h); break; }
                 }
             }
         }
-        event
+        let Some(h) = target else { return event };
+        if let Ok(mut lock) = LOCK.try_lock() { *lock = Some((h, Instant::now())); }
+        match SINK.get() {
+            Some(f) => f(h, units),
+            None => if let Ok(mut list) = WHEEL.try_lock() {
+                list.push((WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, h, units));
+                if list.len() > 200 { list.remove(0); }
+            },
+        }
+        std::ptr::null_mut()                                                      // the program in front does not get this turn
     }
 }
 

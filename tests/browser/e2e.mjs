@@ -1264,16 +1264,16 @@ await main.evaluate(() => { const l = document.getElementById('lines'); l.scroll
     const saved = { click_through: cfgFile().click_through === true, wheel_through: cfgFile().wheel_through === true, hover_clear: cfgFile().hover_clear === true };
     kb.shift = false; kb.cx = 100; kb.cy = 100;
     await control.evaluate(() => import('./settings.js').then(m => m.set({ click_through: true, wheel_through: true, hover_clear: false, fade_sec: 1 }))); await control.waitForTimeout(5600);
-    ok(zone().on === true && zone().down === true, 'wheel zone: click-through, wheel allowed, lines faded away: the exe is asked for the turns down too: ' + JSON.stringify(zone()));
+    ok(zone().on === true && zone().down === true, 'wheel zone: click-through, wheel allowed, lines faded away: the exe is asked for the turns down too (it always is now): ' + JSON.stringify(zone()));
     const hid0 = await hiddenN();
     wheel.push(-120); await control.waitForTimeout(700);
-    ok(await hiddenN() < hid0 && zone().on === true && zone().down === false, 'wheel zone: a turn down (taken by the exe) brings the lines back, and the exe is not asked for the turns down any more: ' + hid0 + ' -> ' + await hiddenN() + ' ' + JSON.stringify(zone()));
+    ok(await hiddenN() < hid0 && zone().on === true && zone().down === true, 'wheel zone: a turn down (taken by the exe) brings the lines back; the exe is asked for the turns both ways all the time: ' + hid0 + ' -> ' + await hiddenN() + ' ' + JSON.stringify(zone()));
     // the lines are on their way out (the 3 seconds of the fade; none is gone yet): a turn down is taken then too
     await control.waitForTimeout(2300);
     const fadeNow = await main.evaluate(() => { const k = [...document.querySelectorAll('#lines .cv-blk')]; return { gone: k.filter(e => e.style.visibility === 'hidden').length, part: k.filter(e => e.style.opacity !== '' && parseFloat(e.style.opacity) < 1).length }; });
     ok(fadeNow.gone === 0 && fadeNow.part > 0 && zone().down === true, 'wheel zone: lines on their way out (not gone yet): the exe is asked for the turns down too: ' + JSON.stringify({ ...fadeNow, zone: zone() }));
     wheel.push(-120); await control.waitForTimeout(700);
-    ok(zone().down === false && (await hiddenN()) === 0, 'wheel zone: a turn down during the fade brings them back: ' + JSON.stringify(zone()));
+    ok(zone().down === true && (await hiddenN()) === 0, 'wheel zone: a turn down during the fade brings them back: ' + JSON.stringify(zone()));
     await control.evaluate(() => import('./settings.js').then(m => m.set({ hover_clear: true }))); await control.waitForTimeout(700);
     ok(zone().on === false, 'wheel zone: "관통 창 숨기기" is on: the wheel stays the game\'s: ' + JSON.stringify(zone()));
     await control.evaluate(s2 => import('./settings.js').then(m => m.set({ ...s2, fade_sec: 0 })), saved); kb.cx = 0; kb.cy = 0; await control.waitForTimeout(700);

@@ -786,9 +786,13 @@ fn make_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// A translation window asks for the wheel turns (up) over it while the mouse goes through it; see win.rs.
+/// The label of the window each wheel zone belongs to (macOS tells the turns to the window as they come: the event 'wheel-turn').
+static WHEEL_LABELS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<isize, String>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// A translation window asks for the wheel turns over it while the mouse goes through it; see win.rs.
 #[tauri::command]
 fn wheel_zone(window: WebviewWindow, on: bool, usable: Option<bool>, down: Option<bool>) -> Result<(), String> {
+    if on { if let Ok(mut m) = WHEEL_LABELS.lock() { m.insert(hwnd_of(&window)?, window.label().to_string()); } }       // (macOS: who gets the turns at once, see set_wheel_sink)
     if !win::wheel_zone(hwnd_of(&window)?, on, usable.unwrap_or(false), down.unwrap_or(false)) {
         return Err("the wheel cannot be taken yet (macOS: the permissions Accessibility / Input Monitoring)".into());
     }
@@ -1017,6 +1021,16 @@ fn main() {
         })
         .setup(|app| {
             let handle = app.handle().clone();
+            #[cfg(target_os = "macos")]
+            {
+                // a wheel turn the exe took for a window goes to that window at once (the page scrolls as the fingers move, not once in 0.1 s)
+                use tauri::Emitter;
+                let h2 = handle.clone();
+                win::set_wheel_sink(move |hwnd, units| {
+                    let label = WHEEL_LABELS.lock().ok().and_then(|m| m.get(&hwnd).cloned());
+                    if let Some(label) = label { let _ = h2.emit_to(label.as_str(), "wheel-turn", units); }
+                });
+            }
             if legacy_present() {
                 make_window(&handle, "legacy", "legacy.html", "legacy")?;
                 return Ok(());
