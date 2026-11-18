@@ -510,11 +510,12 @@ pub fn start_wheel_hook() {
     });
 }
 
-pub fn wheel_zone(hwnd: isize, on: bool, usable: bool, down: bool) {
+pub fn wheel_zone(hwnd: isize, on: bool, usable: bool, down: bool) -> bool {
     if let Ok(mut z) = ZONES.lock() {
         z.retain(|&(h, _, _)| h != hwnd);
         if on { z.push((hwnd, usable, down)); }
     }
+    true
 }
 
 /// The turns told to `hwnd` after number `seq`: (the newest number, the deltas).

@@ -100,6 +100,7 @@ let fontScan = 0;
 //  0 (by hand): every PLACE_MS the window is put right above the game again (flickers when the game comes to the front).
 let lastInput = -1e9, insidePrev = false, lastCopied = '', copyPrev = false, lmbPrev = false, lmbAt = 0, lastDown = -1e9, lags = [];
 const noteLag = ms => { lags.push(Math.max(0, Math.round(ms))); if (lags.length > 5) lags.shift(); };
+let wheelWarned = false;                                                          // (the wheel hook could not be made: said once in the log)
 let lastOs = null;                                                  // the newest answer of os_state (for the diagnosis in the options)
 // The menu and the tips are drawn by a window of their own (popup_host.js) so a small window does not cut them off. Where the page's own pixels
 // (CSS) are turned into the screen's (real pixels) by this window's place and scale. When there is no popup (it could not be made) the page draws them itself.
@@ -318,7 +319,7 @@ async function tick() {
     if (zk !== zoneKey) {
       const had = zoneMode;
       zoneKey = zk; zoneMode = zm;
-      try { await invoke('wheel_zone', { on: !!zm, usable: false, down: zk.endsWith(':down') }); if (zm && !had) wheelSeq = (await invoke('wheel_since', { seq: 0 })).seq; } catch { zoneMode = ''; zoneKey = ''; /* no hook: no review */ }
+      try { await invoke('wheel_zone', { on: !!zm, usable: false, down: zk.endsWith(':down') }); if (zm && !had) wheelSeq = (await invoke('wheel_since', { seq: 0 })).seq; } catch (e) { zoneMode = ''; zoneKey = ''; /* no hook: no review */ if (!wheelWarned) { wheelWarned = true; emit('hub-log', { level: 'warn', msg: `window ${wid}: the wheel over a click-through window is not available: ${e}` }); } }
     }
   }
 }

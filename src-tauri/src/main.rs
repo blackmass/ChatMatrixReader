@@ -789,7 +789,9 @@ fn make_tray(app: &tauri::App) -> tauri::Result<()> {
 /// A translation window asks for the wheel turns (up) over it while the mouse goes through it; see win.rs.
 #[tauri::command]
 fn wheel_zone(window: WebviewWindow, on: bool, usable: Option<bool>, down: Option<bool>) -> Result<(), String> {
-    win::wheel_zone(hwnd_of(&window)?, on, usable.unwrap_or(false), down.unwrap_or(false));
+    if !win::wheel_zone(hwnd_of(&window)?, on, usable.unwrap_or(false), down.unwrap_or(false)) {
+        return Err("the wheel cannot be taken yet (macOS: the permissions Accessibility / Input Monitoring)".into());
+    }
     Ok(())
 }
 
