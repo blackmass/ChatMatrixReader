@@ -101,7 +101,7 @@ let lastInput = -1e9, insidePrev = false, lastCopied = '', copyPrev = false, lmb
 const noteLag = ms => { lags.push(Math.max(0, Math.round(ms))); if (lags.length > 5) lags.shift(); };
 let lastOs = null;                                                  // the newest answer of os_state (for the diagnosis in the options)
 // The menu and the tips are drawn by a window of their own (popup_host.js) so a small window does not cut them off. Where the page's own pixels
-// (CSS) are turned into the screen's (real pixels) by this window's place and scale. When there is no popup (macOS, or it could not be made) the page draws them itself.
+// (CSS) are turned into the screen's (real pixels) by this window's place and scale. When there is no popup (it could not be made) the page draws them itself.
 const toScreen = (cx, cy) => { const w = (lastOs && lastOs.win) || [0, 0, 0, 0], d = window.devicePixelRatio || 1; return [Math.round(w[0] + cx * d), Math.round(w[1] + cy * d)]; };
 const thisRect = () => (lastOs && lastOs.win ? [...lastOs.win] : null);
 view.sink = {

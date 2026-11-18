@@ -1,18 +1,17 @@
 // The menu and the tooltips of a translation window are drawn by a small window of their own (popup.html, made by the exe when it is first
 // needed and taken away again after a while): so a small translation window does not cut them off, and they can lie over its edge.
-// This is the side of the translation window: it asks for the popup and tells it what to show. Where the exe has no popup (macOS for now, or the
-// window could not be made) `usable()` says false and the page draws the menu / the tip in itself, as before.
+// This is the side of the translation window: it asks for the popup and tells it what to show. Where the popup window could not be made `usable()` says
+// false and the page draws the menu / the tip in itself, as before. (Windows and macOS: the same popup; on a Mac it is a panel that does not take the keyboard.)
 //   popup.menu({ items: [{ id, text, cls }], at: [x, y], onPick(id) })     real screen pixels; cls: 'on' (ticked) | 'off' (grey, no click) | 'sep'
 //   popup.tip({ html | text, at: [x, y] | anchor: [l, t, r, b], within })    a point: below right of it; an anchor: above it (centred)
 //   popup.hide('menu' | 'tip')
-import { OS } from './platform.js';
 import { T } from './core/timings.js';
 
 const { emit, listen } = window.__TAURI__.event;
 const invoke = window.__TAURI__.core.invoke;
 const label = window.__TAURI__.window.getCurrentWindow().label;
 
-const wanted = () => OS === 'windows' && !globalThis.__cmrNoPopup;       // (the flag: the tests of the page's own menu switch the popup off)
+const wanted = () => !globalThis.__cmrNoPopup;                          // (the flag: the tests of the page's own menu switch the popup off)
 let state = 'new';                         // new | ready | off (it cannot be made: the page draws it itself)
 let gotReady = false, opening = null, offUntil = 0;
 const picks = new Map();                   // token -> onPick (kept until the menu goes away)

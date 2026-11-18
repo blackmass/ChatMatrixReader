@@ -177,7 +177,7 @@ export class SendBox {
       if (!(await this.io.gameIsFront(this.game))) { await this.io.say('⚠ ' + tr('자동 붙여넣기를 하지 않았습니다: 와우가 활성 창이 아닙니다'), true); this.state = IDLE; }
       else if ((await this.io.modsDown()) && this.tries < PASTE_TRIES) { this.tries++; this.stepAt = now + STEP; }          // wait until the modifier keys are up
       else {
-        if ((await this.io.paste()) === false) await this.io.say('⚠ ' + tr('자동 붙여넣기를 하지 않았습니다: 키 입력 권한이 없습니다 (시스템 설정 → 손쉬운 사용에서 Python 허용 후 다시 시작)'), true);
+        if ((await this.io.paste()) === false) await this.io.say('⚠ ' + tr('자동 붙여넣기를 하지 않았습니다: 키 입력 권한이 없습니다 (시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 ChatMatrix Reader를 허용한 뒤 다시 시작하세요)'), true);
         this.state = IDLE;
       }
     }

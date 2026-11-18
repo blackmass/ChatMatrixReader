@@ -48,7 +48,7 @@ window.__TAURI__ 가 없습니다 (exe가 이 페이지에 기능을 열어주�
 번역 중... = Translating...
 클립보드에 복사하지 못했습니다 = Could not copy to the clipboard
 자동 붙여넣기를 하지 않았습니다: 와우가 활성 창이 아닙니다 = Auto-paste skipped: WoW is not the active window
-자동 붙여넣기를 하지 않았습니다: 키 입력 권한이 없습니다 (시스템 설정 → 손쉬운 사용에서 Python 허용 후 다시 시작) = Auto-paste was not done: no permission to press keys (System Settings → Accessibility: allow Python, then restart)
+자동 붙여넣기를 하지 않았습니다: 키 입력 권한이 없습니다 (시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 ChatMatrix Reader를 허용한 뒤 다시 시작하세요) = Auto-paste was not done: no permission to press keys (System Settings → Privacy & Security → Accessibility: allow ChatMatrix Reader, then restart it)
 사용 안 함 (원문만) = Off (original text only)
 OpenAI 호환 API (LM Studio 등) = OpenAI-compatible API (LM Studio, etc.)
 Google 번역 (무료) = Google Translate (free)
