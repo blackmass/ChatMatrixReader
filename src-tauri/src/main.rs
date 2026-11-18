@@ -471,21 +471,39 @@ async fn open_options(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<(), String> {
     let w = app.get_webview_window("input").ok_or("no input window")?;
-    let anchor = app.get_webview_window(&label).ok_or("no such window")?;
     let e = |e: tauri::Error| e.to_string();
-    let pos = anchor.outer_position().map_err(e)?;
-    let size = anchor.outer_size().map_err(e)?;
-    let (box_w, box_h) = (size.width.max(200), 46u32);
-    let (area, _) = monitor_at(&anchor, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
-    let (bx, by) = placement::send_box(area, place.as_deref().unwrap_or("auto"), pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2);
-    w.set_position(tauri::PhysicalPosition::new(bx, by)).map_err(e)?;
-    w.set_size(tauri::PhysicalSize::new(box_w, box_h)).map_err(e)?;
+    let place = place.unwrap_or_else(|| "auto".into());
+    place_input(&app, &label, &place)?;
+    if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = Some((label, place)); }       // (from now on the box follows its window: see on_window_event)
     w.show().map_err(e)?;
     let got = win::grab_focus(hwnd_of(&w)?);
     w.set_focus().map_err(e)?; // moves the keyboard into the page inside the window
     if !got {
+        // the keyboard did not come: the box is taken away again (a box that is on the screen but not open for the send box would answer nothing)
+        let _ = w.hide();
+        if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = None; }
         return Err("could not take the keyboard focus".into());
     }
+    Ok(())
+}
+
+/// The window the open send box follows (its label) and where it goes ("auto" | "below" | "above"); None while there is no box.
+static INPUT_ANCHOR: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+
+/// Puts the send box next to the window `label`: its width, its height of 46 points (46 pixels times the scale of the monitor: a Retina screen has twice the pixels),
+/// its place by placement::send_box inside the monitor the window is on.
+fn place_input(app: &AppHandle, label: &str, place: &str) -> Result<(), String> {
+    let w = app.get_webview_window("input").ok_or("no input window")?;
+    let anchor = app.get_webview_window(label).ok_or("no such window")?;
+    let e = |e: tauri::Error| e.to_string();
+    let pos = anchor.outer_position().map_err(e)?;
+    let size = anchor.outer_size().map_err(e)?;
+    let (area, scale) = monitor_at(&anchor, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
+    let box_w = size.width.max(200);
+    let box_h = ((46.0 * scale).round() as u32).max(46);
+    let (bx, by) = placement::send_box(area, place, pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2);
+    w.set_position(tauri::PhysicalPosition::new(bx, by)).map_err(e)?;
+    w.set_size(tauri::PhysicalSize::new(box_w, box_h)).map_err(e)?;
     Ok(())
 }
 
@@ -951,6 +969,16 @@ fn main() {
             set_topmost
         ])
         .on_window_event(|window, event| {
+            // the window the send box belongs to was moved or got another size: the box (if it is open) goes with it
+            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                let anchor = INPUT_ANCHOR.lock().ok().and_then(|a| a.clone());
+                if let Some((label, place)) = anchor {
+                    if window.label() == label {
+                        let app = window.app_handle();
+                        if app.get_webview_window("input").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false) { let _ = place_input(app, &label, &place); }
+                    }
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {
                     // closing the control window or the main translation window ends the program (the other translation windows only close themselves)

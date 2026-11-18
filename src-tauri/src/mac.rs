@@ -521,7 +521,8 @@ pub fn grab_focus(hwnd: isize) -> bool {
         let mut psn = [0u32; 2];
         GetCurrentProcess(&mut psn);
         SetFrontProcess(&psn);
-        for _ in 0..15 {
+        // (the system takes its time to make a program active when another one - the game - has the keyboard: up to 0.6 s, usually a fraction of it)
+        for _ in 0..60 {
             let active: Bool = msg_send![app, isActive];
             if active.as_bool() { break; }
             pump(0.01);
@@ -529,6 +530,12 @@ pub fn grab_focus(hwnd: isize) -> bool {
         let w = obj(hwnd);
         let nothing: *const AnyObject = std::ptr::null();
         let _: () = msg_send![w, makeKeyAndOrderFront: nothing];
+        // the window itself must be the one that gets the keys: wait for that too (up to 0.3 s)
+        for _ in 0..30 {
+            let key: Bool = msg_send![w, isKeyWindow];
+            if key.as_bool() { return true; }
+            pump(0.01);
+        }
         let active: Bool = msg_send![app, isActive];
         active.as_bool()
     })

@@ -42,7 +42,7 @@ export function startSend({ settings, translator, capture, system }) {
         await emit('input-open', { label, target: g ? g.title : '' });
         await invoke('show_input', { label: 'main', place: settings.cfg().send_place || 'auto' });
         return true;
-      } catch (e) { log.warn('보내기 입력줄: ' + e); return false; }
+      } catch (e) { log.warn('보내기 입력줄: ' + e); try { await emit('input-close', {}); } catch { /* the box is hidden by the exe too */ } return false; }
     },
     closeBox: () => emit('input-close', {}),
     busyBox: text => emit('input-busy', { text }),
