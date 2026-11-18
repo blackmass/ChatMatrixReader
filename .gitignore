@@ -12,6 +12,7 @@ ChatMatrix Reader.app/
 # zip files made for sending / the release
 *.zip
 release-out/
+release-mac/
 THIRD-PARTY-NOTICES*.txt
 # the engine (engine/stt): what its build leaves
 engine/stt/build*/
