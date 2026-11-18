@@ -8,7 +8,7 @@ import { DEFAULTS, normalize, migrate, ConfigStore, VERSION } from '../app/core/
 import { Events } from '../app/core/events.js';
 
 log.quiet = true;
-const no3 = c => { for (const w of (c && c.child_windows) || []) delete w.clear_on_open; if (c) { delete c.whole_groups; delete c.max_groups; } return c; };      // (3.x only: an extra window can start empty)
+const no3 = c => { for (const w of (c && c.child_windows) || []) delete w.clear_on_open; if (c) { delete c.whole_groups; delete c.max_groups; delete c.send_place; } return c; };      // (3.x only: an extra window can start empty)
 const G = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config.json'), 'utf8'));
 const D = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config_defaults.json'), 'utf8'));
 const same = (a, b, msg) => { const x = canon(a), y = canon(b); if (x === y) check(true, msg); else { check(false, msg); console.log('   got     ', x.slice(0, 500)); console.log('   expected', y.slice(0, 500)); } };

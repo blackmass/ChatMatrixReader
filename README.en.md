@@ -49,7 +49,7 @@ You need both the addon and the program.
 4. Run WoW in **windowed or windowed fullscreen** mode (in exclusive fullscreen other windows cannot be shown on top).
 
 **The program: Mac (experimental)**
-- For Apple Silicon (M1 and later). Translation windows, always on top, on top of WoW only, click-through and matrix reading work. **Voice recognition is not supported yet (planned).**
+- For Apple Silicon (M1 and later), and it needs **macOS 13 or later**. Translation windows, always on top, on top of WoW only, click-through, matrix reading and voice recognition work. On macOS 12 and earlier only the voice recognition is turned off; everything else works as usual.
 - I did not register as an Apple developer, so a security warning appears on first run (right-click → Open). If needed, remove the quarantine with `xattr -dr com.apple.quarantine <folder path>` in the Terminal.
 - You must allow the **Screen & System Audio Recording** permission yourself. Run WoW in windowed (fullscreen window) mode.
 - Tested only on my own MacBook, so expect some rough edges.
@@ -75,14 +75,20 @@ WoW usually takes about 8 GB of VRAM; giving the AI about 4 GB more is enough fo
 
 The installation and settings are explained in a guide (in Korean): [Translating with a local AI in LM Studio](docs/LM%20Studio.md)
 
-# Voice recognition (optional, Windows)
+# Voice recognition (optional)
 Turns voice chat (Discord and the like) into text with Whisper and shows it in the translation window. The sound is processed on your PC only and never leaves it.
 - "Install" an engine and a model in the **Voice** tab of the options. Everything is installed inside `extensions/stt` in the program folder and can be removed with the delete button.
 - The source of the sound can be a single program (Discord, WoW ...), a device, or the whole system.
-- **Recommended: the Vulkan engine + the `large-v3-turbo` model.** It runs on most PCs that have a GPU (Nvidia, AMD and Intel).
+- **Windows, recommended: the Vulkan engine + the `large-v3-turbo` model.** It runs on most PCs that have a GPU (Nvidia, AMD and Intel).
 - If your hardware is struggling, use **the Vulkan engine + the `small` model**.
 - Without a GPU (CPU engine) `small` or below is realistic. `turbo` is slower than real time on a CPU. The "Models and speed" list in the Voice tab measures the speed on your own PC.
-- A CUDA engine is planned. Mac support is planned.
+- A CUDA engine is planned.
+
+**Voice recognition on a Mac**
+- Install just the one **Metal** engine. The GPU (Metal) and the CPU are in the same file, and you choose GPU or CPU under "Compute device". Measure both in "Models and speed" and pick the one that suits your Mac. If your hardware is weak, use `small`.
+- The first time it is turned on with the GPU (Metal), loading the model takes about 10 seconds (the one-time preparation of the GPU code).
+- The sound is received through the **Screen & System Audio Recording** permission. Without it no sound is received (System Settings → Privacy & Security).
+- A Mac cannot split the sound inside one program. With Discord as the source, not only the voice chat but everything Discord plays (videos and so on) is turned into text. Watch videos in a browser and they will not be mixed in.
 
 # Updating
 - The release zip contains no `config.json`, glossary or fonts, so **you can simply overwrite**. The same goes for the addon.

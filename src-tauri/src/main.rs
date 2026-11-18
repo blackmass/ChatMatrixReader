@@ -466,16 +466,20 @@ async fn open_options(app: AppHandle) -> Result<(), String> {
     make_window(&app, "options", "options.html", "options").map(|_| ()).map_err(|e| e.to_string())
 }
 
-/// Shows the send box right under the window `label` (same width) and gives it the keyboard.
+/// Shows the send box next to the window `label` (same width) and gives it the keyboard. `place`: "auto" (or nothing) = under the window, above it when under it
+/// the box would be cut off (it sits at the bottom of the screen, over the taskbar); "below" / "above" = always there (placement.rs send_box). In the monitor the window is on.
 #[tauri::command]
-fn show_input(app: AppHandle, label: String) -> Result<(), String> {
+fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<(), String> {
     let w = app.get_webview_window("input").ok_or("no input window")?;
     let anchor = app.get_webview_window(&label).ok_or("no such window")?;
     let e = |e: tauri::Error| e.to_string();
     let pos = anchor.outer_position().map_err(e)?;
     let size = anchor.outer_size().map_err(e)?;
-    w.set_position(tauri::PhysicalPosition::new(pos.x, pos.y + size.height as i32 + 2)).map_err(e)?;
-    w.set_size(tauri::PhysicalSize::new(size.width.max(200), 46)).map_err(e)?;
+    let (box_w, box_h) = (size.width.max(200), 46u32);
+    let (area, _) = monitor_at(&anchor, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
+    let (bx, by) = placement::send_box(area, place.as_deref().unwrap_or("auto"), pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2);
+    w.set_position(tauri::PhysicalPosition::new(bx, by)).map_err(e)?;
+    w.set_size(tauri::PhysicalSize::new(box_w, box_h)).map_err(e)?;
     w.show().map_err(e)?;
     let got = win::grab_focus(hwnd_of(&w)?);
     w.set_focus().map_err(e)?; // moves the keyboard into the page inside the window

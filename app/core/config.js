@@ -62,6 +62,7 @@ export const DEFAULTS = {
     send_hotkey: 'Shift+Enter',
     send_show_log: false,   // show the translated text sent (the '↗' line) in the window; off: it comes back as a chat line
     send_autopaste: false,   // press Ctrl+V in the game for you (off: you press it)
+    send_place: 'auto',   // where the input line opens: auto (under the window, above it when under it would be cut off) | below | above
     send_prompt: DEFAULT_SEND_PROMPT,
     send_extra_prompt: DEFAULT_SEND_EXTRA_PROMPT,   // the user's own additional instructions for the send translation
     // voice recognition (optional extension in extensions/stt, see voice.py)

@@ -31,6 +31,8 @@ use objc2::{class, msg_send, sel};
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGEventSourceFlagsState(state: i32) -> u64;
+    fn CGEventSourceKeyState(state: i32, key: u16) -> bool;
+    fn CGEventSourceButtonState(state: i32, button: u32) -> bool;
     fn CGImageGetBitmapInfo(image: *const c_void) -> u32;
     fn CGPreflightScreenCaptureAccess() -> bool;
     fn CGRequestScreenCaptureAccess() -> bool;
@@ -183,15 +185,48 @@ const FLAG_SHIFT: u64 = 0x0002_0000;
 const FLAG_CONTROL: u64 = 0x0004_0000;
 const FLAG_OPTION: u64 = 0x0008_0000;
 
-/// Is this key held down right now? (virtual-key codes of Windows, as the pages speak them: 0x10 Shift, 0x11 Ctrl = Control, 0x12 Alt = Option;
-/// other keys are not looked at on macOS.)
+/// The key code of macOS (the position of the key on an ANSI keyboard: letters and digits are NOT in order) for a virtual-key code of Windows, which is how the
+/// pages name the keys (letters 0x41.., digits 0x30.., F1 0x70.., Enter 0x0D ...). None = a key that has no such place on a Mac.
+fn mac_key(vk: i32) -> Option<u16> {
+    const LETTERS: [u16; 26] = [0, 11, 8, 2, 14, 3, 5, 4, 34, 38, 40, 37, 46, 45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7, 16, 6];     // A .. Z
+    const DIGITS: [u16; 10] = [29, 18, 19, 20, 21, 23, 22, 26, 28, 25];                                                           // 0 .. 9
+    const FKEYS: [u16; 12] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111];                                            // F1 .. F12
+    Some(match vk {
+        0x41..=0x5A => LETTERS[(vk - 0x41) as usize],
+        0x30..=0x39 => DIGITS[(vk - 0x30) as usize],
+        0x70..=0x7B => FKEYS[(vk - 0x70) as usize],
+        0x0D => 36,   // Enter (Return)
+        0x20 => 49,   // Space
+        0x09 => 48,   // Tab
+        0x08 => 51,   // Backspace (the Mac "delete")
+        0x1B => 53,   // Esc
+        0x2D => 114,  // Insert (the Mac "help" key)
+        0x2E => 117,  // Delete (forward delete)
+        0x24 => 115,  // Home
+        0x23 => 119,  // End
+        0x21 => 116,  // Page Up
+        0x22 => 121,  // Page Down
+        0x25 => 123,  // Left
+        0x26 => 126,  // Up
+        0x27 => 124,  // Right
+        0x28 => 125,  // Down
+        0xC0 => 50,   // ` (backtick)
+        _ => return None,
+    })
+}
+
+/// Is this key held down right now? (virtual-key codes of Windows, as the pages speak them: 0x10 Shift, 0x11 Ctrl = Control, 0x12 Alt = Option; the mouse
+/// buttons 0x01 left, 0x02 right, 0x04 middle; letters, digits, F keys, Enter, Esc, the arrows and the like through mac_key.)
 pub fn key_down(vk: i32) -> bool {
-    let flags = unsafe { CGEventSourceFlagsState(1) };      // 1 = the state of the keyboard hardware
     match vk {
-        0x10 => flags & FLAG_SHIFT != 0,
-        0x11 => flags & FLAG_CONTROL != 0,
-        0x12 => flags & FLAG_OPTION != 0,
-        _ => false,
+        0x10 | 0x11 | 0x12 => {
+            let flags = unsafe { CGEventSourceFlagsState(1) };      // 1 = the state of the keyboard hardware
+            flags & match vk { 0x10 => FLAG_SHIFT, 0x11 => FLAG_CONTROL, _ => FLAG_OPTION } != 0
+        }
+        0x01 => unsafe { CGEventSourceButtonState(1, 0) },      // left
+        0x02 => unsafe { CGEventSourceButtonState(1, 1) },      // right
+        0x04 => unsafe { CGEventSourceButtonState(1, 2) },      // middle
+        _ => match mac_key(vk) { Some(k) => unsafe { CGEventSourceKeyState(1, k) }, None => false },
     }
 }
 

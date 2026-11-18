@@ -27,6 +27,7 @@ const ok = (c, msg) => { if (!c) { failed++; console.log('  FAIL: ' + msg); } };
 // ---- the stand-in for the exe
 const files = new Map([['Glossary.sample.txt', 'LFM = 구인\n'], ['fonts/나눔 고딕.ttf', 'x'], ['locale/en-US.txt', fs.readFileSync(path.join(ROOT, 'locale', 'en-US.txt'), 'utf8')]]);
 const requests = [], calls = [], clip = [], modelAsks = [];
+let lastInputOpen = null;                            // the arguments of the last show_input
 let aiMode = 'ok';                                   // what the fake AI server answers to the model list: ok | down | 401 | bad
 let popupOn = false, popupPage = null, popupHides = 0, popupCloses = 0;
 const popupPlaced = [];
@@ -77,7 +78,7 @@ async function invoke(cmd, a = {}) {
       return { status: 200, body: JSON.stringify([[[(new URL(a.url).searchParams.get('tl') === 'en' ? 'EN: ' : '번역: ') + q, q, null, null, 10]], null, 'en']) };
     }
     case 'os_state': return { cursor: [kb.cx ?? 0, kb.cy ?? 0], win: [0, 0, 500, 300], shift: kb.shift, ctrl: false, alt: false, keys: (a.keys || []).map(() => kb.enter), fg: kb.fg, fgTitle: kb.fg === 77 ? 'World of Warcraft' : 'ChatMatrix', fgExe: kb.fg === 77 ? 'wow.exe' : 'chatmatrix.exe', fgMine: !!kb.mine };
-    case 'show_input': kb.fg = 99; return null;
+    case 'show_input': kb.fg = 99; lastInputOpen = a; return null;
     case 'focus_window': kb.fg = a.hwnd; return true;
     case 'send_paste': return true;
     case 'set_blur': return true;
@@ -299,6 +300,7 @@ await control.waitForTimeout(300);
 kb.shift = true; kb.enter = true;                                  // Shift+Enter in the game
 await input.waitForFunction(() => document.getElementById('lang').textContent.length > 0, null, { timeout: 5000 }).catch(() => {});
 ok(calls.includes('show_input') && kb.fg === 99, 'the hotkey opens the input line (it has the keyboard)');
+ok(lastInputOpen && lastInputOpen.place === 'auto', 'the input line is opened with the place setting (auto by default): ' + JSON.stringify(lastInputOpen));
 kb.shift = false; kb.enter = false;                                // the keys are let go
 await control.waitForTimeout(400);
 await input.fill('#cmd', '/w Bob Smith');

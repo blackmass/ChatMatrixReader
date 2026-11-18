@@ -40,7 +40,7 @@ export function startSend({ settings, translator, capture, system }) {
       try {
         const g = io.game();
         await emit('input-open', { label, target: g ? g.title : '' });
-        await invoke('show_input', { label: 'main' });
+        await invoke('show_input', { label: 'main', place: settings.cfg().send_place || 'auto' });
         return true;
       } catch (e) { log.warn('보내기 입력줄: ' + e); return false; }
     },
