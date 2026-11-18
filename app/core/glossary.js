@@ -23,7 +23,8 @@ export const MIXED_PLACEHOLDER = '(The glossary meanings that apply to a message
   + 'entries that need a choice or a note are listed before the message.)';
 
 const WORD = /[\p{L}\p{N}_]/u;
-const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\\/-]/g, '\\$&');
+// (no '-' here: with the u flag "\-" outside a [class] is a syntax error, and a hyphen is a plain character there anyway: "Mal-Ganis")
+const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
 const stripBom = t => (t.charCodeAt(0) === 0xFEFF ? t.slice(1) : t);
 
 // a short fingerprint of a text: changes whenever the file changes (used in cache keys)
