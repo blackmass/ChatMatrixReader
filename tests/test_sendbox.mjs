@@ -116,7 +116,9 @@ const press = async (io, box, clock) => { io.combo = false; await run(box, clock
   let t = make(); t.cfg.translator = 'none'; await press(t.io, t.box, t.clock);
   check(t.box.state === 'idle' && t.io.log.at(-1)[0] === 'say' && !t.io.kinds().includes('open'), 'no translation method: said');
   t = make(); t.io.openOk = false; await press(t.io, t.box, t.clock);
-  check(t.box.state === 'idle' && t.io.log.at(-1)[0] === 'say', 'focus refused: said');
+  check(t.box.state === 'back' && t.io.kinds().includes('say') && t.io.kinds().includes('close'), 'focus refused: said, the box is closed and the focus goes back to the game');
+  await run(t.box, t.clock, 40);
+  check(t.box.state === 'idle' && t.io.kinds().includes('focus') && t.io.front === 'G', 'focus refused: the game has the keyboard again (not left with a program that has no window to type into)');
   t = make(); t.io.front = 'other'; await press(t.io, t.box, t.clock);
   check(t.box.state === 'idle' && !t.io.log.length, 'game not in front: nothing');
   t = make({ send_enabled: false }); await press(t.io, t.box, t.clock);

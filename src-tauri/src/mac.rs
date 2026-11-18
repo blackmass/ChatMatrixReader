@@ -530,14 +530,24 @@ pub fn grab_focus(hwnd: isize) -> bool {
         let w = obj(hwnd);
         let nothing: *const AnyObject = std::ptr::null();
         let _: () = msg_send![w, makeKeyAndOrderFront: nothing];
-        // the window itself must be the one that gets the keys: wait for that too (up to 0.3 s)
-        for _ in 0..30 {
-            let key: Bool = msg_send![w, isKeyWindow];
-            if key.as_bool() { return true; }
-            pump(0.01);
-        }
         let active: Bool = msg_send![app, isActive];
         active.as_bool()
+    })
+}
+
+/// Does this window of ours have the keyboard now? Called after the window was asked for it (the page's own set_focus comes after grab_focus): up to
+/// 0.5 s of waiting, because the system takes its time.
+pub fn has_keyboard(hwnd: isize) -> bool {
+    on_main(|| unsafe {
+        let app = shared_app();
+        let w = obj(hwnd);
+        for _ in 0..50 {
+            let key: Bool = msg_send![w, isKeyWindow];
+            let active: Bool = msg_send![app, isActive];
+            if key.as_bool() && active.as_bool() { return true; }
+            pump(0.01);
+        }
+        false
     })
 }
 

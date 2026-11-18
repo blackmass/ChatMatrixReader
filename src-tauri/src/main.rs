@@ -476,10 +476,11 @@ fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<()
     place_input(&app, &label, &place)?;
     if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = Some((label, place)); }       // (from now on the box follows its window: see on_window_event)
     w.show().map_err(e)?;
-    let got = win::grab_focus(hwnd_of(&w)?);
-    w.set_focus().map_err(e)?; // moves the keyboard into the page inside the window
-    if !got {
-        // the keyboard did not come: the box is taken away again (a box that is on the screen but not open for the send box would answer nothing)
+    let hwnd = hwnd_of(&w)?;
+    win::grab_focus(hwnd);          // this program to the front (on a Mac this takes a moment)
+    w.set_focus().map_err(e)?;      // moves the keyboard into the page inside the window
+    if !win::has_keyboard(hwnd) {
+        // the keyboard did not come (even after a wait): the box is taken away again (the page then gives the keyboard back to the game)
         let _ = w.hide();
         if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = None; }
         return Err("could not take the keyboard focus".into());

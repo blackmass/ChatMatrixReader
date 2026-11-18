@@ -203,6 +203,11 @@ pub fn grab_focus(hwnd: isize) -> bool {
     }
 }
 
+/// Does this window have the keyboard now? (After grab_focus has waited for it there is nothing more to wait for.)
+pub fn has_keyboard(hwnd: isize) -> bool {
+    unsafe { GetForegroundWindow() == hwnd }
+}
+
 pub fn window_title(hwnd: isize) -> String {
     let mut buf = [0u16; 256];
     let n = unsafe { GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };

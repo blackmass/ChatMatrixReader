@@ -94,6 +94,7 @@ export class SendBox {
     if (!(await this.io.openBox(this.label(cfg)))) {
       log.warn('보내기 입력줄: 포커스를 가져오지 못했습니다');
       await this.io.say('⚠ ' + tr('입력줄로 포커스를 가져오지 못했습니다'), true);
+      await this.giveBack();                                    // (the keyboard must not stay with this program without a window to type into: every key would only beep)
       return;
     }
     this.state = OPEN; this.armed = false; this.lost = null; this.opened = this.now();
@@ -143,8 +144,12 @@ export class SendBox {
     const was = this.state === OPEN || this.state === BUSY;
     this.state = IDLE;
     await this.io.closeBox();
-    if (was && refocus) { this.state = BACK; this.step = 'return'; this.paste = paste; this.t0 = this.now(); this.stepAt = 0; this.tries = 0; }
+    if (was && refocus) this.startBack(paste);
   }
+
+  // the focus goes back to the game (the steps of backStep, one per tick)
+  startBack(paste = false) { this.state = BACK; this.step = 'return'; this.paste = paste; this.t0 = this.now(); this.stepAt = 0; this.tries = 0; }
+  async giveBack() { await this.io.closeBox(); this.startBack(false); }
 
   // The focus goes back. Never waits inside a step: every step is one tick (macOS tells which program is in front only while the
   // event loop runs).
