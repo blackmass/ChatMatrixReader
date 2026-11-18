@@ -45,10 +45,35 @@ fn exe_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         if dir.ends_with("Contents/MacOS") {
-            if let Some(outside) = dir.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) { return outside.to_path_buf(); }
+            if let Some(bundle) = dir.parent().and_then(|p| p.parent()) {
+                // A program that was downloaded (it has the "quarantine" mark) is started by macOS from a copy of the .app alone, in a read-only place of its own
+                // (".../AppTranslocation/<number>/d/Name.app"): app/, config.json ... next to the real .app are not there. The real place is asked of the system.
+                let real = if bundle.to_string_lossy().contains("/AppTranslocation/") { mac_original_path(bundle) } else { None };
+                let bundle = real.unwrap_or_else(|| bundle.to_path_buf());
+                if let Some(outside) = bundle.parent() { return outside.to_path_buf(); }
+            }
         }
     }
     dir
+}
+
+/// The place a translocated .app really is in (Security framework: SecTranslocateCreateOriginalPathForURL); None when the system does not tell.
+#[cfg(target_os = "macos")]
+fn mac_original_path(translocated: &std::path::Path) -> Option<PathBuf> {
+    use core_foundation::base::TCFType;
+    use core_foundation::url::{CFURL, CFURLRef};
+    type Original = unsafe extern "C" fn(url: CFURLRef, error: *mut *mut std::ffi::c_void) -> CFURLRef;
+    unsafe {
+        let lib = libc::dlopen(c"/System/Library/Frameworks/Security.framework/Security".as_ptr(), libc::RTLD_LAZY);
+        let sym = libc::dlsym(if lib.is_null() { libc::RTLD_DEFAULT } else { lib }, c"SecTranslocateCreateOriginalPathForURL".as_ptr());
+        if sym.is_null() { return None; }
+        let call: Original = std::mem::transmute(sym);
+        let url = CFURL::from_path(translocated, true)?;
+        let mut error: *mut std::ffi::c_void = std::ptr::null_mut();
+        let out = call(url.as_concrete_TypeRef(), &mut error);
+        if out.is_null() { return None; }
+        CFURL::wrap_under_create_rule(out).to_path()
+    }
 }
 
 /// `app` next to the exe; when started from src-tauri/target/release (cargo run), the one in the project folder.
