@@ -41,7 +41,6 @@ You need both the addon and the program.
 **1. The addon (ChatMatrix)**
 - Get it from <a href="https://www.curseforge.com/wow/addons/chatmatrix">CurseForge</a> and put it in the WoW AddOns folder (automatic with the CurseForge app).
 - If the newest version waits for approval on CurseForge, it is also on <a href="https://drive.google.com/drive/u/0/folders/1vAJJ8w9MMW5qJzxfjg5qSktN5XhH77ow">Google Drive</a>.
-- The addon source is also in this repository, in `addon/ChatMatrix`.
 
 **2. The program (ChatMatrixReader): Windows**
 1. Download `ChatMatrixReader-v<version>-windows-x64.zip` from the <a href="https://github.com/blackmass/ChatMatrixReader/releases">Releases page</a> (not the source code zip).
@@ -111,7 +110,7 @@ Turns voice chat (Discord and the like) into text with Whisper and shows it in t
 - **Is there a glossary to download?** I will probably not share a glossary myself. I will keep proposing better rules. Share them with each other, or build your own.
 - **I only want to see what I want**: there are detailed filters in both the addon and the reader. By default it follows WoW's default chat tab, so at first everything you do not want shows up too.
 - **Why is no local AI built in?** Things that keep changing (translation AI, speech recognition models) are not run by this program itself; connecting to an outside program is the basis. Models and ways to run them change every day, only the way to connect does not. I do not know when I will stop updating, so users should be able to follow the times themselves.
-- **Something does not work**: link this GitHub page to GPT, Gemini or another AI and ask it for help. The source is completely open and the protocol document (`addon/ChatMatrix/PROTOCOL.md`) is there too, so it will analyze it well.
+- **Something does not work**: link this GitHub page to GPT, Gemini or another AI and ask it for help. The source is completely open, so it will analyze it well.
 
 # Feedback
 - Feature requests are welcome, as long as they fit the principles above.

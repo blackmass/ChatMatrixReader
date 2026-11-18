@@ -41,7 +41,6 @@
 **1. 애드온 (ChatMatrix)**
 - <a href="https://www.curseforge.com/wow/addons/chatmatrix">CurseForge</a>에서 받아서 와우의 애드온 폴더에 넣습니다 (CurseForge 앱을 쓰면 자동).
 - CurseForge의 최신 버전 승인이 늦어지면 <a href="https://drive.google.com/drive/u/0/folders/1vAJJ8w9MMW5qJzxfjg5qSktN5XhH77ow">구글 드라이브</a>에 올려 둡니다.
-- 애드온 소스는 이 저장소의 `addon/ChatMatrix` 폴더에도 있습니다.
 
 **2. 프로그램 (ChatMatrixReader) — Windows**
 1. <a href="https://github.com/blackmass/ChatMatrixReader/releases">릴리즈 페이지</a>에서 `ChatMatrixReader-v<버전>-windows-x64.zip`을 받습니다 (소스코드 zip이 아닙니다).
@@ -111,7 +110,7 @@ LM Studio 설치와 설정은 가이드로 정리해 놨습니다: [LM Studio로
 - **단어장은 없나요?** 제가 단어장을 공유하는 일은 아마 없습니다. 더 나은 규칙을 계속 제시할 겁니다. 서로 공유하거나 자신만의 단어장을 만들어 보세요.
 - **원하는 것만 보고 싶어요**: 애드온과 리더 양쪽에 상세한 필터가 있습니다. 기본 옵션은 와우 기본 채팅탭을 따라가서, 처음에는 보기 싫은 것까지 다 뜹니다.
 - **로컬 AI는 왜 안 넣어 주나요?** 계속 발전하고 바뀌는 것(번역 AI, 음성인식 모델)은 이 프로그램이 직접 구동하지 않고 외부 연결을 기본으로 합니다. 모델과 구동 방식은 매일 바뀌지만 연결 방법은 안 바뀝니다. 제가 언제 업데이트를 멈출지 모르니, 사용자가 시대에 맞춰 따라갈 수 있게 하는 쪽입니다.
-- **그냥 뭐가 잘 안 돼요**: GPT나 제미나이 같은 AI에게 이 GitHub 페이지를 링크하고 도와달라고 하세요. 소스가 전부 공개되어 있고 프로토콜 문서(`addon/ChatMatrix/PROTOCOL.md`)도 있어서 잘 분석해 줄 겁니다.
+- **그냥 뭐가 잘 안 돼요**: GPT나 제미나이 같은 AI에게 이 GitHub 페이지를 링크하고 도와달라고 하세요. 소스가 전부 공개되어 있어서 잘 분석해 줄 겁니다.
 
 # 피드백
 - 기능 건의는 자유롭게 해도 됩니다. 다만 위의 개발 방향성과 맞아야 합니다.

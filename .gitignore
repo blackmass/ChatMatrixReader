@@ -36,14 +36,15 @@ fonts/*
 
 # the voice recognition installed by the program: engine, models, sounds of the speed test, temporary files
 extensions/
+
+# 애드온(ChatMatrix) 소스: 사용자가 따로 관리한다 (이 저장소에는 올리지 않는다)
+addon/
 *.part
 
 # ---- docs: only what users read is published (the plugin guide). The notes of the maintainer are kept by him, not in this repository ----
 docs/*
 !docs/README.md
 !docs/plugin-guide*.md
-!docs/LM Studio.md
-
 
 # ---- editors and systems ----
 __pycache__/
