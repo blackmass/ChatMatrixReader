@@ -535,20 +535,26 @@ pub fn grab_focus(hwnd: isize) -> bool {
     })
 }
 
-/// Does this window of ours have the keyboard now? Called after the window was asked for it (the page's own set_focus comes after grab_focus): up to
-/// 0.5 s of waiting, because the system takes its time.
+/// Does this window of ours have the keyboard now: it is the key window and this program is the active one. (No waiting: the system takes its time, see ask_keyboard.)
 pub fn has_keyboard(hwnd: isize) -> bool {
     on_main(|| unsafe {
-        let app = shared_app();
-        let w = obj(hwnd);
-        for _ in 0..50 {
-            let key: Bool = msg_send![w, isKeyWindow];
-            let active: Bool = msg_send![app, isActive];
-            if key.as_bool() && active.as_bool() { return true; }
-            pump(0.01);
-        }
-        false
+        let key: Bool = msg_send![obj(hwnd), isKeyWindow];
+        let active: Bool = msg_send![shared_app(), isActive];
+        key.as_bool() && active.as_bool()
     })
+}
+
+/// Asks once more for the keyboard: this window to be the key window (the system may take a second or more to do it; the box asks again every 0.2 s until it has it).
+pub fn ask_keyboard(hwnd: isize) {
+    on_main(|| unsafe {
+        let nothing: *const AnyObject = std::ptr::null();
+        let _: () = msg_send![obj(hwnd), makeKeyAndOrderFront: nothing];
+    });
+}
+
+/// Is this program the one in front? (`foreground` is no help: it looks for an ordinary window of the front program, and the send box is a floating one.)
+pub fn self_front() -> bool {
+    front_pid() == std::process::id() as i32
 }
 
 /// Gives the keyboard back to the game (`hwnd` is the window number of the game window). Does not wait.

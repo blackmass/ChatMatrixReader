@@ -24,6 +24,7 @@ import * as hotkeys from './hotkeys.js';
 export const [IDLE, OPEN, BUSY, BACK] = ['idle', 'open', 'busy', 'back'];
 export const ARM_AFTER = 0.1;            // Enter only counts after it was let go once (a long hotkey press cannot submit anything)
 export const LOST_AFTER = 0.7;           // the user went to another program: the box is forgotten
+export const NO_FOCUS_AFTER = 3.0;       // the box was opened and this program never came to the front: the keyboard goes back to the game
 export const RETURN_WAIT = 1.5;          // waiting for Enter to be let go before the focus goes back
 export const PASTE_DELAY = 0.16;
 export const PASTE_TRIES = 40;           // waiting for the modifier keys to be up (40 x 25 ms)
@@ -97,7 +98,7 @@ export class SendBox {
       await this.giveBack();                                    // (the keyboard must not stay with this program without a window to type into: every key would only beep)
       return;
     }
-    this.state = OPEN; this.armed = false; this.lost = null; this.opened = this.now();
+    this.state = OPEN; this.armed = false; this.lost = null; this.everFront = false; this.opened = this.now();
     log.info('보내기 입력줄 열림');
   }
 
@@ -106,12 +107,20 @@ export class SendBox {
     if (!this.armed && now - this.opened >= ARM_AFTER && !(await this.io.returnDown())) this.armed = true;
     if (this.state === BUSY) return;
     if (!(await this.io.selfIsFront())) {
+      if (!this.everFront) {          // not in front yet (a Mac may take a second or more): wait; for good = the keyboard did not come
+        if (now - this.opened > NO_FOCUS_AFTER) {
+          log.warn('보내기 입력줄: 포커스를 받지 못해 닫음');
+          await this.io.say('⚠ ' + tr('입력줄로 포커스를 가져오지 못했습니다'), true);
+          await this.giveBack();
+        }
+        return;
+      }
       if (this.lost === null) this.lost = now;
       else if (now - this.lost > LOST_AFTER) {                 // the user switched to another program: forget the box
         log.info('보내기 입력줄: 포커스를 잃어 닫음');
         await this.close(false);
       }
-    } else this.lost = null;
+    } else { this.lost = null; this.everFront = true; }
   }
 
   // Enter in the input line -> true when it was taken

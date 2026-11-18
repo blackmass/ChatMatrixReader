@@ -17,7 +17,7 @@ class IO {
   comboDown() { return this.combo; }
   returnDown() { return this.ret; }
   modsDown() { return this.mods; }
-  openBox(label) { this.log.push(['open', label]); if (this.openOk) this.front = 'me'; return this.openOk; }
+  openBox(label) { this.log.push(['open', label]); if (this.openOk && !this.neverFront) this.front = 'me'; return this.openOk; }
   closeBox() { this.log.push(['close']); }
   busyBox(t) { this.log.push(['busy', t]); }
   readyBox() { this.log.push(['ready']); }
@@ -109,8 +109,24 @@ const press = async (io, box, clock) => { io.combo = false; await run(box, clock
 }
 { // losing the focus for good closes quietly
   const { box, io, clock } = make();
-  await press(io, box, clock); io.front = 'other'; await run(box, clock, 40);
+  await press(io, box, clock); await run(box, clock, 3); io.front = 'other'; await run(box, clock, 40);
   check(box.state === 'idle' && !io.kinds().includes('focus'), 'switched away: closed quietly');
+}
+{ // the box was opened but this program never came to the front (the system is slow, or refuses): it waits, and when it is for good the keyboard goes back to the game
+  const { box, io, clock } = make(); io.neverFront = true;
+  await press(io, box, clock); await run(box, clock, 40, 0.05);                     // 2 s: still waiting
+  check(box.state === 'open' && !io.kinds().includes('focus'), 'not in front yet: the box waits (a Mac may take a second or more)');
+  await run(box, clock, 40, 0.05);                                                   // 4 s
+  check(box.state === 'back' || (box.state === 'idle' && io.kinds().includes('focus')), 'never in front: the box is closed and the focus goes back');
+  await run(box, clock, 40);
+  check(box.state === 'idle' && io.kinds().includes('focus') && io.kinds().includes('say') && io.front === 'G', 'never in front: said, and the game has the keyboard again');
+}
+{ // it comes to the front late (1.5 s): everything works
+  const { box, io, clock } = make(); io.neverFront = true;
+  await press(io, box, clock); await run(box, clock, 30, 0.05); io.front = 'me'; await run(box, clock, 10, 0.05);
+  check(box.state === 'open', 'in front late: the box stays open');
+  io.ret = false; await run(box, clock, 4);
+  check(box.submit('hi') === true, 'in front late: Enter is taken');
 }
 { // no method / focus refused / game not in front / option off
   let t = make(); t.cfg.translator = 'none'; await press(t.io, t.box, t.clock);

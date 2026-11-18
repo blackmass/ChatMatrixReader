@@ -257,6 +257,7 @@ fn os_state(window: WebviewWindow, keys: Option<Vec<i32>>) -> Value {
     json!({
         "ex": ex as i64,
         "fgMine": win::is_mine(fg),
+        "selfFront": win::self_front(),
         "cursor": [cx, cy],
         "shift": win::key_down(0x10),
         "ctrl": win::key_down(0x11),
@@ -479,12 +480,24 @@ fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<()
     let hwnd = hwnd_of(&w)?;
     win::grab_focus(hwnd);          // this program to the front (on a Mac this takes a moment)
     w.set_focus().map_err(e)?;      // moves the keyboard into the page inside the window
-    if !win::has_keyboard(hwnd) {
-        // the keyboard did not come (even after a wait): the box is taken away again (the page then gives the keyboard back to the game)
-        let _ = w.hide();
-        if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = None; }
-        return Err("could not take the keyboard focus".into());
-    }
+    // Whether the box gets the keyboard is NOT decided here: it may take a second or more (macOS). The box is "open" at once; a thread asks again every 0.2 s until
+    // it is the key window and tells how long it took ('input-focus', for the log). If it never gets it, the send box (sendbox.js) notices and gives the keyboard back.
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        use tauri::Emitter;
+        let t0 = std::time::Instant::now();
+        let mut ok = win::has_keyboard(hwnd);
+        for _ in 0..15 {
+            if ok { break; }
+            std::thread::sleep(Duration::from_millis(200));
+            let Some(w) = app2.get_webview_window("input") else { return };
+            if !w.is_visible().unwrap_or(false) { return; }        // (closed meanwhile)
+            win::ask_keyboard(hwnd);
+            let _ = w.set_focus();
+            ok = win::has_keyboard(hwnd);
+        }
+        let _ = app2.emit("input-focus", json!({ "ok": ok, "ms": t0.elapsed().as_millis() as u64, "front": win::self_front() }));
+    });
     Ok(())
 }
 

@@ -203,9 +203,17 @@ pub fn grab_focus(hwnd: isize) -> bool {
     }
 }
 
-/// Does this window have the keyboard now? (After grab_focus has waited for it there is nothing more to wait for.)
+/// Does this window have the keyboard now?
 pub fn has_keyboard(hwnd: isize) -> bool {
     unsafe { GetForegroundWindow() == hwnd }
+}
+
+/// Asks once more for the keyboard (macOS needs this: see mac.rs). Windows: grab_focus has already waited for it.
+pub fn ask_keyboard(_hwnd: isize) {}
+
+/// Is a window of this program the one in front?
+pub fn self_front() -> bool {
+    is_mine(foreground())
 }
 
 pub fn window_title(hwnd: isize) -> String {
