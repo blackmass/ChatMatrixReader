@@ -14,6 +14,7 @@ import { T, every } from './core/timings.js';
 import { WidgetLayer } from './widgets/render.js';
 import { defaultRegistry } from './widgets/defaults.js';
 import { report, add as perfAdd } from './core/perf.js';
+import { popup } from './popup_host.js';
 
 const label = thisWin.label;
 const wid = layout.widOf(label) || MAIN;                           // "main" = 1, "win<id>" = the id of the extra window
@@ -42,7 +43,7 @@ const note = text => apply(feed.model.addNote(text, 'system'));
 
 let interactive = null, geometryReady = false, hovering = false;
 let gameFound = true;                                               // no game = the window stays in view: nothing to click through to
-let reviewShown = false, wheelCount = 0, nativeWheel = 0, zoneMode = '';                                                  // (turns of the wheel up that were taken from the game: for the diagnosis)
+let reviewShown = false, wheelCount = 0, nativeWheel = 0, zoneMode = '', zoneKey = '';                                                  // (turns of the wheel up that were taken from the game: for the diagnosis)
 let review = false, reviewIdle = 0, wheelSeq = 0, resizing = false;               // reading the old chat while the window is click-through (wheel up over it)
 let blurKey = JSON.stringify([0, 0]);
 
@@ -73,6 +74,10 @@ function applyAll() {
   applyWidgets();
   // not click-through: the title bar is always there, so one empty line is kept above the first message (it scrolls away with the rest)
   document.getElementById('lines').classList.toggle('cv-pad', !opt('click_through', false));
+  // "온전한 묶음만": a window that is not click-through always has its title bar over the top of the lines, so the groups are judged by the edge BELOW it. A click-through window
+  // is judged by the top of the lines, also while the bar shows for a moment (a key held, the game gone): the groups do not jump.
+  const barH = parseFloat(getComputedStyle(document.body).getPropertyValue('--bar-h')) || 22;
+  view.inset = opt('click_through', false) ? 0 : Math.max(0, barH - document.getElementById('lines').getBoundingClientRect().top);
   const look = lookFrom(opt);
   if (look.family && !fonts.known.some(k => k.family === look.family) && Date.now() - fontScan > 3000) {   // a font file may have been put into fonts/ meanwhile
     fontScan = Date.now();
@@ -95,6 +100,23 @@ let fontScan = 0;
 let lastInput = -1e9, insidePrev = false, lastCopied = '', copyPrev = false, lmbPrev = false, lmbAt = 0, lastDown = -1e9, lags = [];
 const noteLag = ms => { lags.push(Math.max(0, Math.round(ms))); if (lags.length > 5) lags.shift(); };
 let lastOs = null;                                                  // the newest answer of os_state (for the diagnosis in the options)
+// The menu and the tips are drawn by a window of their own (popup_host.js) so a small window does not cut them off. Where the page's own pixels
+// (CSS) are turned into the screen's (real pixels) by this window's place and scale. When there is no popup (macOS, or it could not be made) the page draws them itself.
+const toScreen = (cx, cy) => { const w = (lastOs && lastOs.win) || [0, 0, 0, 0], d = window.devicePixelRatio || 1; return [Math.round(w[0] + cx * d), Math.round(w[1] + cy * d)]; };
+const thisRect = () => (lastOs && lastOs.win ? [...lastOs.win] : null);
+view.sink = {
+  usable: () => popup.usable(),
+  show: (html, x, y) => popup.tip({ html, at: toScreen(x, y), within: thisRect() }),
+  hide: () => popup.hide('tip'),
+};
+widgetLayer.sink = {
+  usable: () => popup.usable(),
+  show: (text, r) => { const [l, t] = toScreen(r.left, r.top), [rr, b] = toScreen(r.right, r.bottom); popup.tip({ text, anchor: [l, t, rr, b], within: thisRect() }); },
+  hide: () => popup.hide('tip'),
+};
+// the popup is made a little after the start (when it stays: POPUP_IDLE_MS 0), so the first tip is there at once; only the main window asks
+if (wid === MAIN) setTimeout(() => { if (T.POPUP_IDLE_MS === 0) popup.warm(); }, 3000);
+let closeMenu = () => {};                                           // takes the right-click menu away (set by contextMenu)
 let libTopNow = null, zKey = '', zMode = '', ownerHwnd = 0, gameHwnd = 0, zTimer = null, placeTimer = null, side = null, sideBusy = false;
 const byOwner = () => T.WOW_BY_OWNER === 1;
 async function setOwner(hwnd) {
@@ -243,7 +265,8 @@ async function tick() {
       if (picked.trim() && picked !== lastCopied) { lastCopied = picked; try { window.__TAURI__.clipboardManager.writeText(picked); } catch { /* no clipboard */ } }
     }
     insidePrev = inside;
-    widgetLayer.pointer(inside ? (cx - x) / (window.devicePixelRatio || 1) : null, inside ? (cy - y) / (window.devicePixelRatio || 1) : null);       // (the tip of a widget under the cursor: also while click-through)
+    const overMe = inside && !hovering;                                               // (a window cleared by the mouse shows no tips: its tip would float over nothing)
+    widgetLayer.pointer(overMe ? (cx - x) / (window.devicePixelRatio || 1) : null, overMe ? (cy - y) / (window.devicePixelRatio || 1) : null);       // (the tip of a widget under the cursor: also while click-through)
     if (!inside && !getSelection().isCollapsed) getSelection().removeAllRanges();     // the cursor left: the marked text is released
     const keys = opt('interact_keys', ['Shift']) || ['Shift'];
     const held = keys.length > 0 && keys.every(k => s[String(k).toLowerCase()] === true);
@@ -277,15 +300,21 @@ async function tick() {
       document.body.classList.toggle('interactive', now);
       await thisWin.setIgnoreCursorEvents(!now);
       invoke('set_noactivate', { on: true }).catch(() => {});          // (the window library may have rewritten the styles with this change)
+      if (!now) closeMenu();                                           // the interact key was let go: the window lets the mouse through again, a menu could not be used any more
     }
     // click-through: the page gets no mouse events, so the tip of a link (item, quest ...) under the cursor is shown from the cursor position the loop has (the option
     // "관통 중 링크 보기 허용"); not while the window is cleared by the mouse (hover_clear) and not at all when the window is usable (its own mouse events do it)
     if (!now && inside && cfg.through_tips !== false && !hovering) view.tipAtPoint((cx - x) / (window.devicePixelRatio || 1), (cy - y) / (window.devicePixelRatio || 1));
     else view.hideTip();
-    const zm = now || !cfg.wheel_through ? '' : 'through';                                                // only a window the mouse goes through needs the exe's wheel; a usable one gets its own
-    if (zm !== zoneMode) {
-      zoneMode = zm;
-      try { await invoke('wheel_zone', { on: !!zm, usable: false }); if (zm) wheelSeq = (await invoke('wheel_since', { seq: 0 })).seq; } catch { zoneMode = ''; /* no hook: no review */ }
+    // only a window the mouse goes through needs the exe's wheel; a usable one gets its own. Not for a window that is cleared by the mouse ("관통 창 숨기기"):
+    // the game's own chat under it is what is used then, and the wheel is the game's. While lines have faded away, the turns DOWN are taken too (a turn brings them back; also while they fade).
+    const wheelOn = !!cfg.wheel_through && !opt('hover_clear', false);
+    const zm = now || !wheelOn ? '' : 'through';
+    const zk = zm + (zm && view.hasFaded() ? ':down' : '');
+    if (zk !== zoneKey) {
+      const had = zoneMode;
+      zoneKey = zk; zoneMode = zm;
+      try { await invoke('wheel_zone', { on: !!zm, usable: false, down: zk.endsWith(':down') }); if (zm && !had) wheelSeq = (await invoke('wheel_since', { seq: 0 })).seq; } catch { zoneMode = ''; zoneKey = ''; /* no hook: no review */ }
     }
   }
 }
@@ -364,16 +393,14 @@ function contextMenu() {
   let open = new Set();
   listen('win-state', e => { open = new Set(e.payload.open); });
   emit('win-state-hello', {});
-  const hide = () => { menu.hidden = true; };
-  const add = (text, fn, cls = '') => {
-    const d = document.createElement('div'); d.textContent = text; d.className = cls;
-    if (fn && !cls.includes('off')) d.onclick = () => { hide(); fn(); };
-    menu.append(d);
-  };
-  const sep = () => { const d = document.createElement('div'); d.className = 'sep'; menu.append(d); };
-  addEventListener('contextmenu', ev => {
+  let inWindow = false;                                         // the menu is in the popup window (not in this page)
+  const hide = () => { menu.hidden = true; if (inWindow) { inWindow = false; popup.hide('menu'); } };
+  closeMenu = hide;
+  addEventListener('contextmenu', async ev => {
     ev.preventDefault();
-    menu.replaceChildren();
+    // what the menu has: { text, fn, cls }; cls 'sep' is a line, 'off' is grey and does nothing, 'on' has a tick
+    const list = [];
+    const add = (text, fn, cls = '') => list.push({ text, fn, cls });
     add(tr('이 창의 옵션…'), async () => {
       try { localStorage.setItem('cmr-options-win', String(wid)); } catch { /* the options open on the first window */ }
       invoke('open_options').catch(e => note(tr('옵션 창: {e}', { e })));
@@ -381,10 +408,25 @@ function contextMenu() {
     const picked = getSelection().toString();
     add(tr('선택한 글 복사'), () => { try { window.__TAURI__.clipboardManager.writeText(picked); } catch { document.execCommand('copy'); } }, picked ? '' : 'off');
     add(tr('창 비우기'), () => apply(feed.clear()));
-    sep();
+    list.push({ cls: 'sep' });
     for (const id of [MAIN, ...cfg.child_windows.map(c => c.id)]) {
       const isOpen = id === MAIN || open.has(id);
       add(windowName(id, cfg.child_windows.find(c => c.id === id) || null), () => emit('win-command', { cmd: isOpen ? 'close' : 'open', id }), (isOpen ? 'on' : '') + (id === MAIN ? ' off' : ''));
+    }
+    // in a window of its own: not cut off by a small window, and it is closed by a click anywhere else (popup.js)
+    if (popup.usable()) {
+      let at = null;
+      try { at = (await invoke('os_state')).cursor; } catch { /* the page draws it */ }
+      if (at && await popup.menu({ items: list.map((e, id) => ({ id, text: e.text, cls: e.cls })), at, onPick: id => { inWindow = false; const e = list[id]; if (e && e.fn) e.fn(); } })) { inWindow = true; return; }
+    }
+    menu.replaceChildren();
+    for (const e of list) {
+      const d = document.createElement('div'); d.className = e.cls;
+      if (e.cls !== 'sep') {
+        d.textContent = e.text;
+        if (e.fn && !e.cls.includes('off')) d.onclick = () => { hide(); e.fn(); };
+      }
+      menu.append(d);
     }
     menu.hidden = false;
     menu.style.left = Math.max(0, Math.min(ev.clientX, innerWidth - menu.offsetWidth - 2)) + 'px';
@@ -392,7 +434,7 @@ function contextMenu() {
   });
   addEventListener('mousedown', ev => { if (!menu.contains(ev.target)) hide(); }, true);
   addEventListener('keydown', ev => { if (ev.key === 'Escape') hide(); });
-  addEventListener('blur', hide);
+  addEventListener('blur', () => { if (!inWindow) hide(); });                // (a menu in the popup window has its own rules: this window is not the one that matters for it)
   addEventListener('wheel', hide, { passive: true });
 }
 
@@ -440,8 +482,10 @@ async function start() {
   contextMenu();
   await listen('quit-request', () => reportGeometry());
   let wasThrough = !!opt('click_through', false);
+  const tipWidth = () => document.documentElement.style.setProperty('--cv-tip-max', T.TIP_MAX_W + 'px');       // (the tip drawn in this page, when there is no popup window)
+  tipWidth();
   settings.onChange(c => {
-    cfg = c; applyAll(); showTitle();
+    cfg = c; applyAll(); showTitle(); tipWidth();
     const through = !!opt('click_through', false);
     if (through && !wasThrough) throughNotice();
     wasThrough = through;
@@ -449,12 +493,15 @@ async function start() {
   showTitle();
   addEventListener('cmr-language', showTitle);
   let seen = 0;                                              // the events of the hub come in order; a replay (history) starts again from the beginning
-  const take = (n, ev) => { if (n <= seen) return; seen = n; apply(feed.handle(ev)); };
+  let firstLive = Infinity;                                  // the first event that came by itself before the replay did: what happened since this window was opened
+  const take = (n, ev) => { if (n <= seen) return; seen = n; if (n < firstLive) firstLive = n; apply(feed.handle(ev)); };
   await listen('feed', e => take(e.payload.seq, e.payload.event));
   await listen('feed-replay', e => {
     if (e.payload.label !== label) return;
+    // "열 때 비우기" (an extra window): it starts empty, the lines the hub kept from before are not given to it (what came since it was opened is)
+    const fresh = wid !== MAIN && !!opt('clear_on_open', false), from = firstLive;
     apply(feed.clear()); seen = 0;
-    for (const x of e.payload.events) take(x.seq, x.event);
+    for (const x of e.payload.events) if (!fresh || x.seq >= from) take(x.seq, x.event);
   });
   await emit('feed-hello', { label });
   try { await thisWin.show(); } catch { /* shown by the exe after a while anyway */ }       // (it was made hidden: no black square while the page loads)

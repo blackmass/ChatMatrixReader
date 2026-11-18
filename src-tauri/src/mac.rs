@@ -550,7 +550,7 @@ static ASKED_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 static WHEEL_SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub fn start_wheel_hook() {}
-pub fn wheel_zone(_hwnd: isize, _on: bool, _usable: bool) {}
+pub fn wheel_zone(_hwnd: isize, _on: bool, _usable: bool, _down: bool) {}
 pub fn wheel_since(_hwnd: isize, seq: u64) -> (u64, Vec<i16>) { (seq.max(WHEEL_SEQ.load(Ordering::Relaxed)), Vec::new()) }
 
 // ------------------------------------------------------------------------------------------------- the options hot key

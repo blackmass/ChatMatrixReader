@@ -8,20 +8,21 @@ import { DEFAULTS, normalize, migrate, ConfigStore, VERSION } from '../app/core/
 import { Events } from '../app/core/events.js';
 
 log.quiet = true;
+const no3 = c => { for (const w of (c && c.child_windows) || []) delete w.clear_on_open; if (c) { delete c.whole_groups; delete c.max_groups; } return c; };      // (3.x only: an extra window can start empty)
 const G = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config.json'), 'utf8'));
 const D = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config_defaults.json'), 'utf8'));
 const same = (a, b, msg) => { const x = canon(a), y = canon(b); if (x === y) check(true, msg); else { check(false, msg); console.log('   got     ', x.slice(0, 500)); console.log('   expected', y.slice(0, 500)); } };
 
 // the defaults: everything of 2.0, plus the add-on slot
-const mine = { ...DEFAULTS }; const added = Object.keys(mine).filter(k => !(k in D));
-eq(added.slice().sort(), ['auto_copy', 'font_weight', 'plugins', 'through_tips', 'tuning', 'voice_capture', 'voice_min_db', 'voice_prompt', 'wheel_through', 'widgets'], 'only `auto_copy`, `font_weight`, `plugins`, `tuning`, `voice_capture`, `voice_min_db`, `voice_prompt`, `through_tips`, `wheel_through` and `widgets` are new in the defaults');
-delete mine.plugins; delete mine.tuning; delete mine.wheel_through; delete mine.auto_copy; delete mine.font_weight; delete mine.voice_prompt; delete mine.voice_capture; delete mine.voice_min_db; delete mine.widgets; delete mine.through_tips;
+const mine = { ...DEFAULTS }; no3(mine); const added = Object.keys(mine).filter(k => !(k in D));
+eq(added.slice().sort(), ['auto_copy', 'bold_fix', 'font_weight', 'letter_spacing', 'line_height', 'outline', 'outline_color', 'plain_text', 'plugins', 'through_tips', 'tuning', 'voice_capture', 'voice_min_db', 'voice_prompt', 'wheel_through', 'widgets'], 'only `auto_copy`, `font_weight`, `plugins`, `tuning`, `voice_capture`, `voice_min_db`, `voice_prompt`, `through_tips`, `wheel_through` and `widgets` are new in the defaults');
+delete mine.plugins; delete mine.line_height; delete mine.tuning; delete mine.wheel_through; delete mine.auto_copy; delete mine.font_weight; delete mine.voice_prompt; delete mine.voice_capture; delete mine.voice_min_db; delete mine.widgets; delete mine.through_tips; for (const k of ['bold_fix', 'letter_spacing', 'outline', 'outline_color', 'plain_text']) delete mine[k];
 same(mine, D, 'defaults equal 2.0');
 
 const noAcrylic = c => { for (const w of c.child_windows || []) if (w.blur === 3) w.blur = 2; if (c.blur === 3) c.blur = 2; return c; };      // 3.0 reads blur 3 as 2
-for (const [saved, want] of G.normalize) { noAcrylic(want); const got = normalize(saved); delete got.plugins; delete got.tuning; delete got.wheel_through; delete got.auto_copy; delete got.font_weight; delete got.voice_prompt; delete got.voice_capture; delete got.voice_min_db; delete got.widgets; delete got.through_tips; same(got, want, 'normalize ' + JSON.stringify(saved)?.slice(0, 70)); }
+for (const [saved, want] of G.normalize) { noAcrylic(want); const got = no3(normalize(saved)); got.config_version = 2; delete got.plugins; delete got.line_height; delete got.tuning; delete got.wheel_through; delete got.auto_copy; delete got.font_weight; delete got.voice_prompt; delete got.voice_capture; delete got.voice_min_db; delete got.widgets; delete got.through_tips; for (const k of ['bold_fix', 'letter_spacing', 'outline', 'outline_color', 'plain_text']) delete got[k]; same(got, want, 'normalize ' + JSON.stringify(saved)?.slice(0, 70)); }
 for (const [old, wantCfg, wantNotes] of G.migrate) {
-  const [cfg, notes] = migrate(old); delete cfg.plugins; delete cfg.tuning; delete cfg.wheel_through; delete cfg.auto_copy; delete cfg.font_weight; delete cfg.voice_prompt; delete cfg.voice_capture; delete cfg.voice_min_db; delete cfg.widgets; delete cfg.through_tips; noAcrylic(wantCfg);
+  const [cfg, notes] = migrate(old); no3(cfg); cfg.config_version = 2; delete cfg.plugins; delete cfg.line_height; delete cfg.tuning; delete cfg.wheel_through; delete cfg.auto_copy; delete cfg.font_weight; delete cfg.voice_prompt; delete cfg.voice_capture; delete cfg.voice_min_db; delete cfg.widgets; delete cfg.through_tips; for (const k of ['bold_fix', 'letter_spacing', 'outline', 'outline_color', 'plain_text']) delete cfg[k]; noAcrylic(wantCfg);
   same(cfg, wantCfg, 'migrate settings ' + JSON.stringify(old)?.slice(0, 60));
   same(notes, wantNotes, 'migrate notes ' + JSON.stringify(old)?.slice(0, 60));
 }
@@ -72,3 +73,22 @@ eq(normalize({ plugins: { x: { enabled: true, granted: [] } } }).plugins, { x: {
   eq(seen, [['a', 1], ['c', 1], ['c', 2], ['once', 'go']], 'events: order, off, once, a throwing listener does not stop the others');
 }
 eq(normalize({ tuning: 5 }).tuning, {}, 'a broken tuning entry becomes {}');
+
+// 3.0.x -> 3.1: line_spacing used to be the row height; the new line_height takes over that value once, so nothing looks different
+{
+  eq(DEFAULTS.line_height, 0, 'line_height: 0 by default');
+  const old = { config_version: 2, font_size: 15, line_spacing: 6, child_windows: [{ id: 3, channels: ['S'], line_spacing: 4 }, { id: 4, channels: ['Y'] }] };
+  const files = memoryFiles({ 'config.json': JSON.stringify(old) }); const st = new ConfigStore(files);
+  const c = await st.load();
+  eq([c.line_height, c.line_spacing, c.child_windows.find(w => w.id === 3).line_height, c.child_windows.find(w => w.id === 3).line_spacing, 'line_height' in c.child_windows.find(w => w.id === 4)],
+    [6, 6, 4, 4, false], '2 -> 3: the old line_spacing is copied into line_height (main and an extra window that had its own); a window that followed keeps following');
+  eq([JSON.parse(await files.read('config.json')).config_version, await files.read('config.1x.json'), st.notes.length], [VERSION, null, 0], '2 -> 3: the file is rewritten in the new format, no 1.x backup, no notes');
+  const again = new ConfigStore(files); const c2 = await again.load();
+  eq([c2.line_height, c2.line_spacing], [6, 6], 'second start: the same');
+  st.cfg.line_height = 0; await st.save();                                  // the user sets the row height to 0 on purpose: it stays
+  eq((await new ConfigStore(files).load()).line_height, 0, 'a value the user set is not copied over again');
+  const ro = new ConfigStore(memoryFiles({ 'config.json': JSON.stringify(old) }), { readOnly: true });
+  eq([(await ro.load()).line_height, await ro.files.read('config.1x.json')], [6, null], 'read-only: the same values, nothing written');
+  eq(migrate({ line_spacing: 5, font_size: 12 })[0].line_height, 5, 'a 1.x file: line_height takes the old line_spacing too');
+  eq(normalize({}).line_height, 0, 'no file: 0');
+}

@@ -19,6 +19,10 @@
 #include <dxgi1_4.h>
 #include <pdh.h>
 #include <pdhmsg.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <sys/resource.h>
+#include <unistd.h>
 #else
 #include <fstream>
 #include <unistd.h>
@@ -42,6 +46,18 @@ double ramMb() {
     return pmc.WorkingSetSize / 1048576.0;
 }
 int cores() { SYSTEM_INFO si; GetSystemInfo(&si); return static_cast<int>(si.dwNumberOfProcessors); }
+#elif defined(__APPLE__)
+double cpuSeconds() {
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) != 0) return 0;
+    return ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6 + ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6;
+}
+double ramMb() {
+    mach_task_basic_info_data_t info; mach_msg_type_number_t n = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &n) != KERN_SUCCESS) return 0;
+    return info.resident_size / 1048576.0;
+}
+int cores() { long n = sysconf(_SC_NPROCESSORS_ONLN); return n > 0 ? static_cast<int>(n) : 1; }
 #else
 double cpuSeconds() {                       // (for development on Linux: the same numbers from /proc)
     std::ifstream f("/proc/self/stat"); std::string all; std::getline(f, all);
@@ -134,8 +150,8 @@ struct ProcSampler::Gpu {
         return any ? total : -1;
     }
 #else
-    double percent(std::string& why) { why = "not Windows"; return -1; }
-    double vramMb(std::string& why) { why = "not Windows"; return -1; }
+    double percent(std::string& why) { why = "no GPU numbers on this system"; return -1; }
+    double vramMb(std::string& why) { why = "no GPU numbers on this system"; return -1; }
 #endif
 };
 

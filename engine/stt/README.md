@@ -23,9 +23,12 @@ Needs CMake, Git, and Visual Studio (or its Build Tools, "Desktop development wi
 it fetches the official whisper.cpp at the commit written in `whisper.version`, builds, runs the tests, and leaves `dist\engine-cpu\cmr-stt.exe` and its SHA-256.
 `build.bat cpu "D:\path\whisper.cpp-1.9.2"` uses an unpacked copy of the official release zip instead of fetching (its SHA-256 is in `whisper.version`).
 
+On a Mac (Apple silicon, macOS 13 or later): needs CMake, Git and the Xcode command line tools (`xcode-select --install`), then **`./build.sh`**.
+One file, `dist/engine-metal/cmr-stt`: Metal (the GPU, its shaders embedded) and the CPU part (Accelerate) together; `device` in the config picks which one computes.
+
 By hand:
 ```
-cmake -S engine/stt -B build -DCMR_WITH_WHISPER=ON            # -DCMR_WHISPER_DIR=<unpacked official source>  -DCMR_GPU=none|vulkan|cuda  -DCMR_CPU=avx2|generic
+cmake -S engine/stt -B build -DCMR_WITH_WHISPER=ON            # -DCMR_WHISPER_DIR=<unpacked official source>  -DCMR_GPU=none|vulkan|cuda|metal  -DCMR_CPU=avx2|generic
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 cmr-stt --version                                             # {"type":"version","engine":..,"whisper":"v1.9.2","commit":..,"gpu":..,"cpu":..}

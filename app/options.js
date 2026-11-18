@@ -106,7 +106,7 @@ function show() {
     const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
     let n = 0;
     for (const t of TABS) for (const c of t.cards) {
-      const rows = c.rows.filter(r => tokens.every(k => [t.title, c.title, r.label, r.note, r.keywords, r.key].join(' ').toLowerCase().includes(k)));
+      const rows = c.rows.filter(r => tokens.every(k => [t.title, c.title, r.label, [].concat(r.note || '').join(' '), r.keywords, r.key].join(' ').toLowerCase().includes(k)));
       if (!rows.length) continue;
       n += rows.length;
       const win = rows.some(r => r.win);

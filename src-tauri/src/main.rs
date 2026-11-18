@@ -22,6 +22,7 @@ mod capturelib;
 mod ext;
 mod extlib;
 mod files;
+mod placement;
 mod procrole;
 // everything that calls the operating system directly: the same functions in both files (win.rs: Windows, mac.rs: macOS)
 #[cfg(windows)]
@@ -181,6 +182,19 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             .resizable(false)
             .visible(false)
             .inner_size(520.0, 46.0),
+        // the popup: the menu and the tooltips of the translation windows. Made when first needed and shown/hidden/closed by the pages (popup_*).
+        // No focus (the game keeps the keyboard), always on top (not "above the game": nothing to be ordered against), the size is set by the page.
+        "popup" => b
+            .title("CMR Popup")
+            .transparent(true)
+            .decorations(false)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .focusable(false)
+            .visible(false)
+            .inner_size(40.0, 40.0),
         "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),
         // the control window is the program's brain, not something to look at: it is never shown. An empty file "show_control" next to app/
@@ -203,6 +217,10 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             win::set_alpha(h, 0.02);                   // (seen for the system, not for the eye)
             win::raise_top(h);
         }
+    }
+    if kind == "popup" {
+        let _ = w.set_ignore_cursor_events(true);
+        if let Ok(h) = hwnd_of(&w) { win::set_noactivate(h, true); }
     }
     if kind == "options" {
         let _ = w.set_always_on_top(false);            // an ordinary window, whatever the other windows do
@@ -298,6 +316,117 @@ async fn open_overlay(app: AppHandle, label: String) -> Result<(), String> {
         return w.show().map_err(|e| e.to_string());
     }
     make_window(&app, &label, "overlay.html", "overlay").map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// The popup window (menu / tooltips): made when it is needed first. Nothing happens when it is there already.
+#[tauri::command]
+async fn popup_open(app: AppHandle) -> Result<(), String> {
+    if app.get_webview_window("popup").is_some() {
+        return Ok(());
+    }
+    make_window(&app, "popup", "popup.html", "popup").map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// The usable area (without the taskbar) and the scale of the monitor that has the point; nothing known = a huge area (nothing is moved).
+fn monitor_at(win: &WebviewWindow, x: i32, y: i32) -> (placement::Area, f64) {
+    let m = win.monitor_from_point(x as f64, y as f64).ok().flatten().or_else(|| win.primary_monitor().ok().flatten());
+    match m {
+        Some(m) => {
+            let a = m.work_area();
+            (placement::Area { x: a.position.x, y: a.position.y, w: a.size.width as i32, h: a.size.height as i32 }, m.scale_factor())
+        }
+        None => (placement::Area { x: -1_000_000, y: -1_000_000, w: 2_000_000, h: 2_000_000 }, 1.0),
+    }
+}
+
+/// What a tip that follows the cursor needs to know between two moves: the size of its page (CSS pixels) and where it is.
+struct PopupFollow {
+    w: f64,
+    h: f64,
+    last: (i32, i32),
+}
+static POPUP_FOLLOW: std::sync::Mutex<Option<PopupFollow>> = std::sync::Mutex::new(None);
+
+/// Puts the popup at a place and shows it WITHOUT taking the focus. `kind`: "menu" (takes the mouse; its corner at `at`) or "tip" (the mouse goes
+/// through it). `at`: [x, y], the cursor (real screen pixels); `anchor`: [left, top, right, bottom] of what a tip is about (a widget): above it.
+/// (w, h): the size of the page in CSS pixels (times the scale of the monitor it lands on: the page does not know that monitor). Everything is put
+/// inside the usable area of the monitor the cursor / the anchor is on (placement.rs).
+#[tauri::command]
+fn popup_place(app: AppHandle, kind: String, at: Option<Vec<i32>>, anchor: Option<Vec<i32>>, w: f64, h: f64) -> Result<(), String> {
+    let win = app.get_webview_window("popup").ok_or("no popup window")?;
+    let e = |e: tauri::Error| e.to_string();
+    let menu = kind == "menu";
+    let anchor = anchor.filter(|a| a.len() == 4);
+    let at = at.filter(|p| p.len() == 2);
+    let (rx, ry) = match (&anchor, &at) {
+        (Some(a), _) => ((a[0] + a[2]) / 2, (a[1] + a[3]) / 2),
+        (None, Some(p)) => (p[0], p[1]),
+        _ => return Err("no place to show it at".into()),
+    };
+    let (area, sc) = monitor_at(&win, rx, ry);
+    let (pw, ph) = ((w * sc).ceil().max(1.0) as i32, (h * sc).ceil().max(1.0) as i32);
+    let (x, y) = match &anchor {
+        Some(a) => placement::above_anchor(area, a[0], a[1], a[2], a[3], pw, ph, (6.0 * sc) as i32),
+        None => placement::at_point(area, rx, ry, pw, ph, if menu { 0 } else { (12.0 * sc) as i32 }, if menu { 0 } else { (16.0 * sc) as i32 }),
+    };
+    if let Ok(mut f) = POPUP_FOLLOW.lock() {
+        *f = if !menu && anchor.is_none() { Some(PopupFollow { w, h, last: (x, y) }) } else { None };
+    }
+    win.set_ignore_cursor_events(!menu).map_err(e)?;
+    win.set_size(tauri::PhysicalSize::new(pw as u32, ph as u32)).map_err(e)?;
+    win.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?;
+    win.show().map_err(e)?;
+    if let Ok(h) = hwnd_of(&win) {
+        win::keep_style(h);
+        win::set_topmost(h, true, 0);                 // (the window library may think it is on top already and skip it)
+    }
+    Ok(())
+}
+
+/// A tip that follows the cursor: the page asks again and again; the exe reads the cursor itself and moves the window (nothing goes back and forth
+/// with the pages). The same rules as at the start: it goes to the other side of the cursor at the edge of the monitor the cursor is on.
+#[tauri::command]
+fn popup_follow(app: AppHandle) -> Result<(), String> {
+    let (w, h, last) = match POPUP_FOLLOW.lock() {
+        Ok(f) => match f.as_ref() { Some(s) => (s.w, s.h, s.last), None => return Ok(()) },
+        Err(_) => return Ok(()),
+    };
+    let win = match app.get_webview_window("popup") { Some(w) => w, None => return Ok(()) };
+    let e = |e: tauri::Error| e.to_string();
+    let (cx, cy) = win::cursor_pos();
+    let (area, sc) = monitor_at(&win, cx, cy);
+    let (pw, ph) = ((w * sc).ceil().max(1.0) as i32, (h * sc).ceil().max(1.0) as i32);
+    let (x, y) = placement::at_point(area, cx, cy, pw, ph, (12.0 * sc) as i32, (16.0 * sc) as i32);
+    if let Ok(cur) = win.outer_size() {
+        if cur.width != pw as u32 || cur.height != ph as u32 {
+            win.set_size(tauri::PhysicalSize::new(pw as u32, ph as u32)).map_err(e)?;      // (the cursor went to a monitor with another scale)
+        }
+    }
+    if (x, y) != last {
+        win.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?;
+        if let Ok(mut f) = POPUP_FOLLOW.lock() {
+            if let Some(s) = f.as_mut() { s.last = (x, y); }
+        }
+    }
+    Ok(())
+}
+
+/// Hides the popup (it stays there, so the next one is quick).
+#[tauri::command]
+fn popup_hide(app: AppHandle) -> Result<(), String> {
+    match app.get_webview_window("popup") {
+        Some(w) => w.hide().map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
+}
+
+/// Takes the popup away (nobody needed it for a while: no web view is kept for nothing).
+#[tauri::command]
+fn popup_close(app: AppHandle) -> Result<(), String> {
+    match app.get_webview_window("popup") {
+        Some(w) => w.destroy().map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
 }
 
 /// Moves / resizes the calling window (real pixels; outer rectangle). x and y may be left out: only the size changes.
@@ -616,8 +745,8 @@ fn make_tray(app: &tauri::App) -> tauri::Result<()> {
 
 /// A translation window asks for the wheel turns (up) over it while the mouse goes through it; see win.rs.
 #[tauri::command]
-fn wheel_zone(window: WebviewWindow, on: bool, usable: Option<bool>) -> Result<(), String> {
-    win::wheel_zone(hwnd_of(&window)?, on, usable.unwrap_or(false));
+fn wheel_zone(window: WebviewWindow, on: bool, usable: Option<bool>, down: Option<bool>) -> Result<(), String> {
+    win::wheel_zone(hwnd_of(&window)?, on, usable.unwrap_or(false), down.unwrap_or(false));
     Ok(())
 }
 
@@ -790,6 +919,11 @@ fn main() {
             fs_remove,
             fs_move,
             restart_app,
+            popup_open,
+            popup_place,
+            popup_follow,
+            popup_hide,
+            popup_close,
             app_folder,
             quit_app,
             quit_request,

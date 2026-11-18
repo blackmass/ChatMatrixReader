@@ -12,7 +12,7 @@ import { LEGACY_DEFAULT_PROMPTS } from './prompts_legacy.js';
 import { DEFAULT_REASONING_OFF } from './translate.js';
 
 export const PATH = 'config.json';
-export const VERSION = 2;                      // the format of config.json; a file without it comes from 1.x
+export const VERSION = 3;                      // the format of config.json; a file without it comes from 1.x. 2 -> 3: line_height (see carryLineHeight)
 
 export const DEFAULTS = {
 
@@ -101,14 +101,17 @@ export const DEFAULTS = {
     translate_test_start: true,   // at start, send a tiny test request so the user sees whether the translation server answers
     check_updates: true,   // look for a newer GitHub release at start (a notice only, nothing is installed)
     font_family: '',   // '' = default (Malgun Gothic); else a font loaded from the fonts/ folder
-    line_spacing: 0,   // pixels between chat lines (inside a group: an original line and its translation)
+    line_spacing: 0,   // pixels between an original line and its translation (inside a group)
+    whole_groups: false,   // only whole groups are shown at the newest line: the one cut at the top edge of the window is hidden (reading above shows all)
+    max_groups: 0,   // only this many of the newest groups are shown (0 = no limit; reading above shows all)
+    line_height: 0,   // extra pixels between the rows of ONE text that is long enough to wrap onto several rows (1.x / 3.0.x: line_spacing did this too)
     indent: 4,   // left alignment: spaces the 2nd row of a long line and the translation line are pushed in
     group_spacing: 4,   // extra pixels between groups (an original line + its translation)
     trans_color: '',   // colour of the translated text ('' = default)
     swap_trans: false,   // translation above, the original below it (in the second-line colour / size)
     outline: 0,   // text outline in tenths of a pixel (0 off .. 30), drawn in outline_color
     outline_color: '#000000',
-    bold_fix: 0,   // makes thin text a little heavier: the glyphs grow by this many tenths of a pixel (0 off .. 10)
+    bold_fix: 0,   // > 0: the glyphs grow by this many tenths of a pixel; < 0: a thin line in the outline colour over their edge, 0.03px a step (-10 .. 10, 0 off)
     letter_spacing: 0,   // extra space between letters, in tenths of a pixel (-10 .. 20)
     plain_text: false,   // no kerning / ligatures
     font_weight: 400,   // weight of the text, 100..900 (CSS font-weight; 400 = normal, 700 = bold)
@@ -141,6 +144,15 @@ const OBSOLETE = new Set(['blur_experiment', 'blur_state', 'blur_tint', 'capture
   'opacity', 'voice_translate', 'glossary_inline', 'manual_pos', 'channel_detail_old']);
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const own = (o, k) => Object.hasOwn(o, k);
+
+// Until 3.0.x "line_spacing" was the height of every row, so it also spread the rows of a long text. Now it is only the space between an original and its
+// translation, and the new "line_height" is the row height. A file from before copies the old value into the new setting once, so nothing looks different.
+function carryLineHeight(saved) {
+  const out = structuredClone(saved);
+  if (!own(out, 'line_height') && typeof out.line_spacing === 'number') out.line_height = out.line_spacing;
+  if (Array.isArray(out.child_windows)) for (const w of out.child_windows) if (isObj(w) && !own(w, 'line_height') && typeof w.line_spacing === 'number') w.line_height = w.line_spacing;
+  return out;
+}
 
 // what a file holds -> the settings the program uses: missing keys get their defaults, old spellings are brought up to date
 export function normalize(saved) {
@@ -197,7 +209,7 @@ export function migrate(oldIn) {
   const wrong = [];
   for (const k of Object.keys(work)) if (own(DEFAULTS, k) && !kindOk(work[k], DEFAULTS[k])) { wrong.push(k); delete work[k]; }
   if (wrong.length) notes.push(tr('형식이 맞지 않는 설정은 기본값으로 두었습니다:') + ' ' + wrong.sort().join(', '));
-  const cfg = normalize(work);
+  const cfg = normalize(carryLineHeight(work));
   if (!(cfg.send_prompt || '').trim()) cfg.send_prompt = DEFAULT_SEND_PROMPT;                 // an empty send prompt meant "the default"
   if ((cfg.prompt || '').trim() === DEFAULT_PROMPT.trim()) cfg.prompt = DEFAULT_PROMPT;       // 1.x saved it without the last line break
   const unknown = Object.keys(old).filter(k => !keep(k)).sort();
@@ -216,6 +228,11 @@ export class ConfigStore {
   async load() {
     let saved = null;
     try { saved = JSON.parse(await this.files.read(PATH)); } catch { /* missing or broken: defaults */ }
+    if (isObj(saved) && saved.config_version === 2) {              // 3.0.x: only the new setting is added (nothing is moved or backed up)
+      this.cfg = normalize(carryLineHeight(saved));
+      if (!this.readOnly) await this.save();
+      return this.cfg;
+    }
     if (isObj(saved) && saved.config_version !== VERSION) {
       [this.cfg, this.notes] = migrate(saved);
       if (!this.readOnly) { await this.backup(); await this.save(); }

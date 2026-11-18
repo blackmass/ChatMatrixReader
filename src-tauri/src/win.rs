@@ -440,7 +440,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 static WHEEL: Mutex<Vec<(u64, isize, i16)>> = Mutex::new(Vec::new());      // (number, window, delta)
-static ZONES: Mutex<Vec<(isize, bool)>> = Mutex::new(Vec::new());          // windows that want the wheel: (window, usable)  usable = the window takes the mouse itself
+static ZONES: Mutex<Vec<(isize, bool, bool)>> = Mutex::new(Vec::new());    // windows that want the wheel: (window, usable, down)  usable = the window takes the mouse itself; down = the turns DOWN too
 static WHEEL_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[repr(C)]
@@ -463,13 +463,14 @@ unsafe extern "system" fn wheel_proc(code: i32, w: usize, l: isize) -> isize {
     if code == 0 && w == 0x020A {                                          // WM_MOUSEWHEEL
         let info = &*(l as *const MsllHook);
         let delta = (info.mouseData >> 16) as i16;
-        // a window the mouse goes through (usable = false): only the turns UP are taken (the game would scroll its own chat with them).
+        // a window the mouse goes through (usable = false): only the turns UP are taken (the game would scroll its own chat with them); the turns DOWN too
+        // while the window asks for them (`down`: it has lines that faded away and a turn down brings them back).
         // A usable window gets the wheel from Windows itself, except while Shift / Ctrl / Alt is held (Windows then keeps the wheel for the program
         // in front, not for the window under the mouse): those turns, both ways, are taken here.
         let modifier = GetAsyncKeyState(0x10) < 0 || GetAsyncKeyState(0x11) < 0 || GetAsyncKeyState(0x12) < 0;
         if let Ok(zones) = ZONES.try_lock() {
-            for &(h, usable) in zones.iter() {
-                if !(if usable { modifier } else { delta > 0 }) {
+            for &(h, usable, down) in zones.iter() {
+                if !(if usable { modifier } else { delta > 0 || down }) {
                     continue;
                 }
                 let mut r = RECT::default();
@@ -496,10 +497,10 @@ pub fn start_wheel_hook() {
     });
 }
 
-pub fn wheel_zone(hwnd: isize, on: bool, usable: bool) {
+pub fn wheel_zone(hwnd: isize, on: bool, usable: bool, down: bool) {
     if let Ok(mut z) = ZONES.lock() {
-        z.retain(|&(h, _)| h != hwnd);
-        if on { z.push((hwnd, usable)); }
+        z.retain(|&(h, _, _)| h != hwnd);
+        if on { z.push((hwnd, usable, down)); }
     }
 }
 

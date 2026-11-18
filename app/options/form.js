@@ -33,7 +33,7 @@ export function buildRow(row, ctx) {
     labelLine.append(a);
   }
   text.append(labelLine);
-  if (row.note) text.append(el('small', 'note', row.note));
+  if (row.note) for (const n of [].concat(row.note)) text.append(el('small', 'note', n));       // (a note may be a list: one line each)
   const hint = row.hints ? el('small', 'note hint') : null;       // row.hints { value: text }: what the chosen value means, under the label
   if (hint) text.append(hint);
   const ctl = el('div', 'ctl');
@@ -43,7 +43,14 @@ export function buildRow(row, ctx) {
   // an extra window's row that can be left empty to follow window 1: no "창 1 따르기" button, the empty input says it (a small dim text with window 1's value)
   const canFollow = !!(row.win && ctx.canFollow && ctx.canFollow(row));
   let followText = () => {};                                   // keeps the "창 1을 따름 · value" texts up to date (set by the row types that have them)
-  const mainShown = () => { const v = ctx.mainValue(row); return v === undefined || v === null || v === '' ? tr('기본') : String(v); };
+  // row.zeroEmpty: a number whose 0 means "no value" (hide after 0 s would hide at once; a lower line of size 0 is unreadable): the main window
+  // shows it as an EMPTY box (typing 0 empties it) with a dim text that says what empty means (row.zeroText(ctx, forExtraWindow)); an extra window
+  // keeps "empty = follow window 1" and shows that text behind it when window 1 has no value
+  const mainShown = () => {
+    const v = ctx.mainValue(row);
+    if (row.zeroEmpty && row.zeroText && (v === undefined || v === null || v === '' || Number(v) === 0)) return row.zeroText(ctx, true);
+    return v === undefined || v === null || v === '' ? tr('기본') : String(v);
+  };
 
   const commit = value => {
     const bad = row.validate ? row.validate(value) : '';
@@ -59,23 +66,37 @@ export function buildRow(row, ctx) {
     read = () => input.checked; write = v => { input.checked = !!v; };
     input.onchange = () => commit(input.checked);
   } else if (row.type === 'number') {
-    input = el('input'); input.type = 'number'; input.min = row.min; input.max = row.max; input.step = row.step || 1;
-    ctl.append(input); if (row.unit) ctl.append(el('span', 'unit', row.unit));
-    read = () => (input.value === '' ? (canFollow ? null : NaN) : Number(input.value)); write = v => { input.value = v === null || v === undefined ? '' : v; };
+    const blank0 = !!row.zeroEmpty && !canFollow;                 // the main window of a zeroEmpty row: 0 is the empty box
+    const lo = blank0 ? Math.max(1, Number(row.min) || 0) : row.min;
+    input = el('input'); input.type = 'number'; input.min = lo; input.max = row.max; input.step = row.step || 1;
+    // the unit may be a list too (one under the other): ['× 0.1px', '(음수는 × 0.03px)']
+    const unitEl = u => { if (!Array.isArray(u)) return el('span', 'unit', u); const b = el('span', 'unit multi'); for (const x of u) b.append(el('span', '', x)); return b; };
+    ctl.append(input); if (row.unit) ctl.append(unitEl(row.unit));
+    read = () => (input.value === '' ? (canFollow ? null : (blank0 ? 0 : NaN)) : Number(input.value));
+    write = v => { input.value = v === null || v === undefined || (blank0 && Number(v) === 0) ? '' : v; };
     input.onchange = () => {
       const v = read();
       if (v === null) { err.textContent = ''; root.classList.remove('bad'); commit(null); return; }          // emptied: follows window 1
-      if (!Number.isFinite(v) || v < row.min || v > row.max) { err.textContent = `${row.min} ~ ${row.max}`; root.classList.add('bad'); return; }
+      if (blank0 && v === 0) { input.value = ''; err.textContent = ''; root.classList.remove('bad'); commit(0); return; }   // 0 = no value = empty
+      if (!Number.isFinite(v) || v < lo || v > row.max) { err.textContent = `${lo} ~ ${row.max}`; root.classList.add('bad'); return; }
       commit(v);
     };
-    if (canFollow) {
-      // the arrows start from window 1's value (an empty input would start from 1): empty + up = window 1's value + one step
+    if (canFollow || blank0) {
+      // the arrows start from window 1's value (an empty input would start from 1): empty + up = window 1's value + one step.
+      // row.startAt(ctx, dir): where an empty box starts instead (a number, or undefined = the rule above)
       input.classList.add('follow-input');
+      if (row.zeroText) input.classList.add('wide-num');
       const step = Number(row.step) || 1, round = v => Math.round(v * 1e6) / 1e6;
       const nudge = dir => {
-        const cur = input.value === '' ? Number(ctx.mainValue(row)) : Number(input.value);
-        const base = Number.isFinite(cur) ? cur : Number(row.min) || 0;
-        const v = Math.min(row.max, Math.max(row.min, round(base + dir * step)));
+        let v;
+        const start = input.value === '' && row.startAt ? row.startAt(ctx, dir) : undefined;
+        if (start !== undefined) v = start;
+        else {
+          const cur = input.value === '' ? (canFollow ? Number(ctx.mainValue(row)) : NaN) : Number(input.value);
+          const base = Number.isFinite(cur) ? cur : (blank0 ? lo - step : Number(row.min) || 0);
+          v = round(base + dir * step);
+        }
+        v = Math.min(row.max, Math.max(lo, v));
         input.value = v; err.textContent = ''; root.classList.remove('bad'); commit(v);
       };
       const pad = el('span', 'stepper'), up = el('button', 'step', '▴'), down = el('button', 'step', '▾');
@@ -83,7 +104,7 @@ export function buildRow(row, ctx) {
       up.onclick = () => nudge(1); down.onclick = () => nudge(-1);
       pad.append(up, down); input.after(pad);
       input.addEventListener('keydown', e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); nudge(e.key === 'ArrowUp' ? 1 : -1); } });
-      followText = () => { input.placeholder = tr('창 1을 따름') + ' · ' + mainShown(); };
+      followText = () => { input.placeholder = blank0 ? (row.zeroText ? row.zeroText(ctx, false) : '') : tr('창 1을 따름') + ' · ' + mainShown(); };
     }
   } else if (row.type === 'text' || row.type === 'password') {
     input = el('input', row.wide ? 'wide' : ''); input.type = row.type === 'password' ? 'password' : 'text';
