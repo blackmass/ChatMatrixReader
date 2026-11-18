@@ -5,7 +5,10 @@ r"""Makes the files of an engine release and tells the program where to download
     py tools\engine_release.py v3.0.0 --no-patch   makes the files but leaves app\core\voice_catalog.js alone
     py tools\engine_release.py v3.0.0 --allow-dirty  goes on although engine/stt has changes that are not committed (not for a real release)
 
-For every engine folder that has a cmr-stt.exe it
+The Mac engine (engine-metal, built on the Mac with engine/stt/build.sh) is copied into engine\stt\dist\ here (the whole folder engine-metal) and released with
+the others (asset name cmr-stt-metal-macos-arm64; the program in it is cmr-stt, without .exe).
+
+For every engine folder that has its program (cmr-stt.exe, on the Mac cmr-stt) it
   1. checks the folder (the licenses are there, the SHA-256 file matches the exe, the version says the engine is the kind the folder is named after),
   2. puts the files to upload into release-out\<tag>\ (the same folder as the program's zip) with names that are unique in one GitHub release:
          cmr-stt-<kind>-windows-x64.exe  BUILD-INFO-engine-<kind>.txt  LICENSE-whisper.cpp.txt  LICENSE-ChatMatrixReader.txt  SHA256SUMS-engine.txt
@@ -27,9 +30,15 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CATALOG = os.path.join(HERE, "app", "core", "voice_catalog.js")
 REPO = "blackmass/ChatMatrixReader"
-KINDS = ["cpu", "vulkan", "cuda"]
-GPU_OF = {"cpu": "none", "vulkan": "vulkan", "cuda": "cuda"}         # what `cmr-stt --version` says for each folder name
-NEEDED = ["cmr-stt.exe", "cmr-stt.exe.sha256", "LICENSE-whisper.cpp.txt", "LICENSE.txt", "version.json"]
+KINDS = ["cpu", "vulkan", "cuda", "metal"]
+GPU_OF = {"cpu": "none", "vulkan": "vulkan", "cuda": "cuda", "metal": "metal"}         # what `cmr-stt --version` says for each folder name
+EXE_OF = {"cpu": "cmr-stt.exe", "vulkan": "cmr-stt.exe", "cuda": "cmr-stt.exe", "metal": "cmr-stt"}      # the program of each kind (metal = macOS, no .exe)
+ASSET_OF = {"cpu": "cmr-stt-cpu-windows-x64.exe", "vulkan": "cmr-stt-vulkan-windows-x64.exe", "cuda": "cmr-stt-cuda-windows-x64.exe",
+            "metal": "cmr-stt-metal-macos-arm64"}                                                     # the file name on the GitHub release
+
+
+def needed(kind):
+    return [EXE_OF[kind], EXE_OF[kind] + ".sha256", "LICENSE-whisper.cpp.txt", "LICENSE.txt", "version.json"]
 
 
 def sha256_of(path):
@@ -50,11 +59,15 @@ def read_version(path):
 
 
 def sha_file_value(path):
-    """The hash in a file made by `certutil -hashfile x SHA256` (a header line, the hash - maybe with spaces -, a closing line)."""
+    """The hash in a file made by `certutil -hashfile x SHA256` (a header line, the hash - maybe with spaces -, a closing line)
+    or by `shasum -a 256 x` (the hash, two spaces, the name)."""
     for line in open(path, encoding="utf-8", errors="replace").read().splitlines():
         h = line.replace(" ", "").strip().lower()
         if re.fullmatch(r"[0-9a-f]{64}", h):
             return h
+        m = re.fullmatch(r"([0-9a-fA-F]{64})  \S+", line.strip())
+        if m:
+            return m.group(1).lower()
     raise ValueError(f"{path}: no SHA-256 found")
 
 
@@ -91,7 +104,7 @@ def fill_missing(kind, folder):
     """An engine that was built before build.bat wrote the license files and version.json: they are made here from what the build left (the engine itself
     is not built again: it would be the same program from the same source)."""
     made = []
-    exe = os.path.join(folder, "cmr-stt.exe")
+    exe = os.path.join(folder, EXE_OF[kind])
     if not os.path.isfile(exe):
         return made
     wanted = {
@@ -117,13 +130,14 @@ def fill_missing(kind, folder):
 
 
 def check_folder(kind, folder):
-    for n in NEEDED:
+    for n in needed(kind):
         if not os.path.isfile(os.path.join(folder, n)):
-            raise SystemExit(f"{folder}: {n} is missing. Run build.bat again (the release needs the licenses and the version with the engine).")
-    exe = os.path.join(folder, "cmr-stt.exe")
-    have, want = sha256_of(exe), sha_file_value(os.path.join(folder, "cmr-stt.exe.sha256"))
+            raise SystemExit(f"{folder}: {n} is missing. Run {'build.sh' if kind == 'metal' else 'build.bat'} again (the release needs the licenses and the version with the engine).")
+    name = EXE_OF[kind]
+    exe = os.path.join(folder, name)
+    have, want = sha256_of(exe), sha_file_value(os.path.join(folder, name + ".sha256"))
     if have != want:
-        raise SystemExit(f"{folder}: cmr-stt.exe does not match cmr-stt.exe.sha256 (the exe was changed after the build?)")
+        raise SystemExit(f"{folder}: {name} does not match {name}.sha256 (the program was changed after the build?)")
     ver = read_version(os.path.join(folder, "version.json"))
     if ver.get("gpu") != GPU_OF[kind]:
         raise SystemExit(f"{folder}: the engine says gpu={ver.get('gpu')!r} but the folder is engine-{kind} (expected {GPU_OF[kind]!r}): a folder mixed up?")
@@ -137,22 +151,23 @@ def build_info(tag, kind, ver, exe_sha, files, commit_text):
         "ChatMatrix Reader - voice recognition engine (cmr-stt)",
         "",
         f"release        : {tag}",
-        f"engine kind    : {kind}  (compute: {GPU_OF[kind] if kind != 'cpu' else 'CPU only'}, cpu level: {ver.get('cpu', '?')})",
+        f"engine kind    : {kind}  (compute: {GPU_OF[kind] if kind != 'cpu' else 'CPU only'}{' + CPU (Accelerate)' if kind == 'metal' else ''}, cpu level: {ver.get('cpu', '?')})",
         f"engine version : {ver.get('engine', '?')}",
         f"whisper.cpp    : {ver.get('whisper')}  commit {ver.get('commit')}  (https://github.com/ggml-org/whisper.cpp)",
         f"source         : https://github.com/{REPO} (engine/stt), commit {commit_text}",
         f"made           : {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
-        "built with     : engine/stt/build.bat (CMake + Visual Studio, static libraries, no DLLs)",
+        "built with     : engine/stt/build.sh (CMake + Xcode command line tools, Apple silicon, macOS 13 or later, Metal and CPU in one file)" if kind == "metal"
+        else "built with     : engine/stt/build.bat (CMake + Visual Studio, static libraries, no DLLs)",
         "licenses       : MIT (this project: LICENSE-ChatMatrixReader.txt; whisper.cpp / ggml: LICENSE-whisper.cpp.txt)",
         "models         : not part of this download (the program gets them from https://huggingface.co/ggerganov/whisper.cpp)",
         "",
-        f"SHA-256 of cmr-stt.exe: {exe_sha}",
+        f"SHA-256 of {EXE_OF[kind]}: {exe_sha}",
         "",
         "SHA-256 of every file of this engine (as the program stores them in extensions/stt/engine-" + kind + "/):",
     ]
     for dest, sha in files:
         lines.append(f"  {sha}  {dest}")
-    lines += ["", "To check a file by hand (Windows):  certutil -hashfile cmr-stt.exe SHA256", ""]
+    lines += ["", "To check a file by hand (macOS):  shasum -a 256 cmr-stt" if kind == "metal" else "To check a file by hand (Windows):  certutil -hashfile cmr-stt.exe SHA256", ""]
     return "\n".join(lines)
 
 
@@ -192,9 +207,9 @@ def main(argv):
                  "(An engine must be built from a committed state, so that BUILD-INFO tells which source it is made of. --allow-dirty goes on anyway.)")
     dist = os.path.join(HERE, "engine", "stt", "dist")
     out_dir = os.path.join(HERE, "release-out", tag)
-    kinds = [k for k in KINDS if os.path.isfile(os.path.join(dist, f"engine-{k}", "cmr-stt.exe"))]
+    kinds = [k for k in KINDS if os.path.isfile(os.path.join(dist, f"engine-{k}", EXE_OF[k]))]
     if not kinds:
-        sys.exit(f"no engine found in {dist} (build it first: engine\\stt\\build.bat, build.bat vulkan)")
+        sys.exit(f"no engine found in {dist} (build it first: engine\\stt\\build.bat, build.bat vulkan; the Mac one: build.sh, then copy dist/engine-metal here)")
     assets, per_kind, shared = [], {}, {}
     if not dry:
         os.makedirs(out_dir, exist_ok=True)
@@ -209,16 +224,16 @@ def main(argv):
             if asset in shared and shared[asset][0] != sha:
                 raise SystemExit(f"{asset} differs between the engine folders: build all engines from the same state of the project")
             shared[asset] = (sha, os.path.join(folder, n))
-        exe_asset, info_asset = f"cmr-stt-{kind}-windows-x64.exe", f"BUILD-INFO-engine-{kind}.txt"
-        files = [("cmr-stt.exe", exe_sha), ("LICENSE-whisper.cpp.txt", shared["LICENSE-whisper.cpp.txt"][0]), ("LICENSE.txt", shared["LICENSE-ChatMatrixReader.txt"][0])]
+        exe_asset, info_asset = ASSET_OF[kind], f"BUILD-INFO-engine-{kind}.txt"
+        files = [(EXE_OF[kind], exe_sha), ("LICENSE-whisper.cpp.txt", shared["LICENSE-whisper.cpp.txt"][0]), ("LICENSE.txt", shared["LICENSE-ChatMatrixReader.txt"][0])]
         info = build_info(tag, kind, ver, exe_sha, files, commit_text)
         info_sha = hashlib.sha256(info.encode("utf-8")).hexdigest()
-        per_kind[kind] = [("cmr-stt.exe", exe_asset, exe_sha), ("LICENSE-whisper.cpp.txt", "LICENSE-whisper.cpp.txt", files[1][1]),
+        per_kind[kind] = [(EXE_OF[kind], exe_asset, exe_sha), ("LICENSE-whisper.cpp.txt", "LICENSE-whisper.cpp.txt", files[1][1]),
                           ("LICENSE.txt", "LICENSE-ChatMatrixReader.txt", files[2][1]), ("BUILD-INFO.txt", info_asset, info_sha)]
         assets += [(exe_asset, exe_sha), (info_asset, info_sha)]
-        print(f"engine-{kind}: whisper.cpp {ver['whisper']}, cmr-stt.exe {exe_sha[:16]}...")
+        print(f"engine-{kind}: whisper.cpp {ver['whisper']}, {EXE_OF[kind]} {exe_sha[:16]}...")
         if not dry:
-            shutil.copyfile(os.path.join(folder, "cmr-stt.exe"), os.path.join(out_dir, exe_asset))
+            shutil.copyfile(os.path.join(folder, EXE_OF[kind]), os.path.join(out_dir, exe_asset))
             open(os.path.join(out_dir, info_asset), "w", encoding="utf-8", newline="\n").write(info)
     for asset, (sha, src) in shared.items():
         assets.append((asset, sha))

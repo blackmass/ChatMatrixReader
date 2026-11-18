@@ -2,34 +2,20 @@
 // something a web page or a config value can change; the only way in is the file extensions/stt/catalog.json that a person puts there by hand
 // (for trying other builds / mirrors; format at the bottom).
 //
-//   engine = one or more files in extensions/stt/engine-<kind>/ ; the one that is started is ENGINE_EXE
+//   engine = one or more files in extensions/stt/engine-<kind>/ ; the one that is started is exeName(kind)  (cmr-stt.exe; the Mac engine 'metal': cmr-stt)
 //   model  = one file extensions/stt/models/ggml-<name>.bin
 //
 // sha256: '' = not checked (the size the server announces is still checked). The engine addresses stay empty until the engine builds are
 // published (GitHub Actions of this repository); an engine without address says so instead of downloading.
 export const FOLDER = 'extensions/stt';
-export const ENGINE_EXE = 'cmr-stt.exe';
+export const exeName = kind => (kind === 'metal' ? 'cmr-stt' : 'cmr-stt.exe');
 export const CATALOG_FILE = FOLDER + '/catalog.json';
 
 const MODEL_URL = n => `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${n}.bin`;
 // mb = about how big (shown before the download; the real size comes from the server)
 export const BUILTIN = {
   // <engine-files> written by tools/engine_release.py when an engine is released (empty until then: the engine buttons say it is not up yet)
-  engines: {
-    cpu: { files: [
-      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/cmr-stt-cpu-windows-x64.exe', sha256: 'fd34757368f42f59d1c2e0e04510cbee1dc03ad6defd9aaf8cc15353f1b8b306' },
-      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/LICENSE-whisper.cpp.txt', sha256: 'bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285' },
-      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
-      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/BUILD-INFO-engine-cpu.txt', sha256: 'e9a9ddbcba600593ddef2cdbe117a1eadad8ea99ae6ed8bf001ea539100d436c' },
-    ] },
-    vulkan: { files: [
-      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/cmr-stt-vulkan-windows-x64.exe', sha256: 'af4f281941be815c09fd4baef1e40e35e43f0e098d04b59a84c54022d6babb52' },
-      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/LICENSE-whisper.cpp.txt', sha256: 'bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285' },
-      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
-      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/BUILD-INFO-engine-vulkan.txt', sha256: 'a8d82e7c6ba99b4c242b4dbe43eb0b846a760645d3f3fcf966175104f6bff365' },
-    ] },
-    cuda: { files: [] },
-  },
+  engines: { cpu: { files: [] }, vulkan: { files: [] }, cuda: { files: [] }, metal: { files: [] } },
   // </engine-files>
   models: {
     tiny: { url: MODEL_URL('tiny'), sha256: 'be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21', mb: 75 },
@@ -42,7 +28,7 @@ export const BUILTIN = {
 };
 
 export const engineDir = kind => `${FOLDER}/engine-${kind}`;
-export const exePath = kind => `${engineDir(kind)}/${ENGINE_EXE}`;
+export const exePath = kind => `${engineDir(kind)}/${exeName(kind)}`;
 export const modelPath = name => `${FOLDER}/models/ggml-${name}.bin`;
 
 const okUrl = u => typeof u === 'string' && /^https?:\/\/[^\s]+$/.test(u);

@@ -8,7 +8,7 @@ import { explain } from './voice_install.js';
 import { tr } from './core/i18n.js';
 import { stateWhy } from './core/voice_text.js';
 import { voiceWidgetState, VOICE_ID } from './widgets/core_voice.js';
-import { isMac } from './platform.js';
+import { isMac, voiceSupported, OS_VERSION } from './platform.js';
 
 const { emit, listen } = window.__TAURI__.event;
 
@@ -43,10 +43,10 @@ export function startVoice({ settings, files, publish, pipeline, backend = null,
   const onMessage = m => { const expected = m.type === 'exit' && (control.state.state === 'stopping' || control.state.state === 'off'); control.message(m); publish(pipeline.onVoice(expected ? { ...m, expected } : m)); };
   if (backend) backend.onMessage = onMessage;
 
-  // macOS: the voice recognition is planned there, not made yet: it is never started (the options show a note instead of the settings)
-  if (isMac) {
+  // macOS before 13 has no sound capture we can use: the voice recognition is never started there (the options show a note instead of the settings)
+  if (isMac && !voiceSupported) {
     control.set({ unsupported: 'mac' });
-    log.info('음성 인식: macOS에서는 아직 지원하지 않습니다 (지원 예정)');
+    log.info(`음성 인식: macOS ${OS_VERSION}에서는 지원하지 않습니다 (macOS 13 이상 필요)`);
     listen('voice-hello', () => emit('voice-state', control.state));
     listen('voice-lamp-hello', () => emit('voice-lamp', lampOf(control.state)));
     return { control, onMessage: () => {} };

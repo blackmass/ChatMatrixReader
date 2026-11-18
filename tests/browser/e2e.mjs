@@ -30,6 +30,7 @@ const requests = [], calls = [], clip = [];
 let popupOn = false, popupPage = null, popupHides = 0, popupCloses = 0;
 const popupPlaced = [];
 let popupOn_ = false;                                       // the fake exe has a popup window (a test turns it on)
+let osVersion = '14.5';                                    // what the command os_version answers (macOS only)
 let osKind = 'windows';                                   // what the command os_kind answers (a test can switch it to 'macos' before it opens a page)
 const kb = { shift: false, enter: false, fg: 77 };       // the keyboard and the window in front (77 = the game, 99 = this program)
 // the fake screen: flat, until `matrixOn`, then a v1 matrix at 200,100 (the game window is the left top 1280x720 of it)
@@ -77,6 +78,7 @@ async function invoke(cmd, a = {}) {
     case 'raise_top': raised.push(1); return null;
     case 'set_topmost': topCalls.push(a.on); return null;
     case 'os_kind': return osKind;
+    case 'os_version': return osVersion;
     case 'popup_open': if (!popupOn) throw new Error('no popup window in this test'); if (!popupPage) popupPage = await open('popup.html?label=popup', { width: 300, height: 300 }); return null;
     case 'popup_place': popupPlaced.push(a); return null;
     case 'popup_hide': popupHides++; return null;
@@ -1224,16 +1226,25 @@ await control.waitForTimeout(7000);
 ok(calls.includes('quit_app'), 'exit with game: quits some seconds after the game was gone');
 
 ok(errors.length === 0, 'page errors: ' + errors.join(' | '));
-// ---- macOS: the voice recognition is "planned" there: the options show one note instead of the settings, and the hub never starts it
+// ---- macOS: the voice recognition needs macOS 13: before it the options show one note instead of the settings and the hub never starts it; from 13 on it is like Windows
 {
-  osKind = 'macos';
+  osKind = 'macos'; osVersion = '12.7';
   const hubMac = await open('control.html?label=control', { width: 700, height: 900 });
   await hubMac.waitForFunction(() => window.cmrHub && window.cmrHub.voice);
   const optMac = await open('options.html?label=options', { width: 940, height: 680 });
   await optMac.locator('#tabs li', { hasText: '음성인식' }).click();
   await optMac.waitForTimeout(300);
-  ok((await optMac.locator('#body').textContent()).includes('지원 예정') && await optMac.locator('.row b.label:text-is("소리 대상")').count() === 0, 'macOS: the voice tab says "planned" and has no settings');
-  ok(await hubMac.evaluate(() => window.cmrHub.voice.control.state.unsupported === 'mac' && window.cmrHub.voice.control.state.state === 'off'), 'macOS: the voice recognition stays off (unsupported)');
+  ok((await optMac.locator('#body').textContent()).includes('macOS 13 이상') && await optMac.locator('.row b.label:text-is("소리 대상")').count() === 0, 'macOS 12: the voice tab says 13 is needed and has no settings');
+  ok(await hubMac.evaluate(() => window.cmrHub.voice.control.state.unsupported === 'mac' && window.cmrHub.voice.control.state.state === 'off'), 'macOS 12: the voice recognition stays off (unsupported)');
+  osVersion = '14.5';
+  const hubNew = await open('control.html?label=control', { width: 700, height: 900 });
+  await hubNew.waitForFunction(() => window.cmrHub && window.cmrHub.voice);
+  const optNew = await open('options.html?label=options', { width: 940, height: 680 });
+  await optNew.locator('#tabs li', { hasText: '음성인식' }).click();
+  await optNew.waitForTimeout(300);
+  ok(await optNew.locator('.row b.label:text-is("소리 대상")').count() === 1, 'macOS 14: the voice tab has its settings');
+  ok(await optNew.locator('button:text-is("설치 (Metal · GPU 와 CPU)")').count() === 1 && await optNew.locator('button:text-is("설치 (CPU)")').count() === 0, 'macOS 14: one install button (Metal), not the Windows ones');
+  ok(await hubNew.evaluate(() => window.cmrHub.voice.control.state.unsupported === undefined), 'macOS 14: the voice recognition is not marked unsupported');
   osKind = 'windows';
 }
 clearTimeout(watchdog);

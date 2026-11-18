@@ -6,6 +6,7 @@ import { BUILTIN } from '../core/voice_catalog.js';
 import { captureText } from '../core/voice_target.js';
 import { ratioText } from '../core/voice_bench.js';
 import { RELEASES_URL } from '../core/version.js';
+import { isMac } from '../platform.js';
 
 const { emit, listen } = window.__TAURI__.event;
 const invoke = window.__TAURI__.core.invoke;
@@ -22,7 +23,7 @@ const follow = (node, draw) => { const f = () => { if (!node.isConnected && node
 const levelSubs = new Set();
 listen('voice-level', ev => levelSubs.forEach(f => f(ev.payload || {})));
 
-const ENGINE_NAME = { cpu: 'CPU', vulkan: 'Vulkan', cuda: 'CUDA' };
+const ENGINE_NAME = { cpu: 'CPU', vulkan: 'Vulkan', cuda: 'CUDA', metal: 'Metal' };
 const DEVICE_NAME = { cpu: 'CPU', gpu: 'GPU' };
 
 export const why = stateWhy;
@@ -130,9 +131,14 @@ export function installRow() {
     btns.replaceChildren();
     const busy = !!(state && state.busy);
     const add = (label, what) => { const b = button(label, what); b.disabled = busy; btns.append(b); };
+    if (isMac) {
+      // (one program for the Mac: the GPU (Metal) and the CPU are both in it)
+      if (!inst.engines.includes('metal')) add(tr('설치 (Metal · GPU 와 CPU)'), 'metal');
+    } else {
     if (!inst.engines.includes('cpu')) add(tr('설치 (CPU)'), 'cpu');
     if (!inst.engines.includes('vulkan')) add(tr('Vulkan 추가 (GPU)'), 'vulkan');
     if (!inst.engines.includes('cuda')) { const b = el('button', 'btn small', tr('CUDA 추가 (NVIDIA) · 예정')); b.disabled = true; b.title = tr('아직 만들지 않았습니다. Vulkan이 NVIDIA 그래픽카드에서도 동작합니다.'); btns.append(b); }
+    }
     const want = state && state.wantModel;
     if (have && want && !inst.models.includes(want)) add(tr('모델 받기 ({model})', { model: want }), 'model');
     if (busy) { const c = el('button', 'btn small', tr('취소')); c.onclick = () => emit('voice-cancel', {}); btns.append(c); }
@@ -181,7 +187,7 @@ export function modelsRow() {
   cancelBtn.onclick = () => emit('voice-bench-cancel', {});
   clearBtn.onclick = () => emit('voice-perf-clear', {});
   emit('voice-bench-files', {});
-  const device = s => (s.device === 'gpu' ? 'gpu' : s.device === 'cpu' ? 'cpu' : (s.installed.engines.includes('cuda') || s.installed.engines.includes('vulkan') ? 'gpu' : 'cpu'));
+  const device = s => (s.device === 'gpu' ? 'gpu' : s.device === 'cpu' ? 'cpu' : (s.installed.engines.includes('cuda') || s.installed.engines.includes('vulkan') || s.installed.engines.includes('metal') ? 'gpu' : 'cpu'));
   const syncRun = () => {        // the test button: something ticked that is on the disk, a file, nothing else running
     const s = state || {}, inst = s.installed || { models: [] };
     runBtn.disabled = !!s.busy || !!s.benchTask || s.state === 'on' || s.state === 'starting' || !(s.benchFiles || []).length || ![...picked].some(n => inst.models.includes(n));

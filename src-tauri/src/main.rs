@@ -641,6 +641,18 @@ fn os_kind() -> &'static str {
     if cfg!(target_os = "macos") { "macos" } else if cfg!(windows) { "windows" } else { "other" }
 }
 
+/// The version of macOS ("14.5"), "" elsewhere. (The voice recognition needs 13 or later.)
+#[tauri::command]
+fn os_version() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(o) = std::process::Command::new("sw_vers").arg("-productVersion").output() {
+            return String::from_utf8_lossy(&o.stdout).trim().to_string();
+        }
+    }
+    String::new()
+}
+
 /// Waits `ms` milliseconds and answers. The wait is done here, not by a timer of the page: macOS slows the timers of a page that is not in front
 /// (the screen reading waits between two looks).
 #[tauri::command]
@@ -884,6 +896,7 @@ fn main() {
             capture_start,
             capture_stop,
             os_kind,
+            os_version,
             sleep_ms,
             os_state,
             screen_rect,

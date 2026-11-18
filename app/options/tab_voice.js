@@ -3,14 +3,15 @@
 import { statusRow, installRow, modelsRow, statsRow, appPickerRow, sourcesRow } from './voice_rows.js';
 import { MODELS, TARGETS, LANGS, deviceOf } from '../core/voice.js';
 import { METHODS } from '../core/voice_target.js';
-import { isMac } from '../platform.js';
+import { voiceSupported, OS_VERSION } from '../platform.js';
+import { tr } from '../core/i18n.js';
 
 const whisper = cfg => (cfg.voice_engine || 'whisper') !== 'openai';
 const address = v => (v === '' || /^https?:\/\//i.test(v) ? '' : '주소는 http:// 또는 https:// 로 시작해야 합니다 (예: http://localhost:8000/v1)');
 
-// macOS: the voice recognition is not made there yet (planned): one note instead of the settings
+// macOS before 13: no sound capture to use there: one note instead of the settings (the rest of the program works)
 const NOT_ON_MAC = [{ title: '음성인식', rows: [
-  { type: 'info', label: 'Mac', keywords: 'mac macos 맥 지원 예정', text: () => 'Mac에서는 음성인식을 아직 지원하지 않습니다 (지원 예정). Windows에서만 쓸 수 있습니다.' },
+  { type: 'info', label: 'Mac', keywords: 'mac macos 맥 버전 13', text: () => tr(OS_VERSION ? '음성인식은 macOS 13 이상에서만 쓸 수 있습니다. 나머지 기능은 그대로 쓸 수 있습니다. (지금 macOS {v})' : '음성인식은 macOS 13 이상에서만 쓸 수 있습니다. 나머지 기능은 그대로 쓸 수 있습니다.', { v: OS_VERSION }) },
 ] }];
 
 const CARDS = [
@@ -47,7 +48,7 @@ const CARDS = [
       { key: 'voice_device', type: 'select', when: 'restart', label: '계산 장치', keywords: 'cpu gpu cuda vulkan 그래픽카드 장치 device',
         options: [['auto', '자동 (GPU가 있으면 GPU)'], ['cpu', 'CPU'], ['gpu', 'GPU']],
         get: cfg => deviceOf(cfg), patch: (cfg, v) => ({ voice_device: v }),
-        note: '대부분의 환경에서는 Vulkan(GPU) 엔진과 large-v3-turbo 모델을 권장합니다. GPU는 Vulkan 엔진을 설치했을 때만 쓸 수 있습니다 (NVIDIA 그래픽카드에서도 Vulkan으로 동작합니다. CUDA 엔진은 예정입니다). CPU만 쓸 때는 large-v3-turbo가 말하는 속도를 따라가지 못할 수 있어서, small이나 base처럼 더 작은 모델을 쓰세요 (아래 "모델 목록과 속도"에서 직접 재 볼 수 있습니다).' },
+        note: '대부분의 환경에서는 Vulkan(GPU) 엔진과 large-v3-turbo 모델을 권장합니다. GPU는 Vulkan 엔진을 설치했을 때만 쓸 수 있습니다 (NVIDIA 그래픽카드에서도 Vulkan으로 동작합니다. CUDA 엔진은 예정입니다). CPU만 쓸 때는 large-v3-turbo가 말하는 속도를 따라가지 못할 수 있어서, small이나 base처럼 더 작은 모델을 쓰세요 (아래 "모델 목록과 속도"에서 직접 재 볼 수 있습니다). Mac에서는 Metal 엔진 하나에 GPU와 CPU가 모두 들어 있어서, 여기서 고르는 대로 계산합니다.' },
       { key: 'voice_model', type: 'combo', when: 'restart', label: '모델', blank: '기본 (large-v3-turbo)', list: MODELS, placeholder: '모델 이름', keywords: '모델 model large turbo small base tiny',
         note: '큰 모델일수록 정확하지만 느리고 메모리를 많이 씁니다. 얼마나 느린지는 PC마다 달라서, 아래 "모델 목록과 속도"에서 모델을 받아 직접 재 보고 고르세요. 작은 모델은 빠른 대신 작은 소리, 잡음, 게임 용어와 이름에서 틀리기 쉽습니다.' },
       { type: 'custom', block: true, label: '모델 목록과 속도', keywords: '모델 속도 시험 벤치 benchmark 배율 삭제 받기 비교 느림 빠름', build: modelsRow,
@@ -73,9 +74,9 @@ const CARDS = [
     ] },
 ];
 
-export const voiceCards = mac => (mac ? NOT_ON_MAC : CARDS);
+export const voiceCards = supported => (supported ? CARDS : NOT_ON_MAC);
 
 export default {
   id: 'voice', title: '음성인식', subtitle: '음성 대화를 글로 바꿔 음성인식 채널에 표시',
-  cards: voiceCards(isMac),
+  cards: voiceCards(voiceSupported),
 };

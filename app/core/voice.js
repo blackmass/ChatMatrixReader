@@ -4,7 +4,7 @@
 //
 //   state.state: 'off' | 'starting' | 'on' | 'stopping' | 'error'
 //   state.code:  why it is in 'error': 'not_installed' | 'no_model' | 'no_url' | 'no_backend' | 'failed' (state.msg has the text of the engine)
-//   state.installed: { engines: ['cpu', 'vulkan', 'cuda'], models: ['base', 'large-v3-turbo'] }
+//   state.installed: { engines: ['cpu', 'vulkan', 'cuda', 'metal'], models: ['base', 'large-v3-turbo'] }
 //   state.device: what the engine computes on now ('cpu' | 'gpu' | ''), state.stats: { cpu, ram, gpu, vram } | null (told by the engine)
 //   state.perf: the speed table of every model measured so far (core/voice_bench.js table()), state.advice: 'slow' when the running model falls behind
 //   state.capture: how the sound is received now (the `capture-state` event of the exe; core/voice_target.js captureText), state.warn: the last warning text ('' = none)
@@ -15,13 +15,13 @@
 //   named in `pending` until restart() is asked.
 //   state.benchTask: what the speed test is doing now ('' = not running)
 //
-//   backend = { start(cfg, plan) -> Promise, stop() -> Promise }        plan = { engine: 'cpu' | 'vulkan' | 'cuda' | 'server', model }
+//   backend = { start(cfg, plan) -> Promise, stop() -> Promise }        plan = { engine: 'cpu' | 'vulkan' | 'cuda' | 'metal' | 'server', model, device? }   (device: only 'metal', one program for both: 'cpu' | 'gpu')
 import * as bench from './voice_bench.js';
 import { tr } from './i18n.js';
 import { captureOptions } from './voice_target.js';
 import { liveOf } from './voice_proto.js';
 export const FOLDER = 'extensions/stt';
-export const ENGINES = ['cpu', 'vulkan', 'cuda'];
+export const ENGINES = ['cpu', 'vulkan', 'cuda', 'metal'];
 export const DEFAULT_MODEL = 'large-v3-turbo';   // the same on every engine (as in 2.x); the options say to take a smaller one when the CPU is too slow
 // whose sound is recognised (2.0's voice_target): the presets and 'app' = a program picked from the list (voice_app = its file name)
 // discord = the voice chat of Discord only, discord-all = everything Discord plays. (Discord's program and the session of its voice chat are not the
@@ -55,14 +55,15 @@ export async function scan(files) {
 // Which engine and model a start would use; { error: code } when it cannot start.
 export function plan(cfg, installed) {
   if ((cfg.voice_engine || 'whisper') === 'openai') return (cfg.voice_oa_url || '').trim() ? { engine: 'server', model: (cfg.voice_oa_model || '').trim() } : { error: 'no_url' };
-  const have = installed.engines, gpu = have.includes('cuda') ? 'cuda' : have.includes('vulkan') ? 'vulkan' : null;
+  const have = installed.engines, gpu = have.includes('cuda') ? 'cuda' : have.includes('vulkan') ? 'vulkan' : have.includes('metal') ? 'metal' : null;
   if (!have.length) return { error: 'not_installed' };
   const want = deviceOf(cfg);
-  const engine = want === 'cpu' ? (have.includes('cpu') ? 'cpu' : null) : want === 'gpu' ? gpu : (gpu || 'cpu');
+  // (metal = the Mac engine: the CPU and the GPU are in the same program, the option only says which one it is told to use)
+  const engine = want === 'cpu' ? (have.includes('cpu') ? 'cpu' : have.includes('metal') ? 'metal' : null) : want === 'gpu' ? gpu : (gpu || 'cpu');
   if (!engine) return { error: 'not_installed', want };
   const model = modelOf(cfg, engine);
   if (!installed.models.includes(model)) return { error: 'no_model', model, engine };
-  return { engine, model };
+  return engine === 'metal' ? { engine, model, device: want === 'cpu' ? 'cpu' : 'gpu' } : { engine, model };
 }
 
 const captureKey = cfg => JSON.stringify(captureOptions(cfg).options || null);       // (what the sound capture is told: the target, the method, the timers)
@@ -112,7 +113,7 @@ export class VoiceControl {
     try { await this.backend.start(cfg, p); } catch (e) { this.applied = null; this.set({ state: 'error', code: 'failed', msg: String(e?.message || e).slice(0, 200) }); }
   }
   // what the running engine and capture were given: the sound capture options, the live settings, the model and the compute device
-  snapshot(cfg, p) { return { capture: captureKey(cfg), live: JSON.stringify(liveOf(cfg)), engine: p.engine, model: p.model }; }
+  snapshot(cfg, p) { return { capture: captureKey(cfg), live: JSON.stringify(liveOf(cfg)), engine: p.engine, device: p.device || '', model: p.model }; }
 
   // ---- the options changed while it runs
   cfgChanged() {
@@ -125,7 +126,7 @@ export class VoiceControl {
   // what only a restart applies: another model, another compute device, another method (Whisper / server)
   updatePending(cfg) {
     const p = plan(cfg, this.state.installed), now = [];
-    if (p.engine) { if ((p.engine === 'server') !== (this.applied.engine === 'server')) now.push('engine'); else if (p.engine !== this.applied.engine) now.push('device'); }
+    if (p.engine) { if ((p.engine === 'server') !== (this.applied.engine === 'server')) now.push('engine'); else if (p.engine !== this.applied.engine || (p.device || '') !== this.applied.device) now.push('device'); }
     else if (p.error === 'no_url') now.push('engine');
     else if (p.want && p.want !== 'cpu' && this.applied.engine === 'cpu') now.push('device');          // (a GPU is wanted but no GPU engine is installed: a restart says so)
     if (p.model !== undefined && p.model !== this.applied.model && p.engine !== 'server') now.push('model');

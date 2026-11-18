@@ -1,4 +1,4 @@
-// The talk between this program and the engine program (extensions/stt/engine-<kind>/cmr-stt.exe).
+// The talk between this program and the engine program (extensions/stt/engine-<kind>/cmr-stt.exe; the Mac engine: engine-metal/cmr-stt).
 //   program -> engine:  command line (engineArgs), then on its standard input (`--framed`: frames, engine/stt/src/protocol.h) the sound: 16 kHz mono,
 //                       `--pcm s16` = 16 bit / `f32` = float, little endian, a continuous stream (the exe fills pauses with silence), and control messages
 //                       (liveOf: language, hint ... while it runs)
@@ -13,10 +13,13 @@ import { PCM } from './voice_target.js';
 
 const clamp = (v, lo, hi, d) => { v = Number(v); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : d; };
 
+// the device the engine is told to compute on: the Mac engine (metal) is one program for both and the plan says which; the others are named after it
+export const deviceArg = plan => plan.device || (plan.engine === 'cpu' ? 'cpu' : 'gpu');
+
 // Arguments are relative to the engine's own folder (it is started there): ../models/ggml-<name>.bin
 export function engineArgs(cfg, plan) {
   const rel = modelPath(plan.model).replace('extensions/stt/', '../');
-  const args = ['--model', rel, '--device', plan.engine === 'cpu' ? 'cpu' : 'gpu',
+  const args = ['--model', rel, '--device', deviceArg(plan),
     '--lang', (cfg.voice_lang || 'auto'), '--end-ms', String(clamp(cfg.voice_end_ms, 200, 5000, 700)), '--max-s', String(clamp(cfg.voice_max_s, 3, 30, 12)),
     '--min-db', String(clamp(cfg.voice_min_db, -60, -25, -44)), '--mode', cfg.voice_mode === 'live' ? 'live' : 'sentence', '--pcm', PCM, '--rate', '16000', '--framed'];
   if (cfg.voice_mode === 'live') args.push('--partial-ms', String(clamp(cfg.voice_partial_ms, 300, 5000, 1000)));
@@ -45,7 +48,7 @@ export function controlFrame(obj) {
 // The speed test: one sound file through one model, then the engine ends (it prints {"type":"bench","dur":s,"ms":ms,"load_ms":ms,"text":"..."}).
 // `file` is relative to the engine's folder (../bench/<name>.wav).
 export function benchArgs(plan, file) {
-  return ['--bench', file, '--model', modelPath(plan.model).replace('extensions/stt/', '../'), '--device', plan.engine === 'cpu' ? 'cpu' : 'gpu'];
+  return ['--bench', file, '--model', modelPath(plan.model).replace('extensions/stt/', '../'), '--device', deviceArg(plan)];
 }
 
 // One line of the engine -> the message, or null when it is not one (the engine's own log lines are not).

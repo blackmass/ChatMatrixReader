@@ -16,7 +16,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from make_zip import display_version, version      # noqa: E402
 
 OK, NO, WARN = "[ OK ]", "[ -- ]", "[ !! ]"
+EXE = {"cpu": "cmr-stt.exe", "vulkan": "cmr-stt.exe", "metal": "cmr-stt"}      # (metal = the Mac engine, copied here from the Mac)
 NEED = ["cmr-stt.exe", "cmr-stt.exe.sha256", "LICENSE-whisper.cpp.txt", "LICENSE.txt", "version.json"]
+need = lambda k: [EXE[k], EXE[k] + ".sha256"] + NEED[2:]
 
 
 def git(*args):
@@ -99,7 +101,7 @@ def main():
     engine_ok = True
     engine_note = []
     dist = os.path.join(HERE, "engine", "stt", "dist")
-    kinds = [k for k in ("cpu", "vulkan") if os.path.isfile(os.path.join(dist, f"engine-{k}", "cmr-stt.exe"))]
+    kinds = [k for k in ("cpu", "vulkan", "metal") if os.path.isfile(os.path.join(dist, f"engine-{k}", EXE[k]))]
     if not kinds:
         line(NO, "엔진: engine\\stt\\dist에 빌드된 엔진이 없습니다 (engine build.bat).")
         engine_ok = False
@@ -107,13 +109,15 @@ def main():
     else:
         for k in kinds:
             folder = os.path.join(dist, f"engine-{k}")
-            missing = [n for n in NEED if not os.path.isfile(os.path.join(folder, n))]
+            missing = [n for n in need(k) if not os.path.isfile(os.path.join(folder, n))]
             if missing:
                 engine_ok = False
                 engine_note.append(f"{k}: 빠진 파일 {', '.join(missing)}")
         fixable = [k for k in kinds if any(not os.path.isfile(os.path.join(dist, f"engine-{k}", n)) for n in NEED[2:])]
         if "cpu" not in kinds or "vulkan" not in kinds:
             engine_note.append("종류가 하나뿐입니다 (CPU, Vulkan 둘 다 올리는 것이 원칙)")
+        if "metal" not in kinds:
+            engine_note.append("Mac 엔진(engine-metal)이 없습니다 (Mac에서 build.sh로 만든 폴더를 engine\\stt\\dist 에 복사. Mac 지원 릴리스에 필요)")
         if engine_note:
             line(WARN, "엔진: " + " / ".join(engine_note))
             if not engine_ok:
