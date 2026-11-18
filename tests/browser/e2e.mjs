@@ -26,6 +26,9 @@ const ok = (c, msg) => { if (!c) { failed++; console.log('  FAIL: ' + msg); } };
 
 // ---- the stand-in for the exe
 const files = new Map([['Glossary.sample.txt', 'LFM = 구인\n'], ['fonts/나눔 고딕.ttf', 'x'], ['locale/en-US.txt', fs.readFileSync(path.join(ROOT, 'locale', 'en-US.txt'), 'utf8')]]);
+// the version of the program (app/core/version.js) and the next patch version: the fake release list of GitHub is made from them, so the test does not change at every release
+const THIS_VERSION = /VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'app', 'core', 'version.js'), 'utf8'))[1];
+const NEXT_VERSION = THIS_VERSION.replace(/\d+$/, n => String(Number(n) + 1));
 const requests = [], calls = [], clip = [], modelAsks = [];
 let lastInputOpen = null;                            // the arguments of the last show_input
 let aiMode = 'ok';                                   // what the fake AI server answers to the model list: ok | down | 401 | bad
@@ -65,7 +68,7 @@ async function invoke(cmd, a = {}) {
     case 'app_folder': return 'C:\\fake\\ChatMatrixReader';
     case 'open_url': opened.push(a.url); return null;
     case 'http_request': {
-      if (new URL(a.url).hostname === 'api.github.com') return { status: 200, body: JSON.stringify([{ tag_name: 'v4.0.0' }, { tag_name: 'v3.0.1' }, { tag_name: 'v3.0.0', prerelease: true }]) };
+      if (new URL(a.url).hostname === 'api.github.com') return { status: 200, body: JSON.stringify([{ tag_name: 'v4.0.0' }, { tag_name: 'v' + NEXT_VERSION }, { tag_name: 'v' + THIS_VERSION, prerelease: true }]) };
       if (new URL(a.url).hostname === 'ai.test') {              // an AI server: its model list answers as the test asks (aiMode), the other paths are not asked here
         modelAsks.push(a);
         if (aiMode === 'down') throw new Error('connection refused');
@@ -984,9 +987,9 @@ await opt.locator('#tabs li', { hasText: '일반' }).click();
 // ---- the 정보 tab: version, the newest release (of this major version), the log
 await opt.locator('#tabs li', { hasText: '정보' }).click();
 await opt.waitForSelector('.aboutcard .latest');
-ok((await opt.locator('.aboutcard .cur').textContent()).startsWith('v3.0.0'), 'options/about: the version is shown');
+ok((await opt.locator('.aboutcard .cur').textContent()).startsWith('v' + THIS_VERSION), 'options/about: the version is shown');
 await control.waitForTimeout(3500);
-ok((await opt.locator('.aboutcard .latest').textContent()).includes('v3.0.1') && await opt.locator('.aboutcard .latest.newer').count() === 1, 'options/about: the newest release of this major version (not 4.0), marked as newer: ' + await opt.locator('.aboutcard .latest').textContent());
+ok((await opt.locator('.aboutcard .latest').textContent()).includes('v' + NEXT_VERSION) && await opt.locator('.aboutcard .latest.newer').count() === 1, 'options/about: the newest release of this major version (not 4.0), marked as newer: ' + await opt.locator('.aboutcard .latest').textContent());
 ok((await opt.locator('.aboutcard .dir').textContent()).includes('fake'), 'options/about: the program folder');
 await opt.click('.aboutcard button:has-text("릴리스 페이지")');
 await control.waitForTimeout(200);

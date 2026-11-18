@@ -26,12 +26,15 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>chatmatrix-reader</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>1</string>
-<key>CFBundleShortVersionString</key><string>3.0</string>
-<key>LSMinimumSystemVersion</key><string>11.0</string>
+<key>CFBundleShortVersionString</key><string>__VERSION__</string>
+<key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>
 PLIST
+# the version of the program (app/core/version.js) into the properties of the app, and the macOS the program needs (13: the sound capture of the voice recognition)
+VERSION=$(sed -n "s/^export const VERSION = '\([^']*\)'.*/\1/p" app/core/version.js)
+sed -i '' "s/__VERSION__/${VERSION:-3}/" "$APP/Contents/Info.plist"
 
 # The signature. With the certificate "ChatMatrixReader Mac" of your own keychain (made once, see docs/MAC_BUILD.md) the identity of the app stays the same
 # when it is built again, so the permissions given to it (screen recording ...) stay too. Without it an "ad hoc" signature is used: it changes with every
