@@ -5,8 +5,8 @@
 //!
 //! How: one SCStream with audio on and a tiny picture (2 x 2 pixels, one a second: ScreenCaptureKit wants a picture to go with the sound, and nothing
 //! reads it). "The program alone" = a content filter that includes only the applications whose name (or bundle id) matches; "the whole Mac" = every
-//! application (this program's own sound is left out). ScreenCaptureKit gives the sound already as 16 kHz mono when asked for it (the resampler
-//! of capturelib is only used when it answers with another rate).
+//! application (this program's own sound is left out). ScreenCaptureKit is asked for its own default format (48 kHz, two channels, like OBS) and the sound is changed to 16 kHz mono here
+//! (asking the system for 16 kHz mono gave no voice chat of Discord).
 //! The permission is the one the screen reading already needs: Screen Recording (System Settings -> Privacy & Security). Without it the capture
 //! says so in `reason` and tries again every second.
 //!
@@ -23,7 +23,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use block2::RcBlock;
-use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, AnyThread, DefinedClass};
@@ -98,6 +97,10 @@ struct Shared {
     stop: AtomicBool,
     audible: AtomicBool,           // something other than silence arrived since the writer looked
     level: AtomicU32,              // f32 bits: the loudest sample of the last piece
+    pieces: AtomicU64,             // how many pieces of sound ScreenCaptureKit has delivered (for the line the options show: is anything arriving?)
+    screens: AtomicU64,            // how many pictures (they are thrown away; it shows that the stream itself is alive)
+    rate: AtomicU32,               // the rate of the last piece, as ScreenCaptureKit gave it
+    nbuf: AtomicU32,               // how many buffers (channels, when planar) the last piece had
     info: Mutex<Info>,
 }
 
@@ -119,6 +122,7 @@ pub fn start(app: AppHandle, id: String, options: Value) -> Result<Value, String
     if !ext::is_running(&id) { return Err("the engine is not running".into()); }
     let gen = GEN.fetch_add(1, Ordering::Relaxed);
     let sh = Arc::new(Shared { gen, stop: AtomicBool::new(false), audible: AtomicBool::new(false), level: AtomicU32::new(0),
+        pieces: AtomicU64::new(0), screens: AtomicU64::new(0), rate: AtomicU32::new(0), nbuf: AtomicU32::new(0),
         info: Mutex::new(Info { mode: "none", status: "waiting".into(), ..Default::default() }) });
     {
         let mut m = caps().lock().map_err(|e| e.to_string())?;
@@ -201,9 +205,12 @@ define_class!(
     unsafe impl SCStreamOutput for AudioOutput {
         #[unsafe(method(stream:didOutputSampleBuffer:ofType:))]
         unsafe fn did_output(&self, _stream: &SCStream, sample: &CMSampleBuffer, kind: SCStreamOutputType) {
-            if kind != SCStreamOutputType::Audio { return; }
-            let Some((mut x, rate)) = pull(sample) else { return };
             let iv = self.ivars();
+            if kind != SCStreamOutputType::Audio { iv.level.screens.fetch_add(1, Ordering::Relaxed); return; }   // (the pictures are only counted)
+            let Some((mut x, rate, nbuf)) = pull(sample) else { return };
+            iv.level.pieces.fetch_add(1, Ordering::Relaxed);
+            iv.level.rate.store(rate.round() as u32, Ordering::Relaxed);
+            iv.level.nbuf.store(nbuf as u32, Ordering::Relaxed);
             if (rate - 16000.0).abs() > 1.0 {
                 if let Ok(mut r) = iv.resampler.lock() {
                     let want = rate.round() as u32;
@@ -235,7 +242,7 @@ impl AudioOutput {
 }
 
 /// the sound of one piece as mono float and its rate. ScreenCaptureKit answers with 32 bit float, one buffer per channel (we ask for one channel).
-unsafe fn pull(sample: &CMSampleBuffer) -> Option<(Vec<f32>, f64)> {
+unsafe fn pull(sample: &CMSampleBuffer) -> Option<(Vec<f32>, f64, usize)> {
     let mut need: usize = 0;
     // the first call only says how big the list is (it answers "too small" on purpose)
     let _ = sample.audio_buffer_list_with_retained_block_buffer(&mut need, std::ptr::null_mut(), 0, None, None, 0, std::ptr::null_mut());
@@ -270,11 +277,11 @@ unsafe fn pull(sample: &CMSampleBuffer) -> Option<(Vec<f32>, f64)> {
     if len == 0 { return None; }
     // one buffer per channel: the mean of them is the mono sound
     let k = chans.len() as f32;
-    Some(((0..len).map(|i| chans.iter().map(|c| c[i]).sum::<f32>() / k).collect(), rate))
+    Some(((0..len).map(|i| chans.iter().map(|c| c[i]).sum::<f32>() / k).collect(), rate, n))
 }
 
 /// a running stream (it lives on the worker thread only) with what keeps it going
-struct Running { stream: Retained<SCStream>, _out: Retained<AudioOutput>, _queue: dispatch2::DispatchRetained<DispatchQueue>, dead: Arc<Mutex<String>> }
+struct Running { stream: Retained<SCStream>, _out: Retained<AudioOutput>, dead: Arc<Mutex<String>> }
 
 impl Running {
     fn stop(self) {
@@ -294,18 +301,16 @@ fn open(content: &Content, apps: Option<&[Retained<SCRunningApplication>]>, sh: 
                 let arr = NSArray::from_retained_slice(list);
                 SCContentFilter::initWithDisplay_includingApplications_exceptingWindows(SCContentFilter::alloc(), display, &arr, &none_w)
             }
-            None => {
-                let none_a: Retained<NSArray<SCRunningApplication>> = NSArray::new();
-                SCContentFilter::initWithDisplay_excludingApplications_exceptingWindows(SCContentFilter::alloc(), display, &none_a, &none_w)
-            }
+            None => SCContentFilter::initWithDisplay_excludingWindows(SCContentFilter::alloc(), display, &none_w),
         }
     };
     let cfg = unsafe { SCStreamConfiguration::new() };
     unsafe {
         cfg.setCapturesAudio(true);
         cfg.setExcludesCurrentProcessAudio(true);
-        cfg.setSampleRate(16000);
-        cfg.setChannelCount(1);
+        // as OBS does it: the rate ScreenCaptureKit chooses itself (48 kHz) and two channels; the change to 16 kHz mono is made here, not by the system
+        cfg.setChannelCount(2);
+        cfg.setQueueDepth(8);
         cfg.setWidth(2);
         cfg.setHeight(2);
         cfg.setShowsCursor(false);
@@ -313,15 +318,17 @@ fn open(content: &Content, apps: Option<&[Retained<SCRunningApplication>]>, sh: 
     }
     let dead = Arc::new(Mutex::new(String::new()));
     let out = AudioOutput::new(Ivars { tx: Mutex::new(tx.clone()), resampler: Mutex::new(None), level: sh.clone(), dead: dead.clone() });
-    let queue = DispatchQueue::new("cmr.voice.audio", None);
-    let stream = unsafe { SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &cfg, Some(ProtocolObject::from_ref(&*out))) };
-    unsafe { stream.addStreamOutput_type_sampleHandlerQueue_error(ProtocolObject::from_ref(&*out), SCStreamOutputType::Audio, Some(&queue)) }
-        .map_err(|e| format!("addStreamOutput: {} (code {})", e.localizedDescription(), e.code()))?;
+        let stream = unsafe { SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &cfg, Some(ProtocolObject::from_ref(&*out))) };
+    // (a picture output as well, as OBS does: without one ScreenCaptureKit complains about every picture; they are dropped in did_output)
+    for kind in [SCStreamOutputType::Screen, SCStreamOutputType::Audio] {
+        unsafe { stream.addStreamOutput_type_sampleHandlerQueue_error(ProtocolObject::from_ref(&*out), kind, None) }
+            .map_err(|e| format!("addStreamOutput: {} (code {})", e.localizedDescription(), e.code()))?;
+    }
     let (stx, srx) = channel::<String>();
     let block = RcBlock::new(move |e: *mut NSError| { let _ = stx.send(if e.is_null() { String::new() } else { error_text(e) }); });
     unsafe { stream.startCaptureWithCompletionHandler(Some(&block)) };
     match srx.recv_timeout(Duration::from_secs(10)) {
-        Ok(s) if s.is_empty() => Ok(Running { stream, _out: out, _queue: queue, dead }),
+        Ok(s) if s.is_empty() => Ok(Running { stream, _out: out, dead }),
         Ok(s) => Err(s),
         Err(_) => Err("the capture did not start in 10 s".into()),
     }
@@ -455,7 +462,10 @@ fn writer_loop(app: AppHandle, id: String, sh: Arc<Shared>, o: Options, rx: Rece
         if now - last_state >= 0.25 {
             last_state = now;
             let i = sh.info.lock().map(|i| i.clone()).unwrap_or_default();
-            let _ = app.emit("capture-state", json!({ "id": id, "gen": sh.gen, "mode": i.mode, "device": i.device, "program": i.program, "pid": i.pid, "status": i.status, "reason": i.reason,
+            // what arrives from ScreenCaptureKit, for the line of the options: pieces of sound (rate, buffers), the loudest sample of the last one, pictures
+            let diag = format!("{} pieces, {} Hz x{}, last peak {:.4}, {} pictures", sh.pieces.load(Ordering::Relaxed), sh.rate.load(Ordering::Relaxed), sh.nbuf.load(Ordering::Relaxed),
+                load(&sh.level), sh.screens.load(Ordering::Relaxed));
+            let _ = app.emit("capture-state", json!({ "id": id, "gen": sh.gen, "mode": i.mode, "device": i.device, "program": i.program, "pid": i.pid, "status": i.status, "reason": i.reason, "diag": diag,
                 "gate": true, "level": (load(&sh.level) * 1000.0).round() / 1000.0, "peak": 0 }));
         }
     }

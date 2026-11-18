@@ -99,3 +99,4 @@ check(vc.state.capture === null && vc.state.warn === '', 'turned off: no capture
   const sys = captureText({ mode: 'system', device: 'ScreenCaptureKit', program: 'Discord', reason: 'x failed' }, tr);
   check(sys.includes('x failed'), 'a fallback to the whole system says why the program alone was not used');
 }
+check(captureText({ mode: 'system', device: 'ScreenCaptureKit', diag: '12 pieces, 48000 Hz x2, last peak 0.0100, 3 pictures' }, tr).endsWith('3 pictures') && !captureText({ mode: 'system', device: 'x' }, tr).includes('pieces'), 'the Mac line shows what arrives (pieces, rate, peak); Windows has none');

@@ -59,14 +59,15 @@ export function captureOptions(cfg, os = OS) {
 export function captureText(c, tr) {
   if (!c || c.mode === 'off') return '';
   const who = c.program ? ' · ' + c.program : '';
+  const diag = c.diag ? ' · ' + c.diag : '';           // (macOS: what arrives from ScreenCaptureKit)
   if (c.status === 'retry' || c.status === 'reconnecting') return tr('소리: 다시 연결하는 중입니다') + (c.reason ? ' (' + c.reason + ')' : '');
   switch (c.mode) {
-    case 'process': return tr('소리: 프로그램만 따로 받는 중') + who + (c.pid ? ' (pid ' + c.pid + ')' : '');
+    case 'process': return tr('소리: 프로그램만 따로 받는 중') + who + (c.pid ? ' (pid ' + c.pid + ')' : '') + diag;
     case 'device': {
       const refused = c.reason ? ' · ' + tr('프로그램만 따로 받기는 안 됨') + ': ' + c.reason : '';
       return tr('소리: 장치 전체를 받고 프로그램이 소리 낼 때만 통과') + who + ' · ' + c.device + refused;       // (open / closed is shown on the loudness bar)
     }
-    case 'system': return tr('소리: 시스템 전체') + ' · ' + c.device + (c.program && c.reason ? ' · ' + tr('프로그램만 따로 받기는 안 됨') + ': ' + c.reason : '');
+    case 'system': return tr('소리: 시스템 전체') + ' · ' + c.device + (c.program && c.reason ? ' · ' + tr('프로그램만 따로 받기는 안 됨') + ': ' + c.reason : '') + diag;
     default: return tr('소리: 프로그램이 소리를 낼 때까지 기다리는 중');
   }
 }
