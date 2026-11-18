@@ -4,6 +4,7 @@
 // A chosen menu item is told back: popup-pick { token, id }. Closing it: popup-gone, then the exe destroys the window.
 const { listen, emit } = window.__TAURI__.event;
 const invoke = window.__TAURI__.core.invoke;
+import { isMac } from './platform.js';
 const $ = id => document.getElementById(id);
 
 let cur = null;                              // what is shown: { kind, owner, token, within }
@@ -79,6 +80,15 @@ async function show(p) {
   if (p.kind === 'tip' && !p.anchor && every > 0) followLoop = setInterval(() => { invoke('popup_follow').catch(() => {}); }, Math.max(8, every));
 }
 
+// A Mac gives no mouse-over (and no :hover) to a window that is not the active one, and this one never is: the line of the menu under the cursor is marked from the
+// cursor reading of the loop below (x, y in CSS pixels of this page; null = the cursor is not over the window).
+function markHot(x, y) {
+  const el = x === null ? null : document.elementFromPoint(x, y);
+  const line = el && el.closest ? el.closest('#ctx div') : null;
+  for (const d of document.querySelectorAll('#ctx div.hot')) if (d !== line) d.classList.remove('hot');
+  if (line) line.classList.add('hot');
+}
+
 // while it is shown: a click anywhere else (any button) or Esc closes a menu; a tip goes when the pointer has left the window it belongs to
 async function check() {
   if (!cur) return;
@@ -89,6 +99,7 @@ async function check() {
   const down = !!(k[0] || k[1] || k[2]), esc = !!k[3];
   if (cur.kind === 'menu') {
     const inside = cx >= x && cx < x + w && cy >= y && cy < y + h;
+    if (isMac) markHot(inside ? (cx - x) / (window.devicePixelRatio || 1) : null, inside ? (cy - y) / (window.devicePixelRatio || 1) : null);
     const early = performance.now() - shownAt < graceMs;            // (the click that opened the menu, or a click right after it, is not "a click elsewhere")
     if (!early && down && !prevDown && !inside) { why(`a click outside: cursor ${cx},${cy} window ${x},${y} ${w}x${h}`); hide(); }
     else if (!early && esc && !prevEsc) { why('Esc'); hide(); }

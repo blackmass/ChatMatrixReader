@@ -1125,6 +1125,23 @@ await main.evaluate(() => { const l = document.getElementById('lines'); l.scroll
   ok(!!pop() && await pop().locator('#ctx').isVisible() && await main.evaluate(() => document.getElementById('ctx').hidden), 'popup: the menu is in the popup window, not in the page');
   const items = await pop().locator('#ctx div:not(.sep)').allTextContents();
   ok(items.length >= 5 && await pop().locator('#ctx div.sep').count() === 1 && (items[0] === '이 창의 옵션…' || items[0] === 'Options of this window…'), 'popup: the same items: ' + items.join('|'));
+  { // a Mac gives no mouse-over to a window that is not active: the line under the cursor is marked from the cursor reading (Windows: nothing marked, :hover does it)
+    const centre = () => pop().evaluate(() => { const r = document.querySelector('#ctx div:not(.sep)').getBoundingClientRect(); return [(r.left + r.right) / 2 * devicePixelRatio, (r.top + r.bottom) / 2 * devicePixelRatio]; });
+    const c0 = await centre(); kb.cx = Math.round(c0[0]); kb.cy = Math.round(c0[1]); await control.waitForTimeout(400);
+    ok(await pop().locator('#ctx div.hot').count() === 0, 'popup (Windows): the cursor reading marks nothing (the browser has :hover)');
+    await control.evaluate(() => window.__TAURI__.event.emit('popup-gone', {})); await control.waitForTimeout(200);
+    { const pg = popupPage; popupPage = null; await pg.close(); }
+    osKind = 'macos'; kb.cx = 900; kb.cy = 900;
+    await menuAt();
+    const c1 = await centre(); kb.cx = Math.round(c1[0]); kb.cy = Math.round(c1[1]); await control.waitForTimeout(500);
+    ok(await pop().locator('#ctx div.hot').count() === 1 && (await pop().locator('#ctx div.hot').textContent()) === items[0], 'popup (macOS): the line under the cursor is marked: ' + await pop().locator('#ctx div.hot').allTextContents());
+    kb.cx = 900; kb.cy = 900; await control.waitForTimeout(400);
+    ok(await pop().locator('#ctx div.hot').count() === 0, 'popup (macOS): the cursor left the menu: nothing marked');
+    await control.evaluate(() => window.__TAURI__.event.emit('popup-gone', {})); await control.waitForTimeout(200);
+    { const pg = popupPage; popupPage = null; await pg.close(); }
+    osKind = 'windows'; kb.cx = 0; kb.cy = 0;
+    await menuAt();
+  }
   const placed = popupPlaced.at(-1);
   ok(placed && placed.kind === 'menu' && Array.isArray(placed.at) && !placed.anchor && placed.w >= 150 && placed.h > 40, 'popup: the exe is told it is a menu (takes the mouse), where, and the size: ' + JSON.stringify(placed));
   const before = calls.filter(c => c === 'open_options').length;

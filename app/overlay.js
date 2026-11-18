@@ -10,6 +10,7 @@ import { MAIN } from './core/pipeline.js';
 import * as winconf from './core/winconf.js';
 import * as layout from './core/winlayout.js';
 import * as fonts from './fonts.js';
+import { isMac } from './platform.js';
 import { T, every } from './core/timings.js';
 import { WidgetLayer } from './widgets/render.js';
 import { defaultRegistry } from './widgets/defaults.js';
@@ -304,7 +305,10 @@ async function tick() {
     }
     // click-through: the page gets no mouse events, so the tip of a link (item, quest ...) under the cursor is shown from the cursor position the loop has (the option
     // "관통 중 링크 보기 허용"); not while the window is cleared by the mouse (hover_clear) and not at all when the window is usable (its own mouse events do it)
-    if (!now && inside && cfg.through_tips !== false && !hovering) view.tipAtPoint((cx - x) / (window.devicePixelRatio || 1), (cy - y) / (window.devicePixelRatio || 1));
+    // A Mac gives no mouse-over events to a window that is not the active one (and these windows never are: they must not take the game's keyboard), so there the same
+    // cursor reading shows the tips of a usable window too (the mouse events would do it on Windows).
+    const tipsFromCursor = !now ? cfg.through_tips !== false : isMac;
+    if (inside && tipsFromCursor && !hovering) view.tipAtPoint((cx - x) / (window.devicePixelRatio || 1), (cy - y) / (window.devicePixelRatio || 1));
     else view.hideTip();
     // only a window the mouse goes through needs the exe's wheel; a usable one gets its own. Not for a window that is cleared by the mouse ("관통 창 숨기기"):
     // the game's own chat under it is what is used then, and the wheel is the game's. While lines have faded away, the turns DOWN are taken too (a turn brings them back; also while they fade).
