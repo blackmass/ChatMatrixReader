@@ -101,8 +101,11 @@ export class GlossWatch {
   }
 }
 
-// The game runs but the matrix is not being read: say what to do. Shown at once if no position was ever found (first start), else after a few
-// seconds (a loading screen or a reload ends by itself). Gone again as soon as the matrix is read.
+// The matrix is not being read: say what to do.
+//   no position was ever found (first start): at once, the game running or not (the first-start guide: install the addon, look for the box, lower the colour levels)
+//   a position is known: only while the game runs, and after a few seconds (a loading screen or a reload ends by itself); with no game there is nothing to say
+//   (the program is often started before the game), and a hint that was shown goes when the game is closed.
+// Gone again as soon as the matrix is read.
 export class LostHint {
   constructor() { this.since = null; this.shown = false; }
 
@@ -113,10 +116,17 @@ export class LostHint {
       if (this.shown) { this.shown = false; return ['hide', false]; }
       return null;
     }
-    if (this.shown) return null;
-    if (game === null || game === undefined) { this.since = null; return null; }
+    const first = !truthy(cfg.last_pos), noGame = game === null || game === undefined;
+    if (this.shown) {
+      if (noGame && !first) { this.shown = false; this.since = null; return ['hide', false]; }
+      return null;
+    }
+    if (noGame) {
+      this.since = null;
+      if (first) { this.shown = true; return ['show', true]; }
+      return null;
+    }
     if (this.since === null) this.since = now;
-    const first = !truthy(cfg.last_pos);
     if (first || now - this.since >= LOST_AFTER) { this.shown = true; return ['show', first]; }
     return null;
   }

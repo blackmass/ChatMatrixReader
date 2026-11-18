@@ -8,6 +8,15 @@ import { tr } from './core/i18n.js';
 import { every } from './core/timings.js';
 
 const invoke = window.__TAURI__.core.invoke;
+// The wait between two looks. On macOS the timers of a page that is not in front are slowed down by the system (seconds instead of 33 ms), so the exe
+// does the waiting there (the answer of a command is not a timer). Everywhere else (and when the exe cannot do it) a timer of the page.
+let nativeSleep = null;
+async function sleep(seconds) {
+  if (nativeSleep === null) { try { nativeSleep = (await invoke('os_kind')) === 'macos'; } catch { nativeSleep = false; } }
+  const ms = Math.max(0, Math.round(seconds * 1000));
+  if (nativeSleep) { try { await invoke('sleep_ms', { ms }); return; } catch { nativeSleep = false; } }
+  await new Promise(r => setTimeout(r, ms));
+}
 const nowSec = () => performance.now() / 1000;
 const stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
 
@@ -29,7 +38,7 @@ export function startCapture({ settings, publish, pipeline }) {
   const lost = new LostHint();
 
   const io = {
-    grab, now: nowSec, sleep: s => new Promise(r => setTimeout(r, Math.max(0, s) * 1000)),
+    grab, now: nowSec, sleep,
     screen: () => screen,
     gameRect: () => game.rect,
   };
@@ -72,10 +81,12 @@ export function startCapture({ settings, publish, pipeline }) {
       publish(pipeline.tick(nowSec()));
       const act = lost.check(cfg, game.found ? game : null, connected, nowSec());
       if (act && act[0] === 'show') {
-        let msg = '⚠ ' + tr('매트릭스를 찾지 못했습니다. 게임에서 애드온이 켜져 있고 매트릭스가 화면에 보이는지 확인하세요. '
-          + '로딩 중이거나 애드온을 리로드한 경우라면 매트릭스가 다시 보일 때 바로 감지하니 그냥 두셔도 됩니다. '
-          + '처음 실행했거나 매트릭스 위치를 옮겼다면, 창 위쪽의 ⟳ 아이콘을 눌러 매트릭스를 다시 찾아 주세요.');
-        if (act[1]) msg += ' ' + tr('왼쪽 아래가 아니어도 한 번 찾으면 위치를 기억합니다.');
+        // act[1] = no position was ever found: the guide of the first start (the game may not even be running)
+        const msg = '⚠ ' + (act[1]
+          ? tr('매트릭스를 아직 찾지 못했습니다. ① 와우에 애드온(ChatMatrix)이 설치되어 있고 켜져 있는지 확인하세요. ② 설치했다면 와우 화면에 초록색 매트릭스 박스가 잘 보이는지 확인하세요. ③ 잘 보이는데도 감지가 안 되면, 애드온 설정에서 색 레벨 단계를 한 단계씩 낮추고(예: /cm levels 16) 이 창 위쪽의 ⟳ 아이콘을 누르면서 다시 시도해 보세요.')
+          : tr('매트릭스를 찾지 못했습니다. 게임에서 애드온이 켜져 있고 매트릭스가 화면에 보이는지 확인하세요. '
+            + '로딩 중이거나 애드온을 리로드한 경우라면 매트릭스가 다시 보일 때 바로 감지하니 그냥 두셔도 됩니다. '
+            + '매트릭스 위치를 옮겼다면, 창 위쪽의 ⟳ 아이콘을 눌러 매트릭스를 다시 찾아 주세요.'));
         system(msg, 'lost');
       } else if (act && act[0] === 'hide') removeSystem('lost');
     } catch (e) { log.error('주기 점검 실패: ' + (e?.message || e)); }

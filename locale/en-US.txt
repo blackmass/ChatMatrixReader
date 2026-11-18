@@ -7,8 +7,6 @@
 
 매트릭스를 찾았습니다. = Found the matrix.
 연결됨 = Connected
-매트릭스를 찾지 못했습니다. 게임에서 애드온이 켜져 있고 매트릭스가 화면에 보이는지 확인하세요. 로딩 중이거나 애드온을 리로드한 경우라면 매트릭스가 다시 보일 때 바로 감지하니 그냥 두셔도 됩니다. 처음 실행했거나 매트릭스 위치를 옮겼다면, 창 위쪽의 ⟳ 아이콘을 눌러 매트릭스를 다시 찾아 주세요. = The matrix was not found. Check that the addon is on in the game and the matrix is visible on screen. During a loading screen or after an addon reload you can just leave it: it is picked up again as soon as the matrix is visible. If this is the first start or you moved the matrix, click the ⟳ icon at the top of the window to find it again.
-왼쪽 아래가 아니어도 한 번 찾으면 위치를 기억합니다. = Even if it is not at the bottom left, the position is remembered once found.
 window.__TAURI__ 가 없습니다 (exe가 이 페이지에 기능을 열어주지 않음) = window.__TAURI__ is missing (the exe did not give this page its functions)
 번역 응답 없음 (허브 창이 열려 있어야 합니다) = No translation answer (the hub window must be open)
 (한 줄 {cols}칸, {dir}) = (one line of {cols} cells, {dir})
@@ -100,7 +98,6 @@ API 키가 맞지 않습니다. ({detail}) = The API key is not accepted. ({deta
 서버가 제한 시간 안에 답하지 않았습니다. ({detail}) = The server did not answer in time. ({detail})
 서버의 답을 알아볼 수 없습니다. OpenAI 방식의 음성 인식(transcriptions)을 지원하는 서버인지 확인하세요. ({detail}) = The answer of the server cannot be understood. Check that it supports OpenAI-style speech recognition (transcriptions). ({detail})
 주소는 http:// 또는 https:// 로 시작해야 합니다 (예: http://localhost:8000/v1) = The address must start with http:// or https:// (for example http://localhost:8000/v1)
-준비됨. 와우 채팅은 매트릭스를 찾으면 바로 나옵니다 (가짜 채팅으로도 시험할 수 있습니다). = Ready. The WoW chat appears as soon as the matrix is found (you can also try it with the fake chat).
 새 버전 {latest}이 있습니다 (현재 v{cur}) = A new version {latest} is available (you have v{cur})
 일반 대화 = Say
 외침 = Yell
@@ -902,3 +899,14 @@ Mac이 내는 모든 소리를 듣습니다 (이 프로그램의 소리는 뺍�
 프로그램만 따로 받는 것이 가장 정확합니다. 안 될 때 "자동"이 시스템 전체 소리로 바꿔 받습니다. 화면 기록 권한이 필요합니다 (시스템 설정 → 개인정보 보호 및 보안 → 화면 기록). = Receiving the program alone is the most accurate. When that does not work, "Automatic" switches to the sound of the whole system. The Screen Recording permission is needed (System Settings → Privacy & Security → Screen Recording).
 목록에 없으면 프로그램 이름 (예: Discord) = If it is not listed, the program's name (e.g. Discord)
 실행 중인 프로그램을 읽지 못했습니다. 화면 기록 권한을 확인해 주세요 (시스템 설정 → 개인정보 보호 및 보안 → 화면 기록). = The running programs could not be read. Check the Screen Recording permission (System Settings → Privacy & Security → Screen Recording).
+fonts 폴더의 글꼴 = Fonts of the fonts folder
+시스템에 설치된 글꼴 = Fonts installed on the system
+불러오는 중… = Loading…
+목록을 불러오지 못했습니다 = The list could not be loaded
+서버 주소를 먼저 적어 주세요 = Enter the server address first
+연결 확인 실패 = Connection check failed
+모델 로드 실패 = Model list failed
+칸을 누르면 위의 서버에서 모델 목록을 가져와 보여 줍니다. 목록에 없는 이름은 그대로 적어도 됩니다. = Click the box and the model list is fetched from the server above. A name that is not in the list can be typed as it is.
+프로그램 폴더의 fonts 폴더에 글꼴 파일(.ttf .otf .woff2)을 넣고 옵션 창을 다시 열면 목록에 나옵니다 (글꼴 이름과 파일 이름). 설치된 글꼴도 목록에 있습니다. 칸을 누르면 목록이 열리고, 목록에 없는 이름은 그대로 적어도 됩니다. = Put font files (.ttf .otf .woff2) into the fonts folder of the program folder and reopen the options window: they appear in the list (the font name and the file name). Installed fonts are in the list too. Click the box to open the list; a name that is not in it can be typed as it is.
+매트릭스를 아직 찾지 못했습니다. ① 와우에 애드온(ChatMatrix)이 설치되어 있고 켜져 있는지 확인하세요. ② 설치했다면 와우 화면에 초록색 매트릭스 박스가 잘 보이는지 확인하세요. ③ 잘 보이는데도 감지가 안 되면, 애드온 설정에서 색 레벨 단계를 한 단계씩 낮추고(예: /cm levels 16) 이 창 위쪽의 ⟳ 아이콘을 누르면서 다시 시도해 보세요. = The matrix has not been found yet. ① Check that the addon (ChatMatrix) is installed and enabled in WoW. ② If it is, check that the green matrix box is clearly visible on the WoW screen. ③ If it is visible but still not detected, lower the color levels in the addon settings one step at a time (e.g. /cm levels 16) and try again, pressing the ⟳ icon at the top of this window each time.
+매트릭스를 찾지 못했습니다. 게임에서 애드온이 켜져 있고 매트릭스가 화면에 보이는지 확인하세요. 로딩 중이거나 애드온을 리로드한 경우라면 매트릭스가 다시 보일 때 바로 감지하니 그냥 두셔도 됩니다. 매트릭스 위치를 옮겼다면, 창 위쪽의 ⟳ 아이콘을 눌러 매트릭스를 다시 찾아 주세요. = The matrix was not found. Check that the addon is enabled in the game and the matrix is visible on the screen. If the game is loading or the addon was reloaded, the matrix is detected as soon as it is visible again, so you can just wait. If you moved the matrix, press the ⟳ icon at the top of the window to find it again.

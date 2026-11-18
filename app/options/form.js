@@ -4,18 +4,28 @@
 //
 //   row = { key, apply?(ctx, value) (instead of a plain write: a choice that fills other settings too), type, label, note?, keywords?, def?, show?(cfg), validate?(value) -> '' | error text, ...type specific }
 //   types: check | number {min,max,step,unit} | text {placeholder, wide} | select {options: [[value, label]] | () => [...]} | textarea {rows}
-//          | hotkey (Ctrl/Alt/Shift + a key) | combo {list, placeholder} (a list and "직접 입력") | percent {min} (a slider, the value is 0..1) | color (#rrggbb or empty) | keys (Shift / Ctrl / Alt) | channels (chat channels) | routes (a choice per channel: { code: value })
+//          | hotkey (Ctrl/Alt/Shift + a key) | combo {list, placeholder} (a list and "직접 입력")
+//          | suggest {items(ctx), blank?, placeholder, needs?(cfg), cacheKey?(cfg), fail?} (ONE text box; its list drops down under it, filtered by what is typed, and a click puts the value in) | percent {min} (a slider, the value is 0..1) | color (#rrggbb or empty) | keys (Shift / Ctrl / Alt) | channels (chat channels) | routes (a choice per channel: { code: value })
 //          | file {path(cfg), files, rows} (a text file of the program folder with a save button) | info {text(cfg)} | button {label, action(ctx)}
 //          | custom {build(ctx) -> element, block?} (a live part a tab draws itself, e.g. the state of the voice recognition)
 //   ctx = { sel (window id of the row), cfg(), snapshot, get(row, cfg), put(row, value), def(row), reset(row), following(row), known(row) }
 //   (a row of a window is read and written through ctx: the main window's settings are at the top of the config, an extra window's in its
 //   entry; see options.js. A setting an extra window does not have of its own follows window 1: following(row) tells.)
-import { tr } from '../core/i18n.js';
+import { tr, macKeys } from '../core/i18n.js';
+import { isMac } from '../platform.js';
+const keyName = k => (isMac ? macKeys(k) : k);                 // (the key boxes: the setting keeps 'Ctrl' / 'Alt', a Mac shows Control / Option)
 export const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
 // the name of a channel, in the colour the chat shows it in (row.color(code))
 const named = (row, code) => { const s = el('span', '', row.names(code)); if (row.color) { s.style.color = row.color(code); s.dataset.ccode = code; } return s; };
+
+// ---- the list of a `suggest` row: one box for the whole page, so only one list is open at a time
+let openSg = null;                                               // { close(), place(), pop }
+const closeSg = () => { if (openSg) { const o = openSg; openSg = null; o.close(); } };
+// the page scrolls (also by itself, to bring the clicked box into view): the list follows its box, and is closed when the box is out of sight
+window.addEventListener('scroll', e => { if (openSg && !openSg.pop.contains(e.target)) openSg.place(); }, true);
+window.addEventListener('resize', closeSg);
 
 export const isData = row => !['info', 'button', 'file', 'examples', 'notice', 'logview', 'perf', 'diag', 'custom'].includes(row.type);
 
@@ -115,7 +125,7 @@ export function buildRow(row, ctx) {
     input.onchange = () => commit(read());
   } else if (row.type === 'hotkey') {
     // Shift / Ctrl / Alt boxes and a key list (catching the keys themselves is fragile: Enter would end the input)
-    const boxes = ['Ctrl', 'Alt', 'Shift'].map(k => { const l = el('label', 'keybox'); const c = el('input'); c.type = 'checkbox'; c.value = k; l.append(c, el('span', '', k)); ctl.append(l); return c; });
+    const boxes = ['Ctrl', 'Alt', 'Shift'].map(k => { const l = el('label', 'keybox'); const c = el('input'); c.type = 'checkbox'; c.value = k; l.append(c, el('span', '', keyName(k))); ctl.append(l); return c; });
     const KEYLIST = ['Enter', 'Space', 'Tab', 'Backspace', 'Insert', 'Delete', 'Home', 'End', 'PageUp', 'PageDown', 'Left', 'Up', 'Right', 'Down', '`',
       ...Array.from({ length: 12 }, (_, i) => 'F' + (i + 1)), ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'];
     input = el('select', 'hotkeykey');
@@ -151,6 +161,79 @@ export function buildRow(row, ctx) {
     sel.onchange = () => { if (sel.value === OWN) { own.hidden = false; own.focus(); } else commit(sel.value); };
     if (canFollow && blankOpt) followText = () => { blankOpt.textContent = tr('창 1을 따름') + ' · ' + mainShown(); };
     own.onchange = () => commit(own.value.trim());
+  } else if (row.type === 'suggest') {
+    // items(ctx) -> [{ value, text?, sub? } | { head }]  or a promise of it (a failed promise has `kind`: row.fail[kind] is the short orange note; `message` goes to its tooltip)
+    // blank: what an empty box means (shown as its dim text, and as the first line of the list). needs(cfg) -> a text when the list cannot be asked for yet.
+    input = el('input', 'wide'); input.type = 'text'; input.spellcheck = false; input.autocomplete = 'off';
+    const blankText = () => (canFollow ? tr('창 1을 따름') + ' · ' + mainShown() : (typeof row.blank === 'function' ? row.blank(ctx) : row.blank) || '');
+    input.placeholder = row.placeholder || '';
+    if (canFollow) input.classList.add('follow-input');
+    const state = el('small', 'sg-state'); state.hidden = true;
+    const pop = el('div', 'sg-pop');
+    ctl.append(state, input);
+    let items = [], rows = [], active = -1, typed = false, cache = null, seq = 0, isOpen = false;
+    const setState = (text, kind, title) => { state.hidden = !text; state.textContent = text || ''; state.className = 'sg-state' + (kind ? ' ' + kind : ''); state.title = title || ''; };
+    const place = () => {
+      const r = input.getBoundingClientRect(), below = innerHeight - r.bottom - 8, above = r.top - 8;
+      if (r.bottom < 0 || r.top > innerHeight) { close(); return; }
+      const up = pop.scrollHeight > below && above > below;
+      pop.style.left = r.left + 'px'; pop.style.minWidth = Math.max(r.width, 240) + 'px';
+      pop.style.maxHeight = Math.max(80, Math.min(280, up ? above : below)) + 'px';
+      if (up) { pop.style.top = ''; pop.style.bottom = (innerHeight - r.top + 2) + 'px'; } else { pop.style.bottom = ''; pop.style.top = (r.bottom + 2) + 'px'; }
+    };
+    const pick = v => { input.value = v; typed = false; close(); commit(v); };
+    const draw = () => {
+      const q = typed ? input.value.trim().toLowerCase() : '';
+      const hit = it => !q || String(it.value).toLowerCase().includes(q) || String(it.text || '').toLowerCase().includes(q) || String(it.sub || '').toLowerCase().includes(q);
+      const list = [], bl = blankText();
+      if (bl && !q) list.push({ value: '', text: bl, dim: true });
+      let head = null;
+      for (const it of items) { if (it.head) { head = it; continue; } if (!hit(it)) continue; if (head) { list.push(head); head = null; } list.push(it); }
+      rows = list; active = -1;
+      pop.replaceChildren(...list.map((it, i) => {
+        if (it.head) return el('div', 'sg-head', it.head);
+        const d = el('div', 'sg-item' + (it.dim ? ' dim' : '') + (it.value === input.value.trim() && !it.dim ? ' cur' : ''));
+        d.append(el('span', 'sg-main', it.text ?? it.value));
+        if (it.sub) d.append(el('small', 'sg-sub', it.sub));
+        d.onmousedown = e => { e.preventDefault(); pick(it.value); };
+        d.onmousemove = () => { active = i; mark(); };
+        return d;
+      }));
+      if (!isOpen) return;
+      if (!list.some(x => !x.head)) { pop.remove(); return; }
+      if (!pop.isConnected) document.body.append(pop);
+      place();
+    };
+    const mark = () => { [...pop.children].forEach((c, i) => c.classList.toggle('active', i === active)); const c = pop.children[active]; if (c && c.scrollIntoView) c.scrollIntoView({ block: 'nearest' }); };
+    const close = () => { isOpen = false; seq++; pop.remove(); if (openSg && openSg.pop === pop) openSg = null; };
+    const load = () => {
+      const need = row.needs ? row.needs(ctx.cfg()) : '';
+      if (need) { items = []; setState(need, 'dim'); draw(); return; }
+      const got = row.items(ctx);
+      if (!got || typeof got.then !== 'function') { items = got || []; setState(''); draw(); return; }
+      const key = row.cacheKey ? row.cacheKey(ctx.cfg()) : '', mine = ++seq;
+      if (cache && cache.key === key) { items = cache.items; draw(); }            // (the last answer at once, the new one replaces it)
+      setState(tr('불러오는 중…'), 'dim');
+      got.then(list => { if (mine !== seq) return; cache = { key, items: list }; items = list; setState(''); draw(); },
+        e => { if (mine !== seq) return; items = []; setState(tr((row.fail && row.fail[e && e.kind]) || '목록을 불러오지 못했습니다'), 'bad', String((e && e.message) || e)); draw(); });
+    };
+    const open = () => { if (isOpen) return; closeSg(); isOpen = true; openSg = { close, place, pop }; typed = false; load(); };
+    read = () => input.value.trim(); write = v => { input.value = v ?? ''; };
+    followText = () => { input.placeholder = blankText() || row.placeholder || ''; };
+    input.onfocus = open; input.onclick = open;
+    input.oninput = () => { typed = true; open(); draw(); };
+    input.onblur = () => close();
+    input.onchange = () => commit(read());
+    input.onkeydown = e => {
+      const sel = rows.map((x, i) => (x.head ? -1 : i)).filter(i => i >= 0);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault(); if (!isOpen) { open(); return; }
+        if (!sel.length) return;
+        const at = sel.indexOf(active), n = e.key === 'ArrowDown' ? (at < 0 ? 0 : Math.min(sel.length - 1, at + 1)) : (at < 0 ? sel.length - 1 : Math.max(0, at - 1));
+        active = sel[n]; mark();
+      } else if (e.key === 'Enter' && isOpen && active >= 0 && rows[active] && !rows[active].head) { e.preventDefault(); pick(rows[active].value); }
+      else if (e.key === 'Escape' && isOpen) { e.preventDefault(); close(); }
+    };
   } else if (row.type === 'select') {
     input = el('select');
     const optionList = () => (typeof row.options === 'function' ? row.options(ctx) : row.options);
@@ -184,7 +267,7 @@ export function buildRow(row, ctx) {
     input.onchange = () => commit(read());
     sw.onchange = () => { input.value = sw.value; commit(sw.value); };
   } else if (row.type === 'keys') {
-    const boxes = ['Shift', 'Ctrl', 'Alt'].map(k => { const l = el('label', 'keybox'); const c = el('input'); c.type = 'checkbox'; c.value = k; l.append(c, el('span', '', k)); ctl.append(l); return c; });
+    const boxes = ['Shift', 'Ctrl', 'Alt'].map(k => { const l = el('label', 'keybox'); const c = el('input'); c.type = 'checkbox'; c.value = k; l.append(c, el('span', '', keyName(k))); ctl.append(l); return c; });
     read = () => boxes.filter(b => b.checked).map(b => b.value);
     write = v => { const have = new Set(v || []); for (const b of boxes) b.checked = have.has(b.value); };
     row = { ...row, validate: v => (v.length ? '' : '하나는 꼭 체크해야 합니다') };

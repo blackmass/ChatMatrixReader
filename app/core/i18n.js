@@ -19,10 +19,23 @@ function format(s, kw) {
   return ok ? out : null;
 }
 
+// A filter every shown text passes at the end (the Mac one: Ctrl -> Control ...; see keyNames below). Nothing by default.
+let finish = s => s;
+export const setTextFilter = fn => { finish = typeof fn === 'function' ? fn : (s => s); };
+
 export function tr(text, kw = null) {
   const s = Object.hasOwn(table, text) ? table[text] : text;
-  if (!kw) return s;
-  return format(s, kw) ?? format(text, kw) ?? s;
+  if (!kw) return finish(s);
+  return finish(format(s, kw) ?? format(text, kw) ?? s);
+}
+
+// The names of the keys on a Mac: Ctrl is the Control key (the texts say Ctrl, as Windows does), Alt is the Option key, and the paste (Ctrl+V) is Command+V.
+// The settings keep the Windows names ('Ctrl', 'Alt'): only what is SHOWN changes, so a config.json works on both systems.
+export function macKeys(text) {
+  return String(text)
+    .replace(/\bCtrl\+([CVXAZ])(?![A-Za-z])/g, '⌘$1')
+    .replace(/\bCtrl\b/g, 'Control')
+    .replace(/\bAlt\b/g, 'Option');
 }
 
 const unescape = s => s.replace(/\\n/g, '\n');

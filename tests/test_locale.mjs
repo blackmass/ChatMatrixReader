@@ -27,3 +27,16 @@ setTable(en.entries, 'en-US');
 check(tr('열었을 때 값으로 되돌리기: {v}', { v: '켬' }) === 'Back to the value when opened: 켬', 'tr() with placeholders');
 setTable({}, 'ko-KR');
 check(tr('저장') === '저장', 'Korean is the built-in language');
+
+// ---- the key names on a Mac: only what is shown changes (Ctrl -> Control, Alt -> Option, the paste Ctrl+V -> ⌘V); a Windows page is untouched
+{
+  const { macKeys, setTextFilter, tr, setTable } = await import('../app/core/i18n.js');
+  check(macKeys('Ctrl+Alt+O') === 'Control+Option+O' && macKeys('Shift+Ctrl') === 'Shift+Control', 'mac keys: Ctrl and Alt become Control and Option');
+  check(macKeys('직접 Ctrl+V를 누릅니다') === '직접 ⌘V를 누릅니다' && macKeys('Ctrl+C') === '⌘C', 'mac keys: the paste / copy are Command');
+  check(macKeys('Ctrl+Enter') === 'Control+Enter' && macKeys('Alternative Ctrlx') === 'Alternative Ctrlx', 'mac keys: only whole words, and Ctrl+Enter is not a letter shortcut');
+  setTable({ '옵션은 Ctrl+Alt+O 로 엽니다': 'Open the options with Ctrl+Alt+O' });
+  check(tr('옵션은 Ctrl+Alt+O 로 엽니다') === 'Open the options with Ctrl+Alt+O', 'no filter (Windows): the text is as written');
+  setTextFilter(macKeys);
+  check(tr('옵션은 Ctrl+Alt+O 로 엽니다') === 'Open the options with Control+Option+O' && tr('열기: {k}', { k: 'Ctrl+Alt+O' }) === '열기: Control+Option+O', 'with the Mac filter: the translated text and the filled-in values both show the Mac names');
+  setTextFilter(null); setTable({});
+}

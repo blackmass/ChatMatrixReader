@@ -270,3 +270,16 @@ input.colortext.follow-input { width: 150px; }
 .lictech { display: flex; flex-direction: column; gap: 6px; }
 .lictech small { overflow-wrap: anywhere; }
 .licview { width: 100%; box-sizing: border-box; font: 12px Consolas, Menlo, "Malgun Gothic", "Apple SD Gothic Neo", monospace; resize: vertical; }
+
+/* ---- a `suggest` box (options/form.js): one text box, its list drops down under it (the list lives in <body>, so no card can cut it off) */
+:root { --warn: #ff9d3c; }
+.sg-state { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--dim); }
+.sg-state.bad { color: var(--warn); cursor: help; }
+.sg-pop { position: fixed; z-index: 1000; overflow-y: auto; background: #1b1c20; border: 1px solid #5a5d66; border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.5); padding: 3px 0; scrollbar-width: thin; scrollbar-color: #555 transparent; }
+.sg-item { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+.sg-item.active { background: #33353c; }
+.sg-item.cur .sg-main { color: var(--accent); }
+.sg-item.dim .sg-main { color: var(--dim); }
+.sg-sub { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.sg-head { padding: 6px 10px 3px; color: var(--dim); font-size: 11px; border-top: 1px solid #2f3137; margin-top: 3px; }
+.sg-head:first-child { border-top: 0; margin-top: 0; }

@@ -26,7 +26,8 @@ const ok = (c, msg) => { if (!c) { failed++; console.log('  FAIL: ' + msg); } };
 
 // ---- the stand-in for the exe
 const files = new Map([['Glossary.sample.txt', 'LFM = 구인\n'], ['fonts/나눔 고딕.ttf', 'x'], ['locale/en-US.txt', fs.readFileSync(path.join(ROOT, 'locale', 'en-US.txt'), 'utf8')]]);
-const requests = [], calls = [], clip = [];
+const requests = [], calls = [], clip = [], modelAsks = [];
+let aiMode = 'ok';                                   // what the fake AI server answers to the model list: ok | down | 401 | bad
 let popupOn = false, popupPage = null, popupHides = 0, popupCloses = 0;
 const popupPlaced = [];
 let popupOn_ = false;                                       // the fake exe has a popup window (a test turns it on)
@@ -64,6 +65,13 @@ async function invoke(cmd, a = {}) {
     case 'open_url': opened.push(a.url); return null;
     case 'http_request': {
       if (new URL(a.url).hostname === 'api.github.com') return { status: 200, body: JSON.stringify([{ tag_name: 'v4.0.0' }, { tag_name: 'v3.0.1' }, { tag_name: 'v3.0.0', prerelease: true }]) };
+      if (new URL(a.url).hostname === 'ai.test') {              // an AI server: its model list answers as the test asks (aiMode), the other paths are not asked here
+        modelAsks.push(a);
+        if (aiMode === 'down') throw new Error('connection refused');
+        if (aiMode === '401') return { status: 401, body: '{"error":"bad key"}' };
+        if (aiMode === 'bad') return { status: 200, body: '{"hello":"world"}' };
+        return { status: 200, body: JSON.stringify({ data: [{ id: 'qwen3-8b' }, { id: 'gemma-3-4b' }, { id: 'qwen3-8b' }] }) };
+      }
       requests.push(a);
       const q = new URL(a.url).searchParams.get('q') || '';
       return { status: 200, body: JSON.stringify([[[(new URL(a.url).searchParams.get('tl') === 'en' ? 'EN: ' : '번역: ') + q, q, null, null, 10]], null, 'en']) };
@@ -404,12 +412,28 @@ ok(cfgFile().topmost === true && cfgFile().topmost_wow_only === false && await m
   await sw('항상 맨 위에').click(); await control.waitForTimeout(800);
 }
 // the font list: the files of fonts/ and the way back to the default
-const fontSel = rowOf('글꼴').locator('select');
-ok((await fontSel.locator('option').allTextContents()).join('|').startsWith('기본 (맑은 고딕)|Nano Test  —  나눔 고딕.ttf|────────── 윈도우에 설치된 글꼴|Arial|Malgun Gothic'), 'options/windows: the font list: ' + (await fontSel.locator('option').allTextContents()).join('|'));
-await fontSel.selectOption('Nano Test'); await control.waitForTimeout(500);
-ok(cfgFile().font_family === 'Nano Test', 'options/windows: a font of the folder is chosen');
-await fontSel.selectOption(''); await control.waitForTimeout(500);
-ok(cfgFile().font_family === '', 'options/windows: back to the default font');
+const fontBox = rowOf('글꼴').locator('input.wide'), pop = opt.locator('.sg-pop');
+ok(await fontBox.count() === 1 && await rowOf('글꼴').locator('select').count() === 0, 'options/windows: the font is ONE text box (no second box, no drop-down)');
+await fontBox.click(); await control.waitForTimeout(200);
+ok(await pop.count() === 1, 'options/windows: the font list opens under the box when it is clicked');
+ok(await fontBox.inputValue() === '' && cfgFile().font_family === '', 'options/windows: opening the list changes nothing');
+await opt.screenshot({ path: path.join(OUT, 'options_suggest.png') });
+const fontLines = (await pop.locator('.sg-item, .sg-head').allTextContents()).join('|');
+ok(fontLines.startsWith('기본 (맑은 고딕)|fonts 폴더의 글꼴|Nano Test나눔 고딕.ttf|시스템에 설치된 글꼴|Arial|Malgun Gothic'), 'options/windows: the font list: ' + fontLines);
+await fontBox.fill('mal'); await control.waitForTimeout(200);
+ok((await pop.locator('.sg-item').allTextContents()).join('|') === 'Malgun Gothic', 'options/windows: typing narrows the list');
+await fontBox.fill(''); await control.waitForTimeout(100);
+await pop.locator('.sg-item', { hasText: 'Nano Test' }).dispatchEvent('mousedown'); await control.waitForTimeout(500);
+ok(cfgFile().font_family === 'Nano Test' && await fontBox.inputValue() === 'Nano Test' && await pop.count() === 0, 'options/windows: a click on a line puts the font name (only the name) in and closes the list');
+await fontBox.click(); await control.waitForTimeout(200);
+await pop.locator('.sg-item.dim').dispatchEvent('mousedown'); await control.waitForTimeout(500);
+ok(cfgFile().font_family === '' && await fontBox.inputValue() === '', 'options/windows: the first line (the default) is the way back');
+await fontBox.click(); await fontBox.fill('Some Font'); await fontBox.press('Escape'); await control.waitForTimeout(200);
+ok(await pop.count() === 0, 'options/windows: Esc closes the list');
+await fontBox.press('Tab'); await control.waitForTimeout(500);
+ok(cfgFile().font_family === 'Some Font', 'options/windows: a name typed by hand is kept as it is');
+await fontBox.fill(''); await fontBox.press('Tab'); await control.waitForTimeout(500);
+ok(cfgFile().font_family === '', 'options/windows: emptied: the default again');
 // the mouse over a click-through window clears it (the fake window always has the mouse over it)
 await sw('클릭 관통').click(); await control.waitForTimeout(500);
 ok(await main.evaluate(() => document.body.classList.contains('hover-clear')) === false, 'hover clear: off by default');
@@ -645,7 +669,7 @@ await opt.waitForSelector('.row b.label:text-is("이름")');
 const ph = label => rowOf(label).locator('input').first().getAttribute('placeholder');
 ok((await ph('줄 간격')).startsWith('창 1을 따름 · ') && (await ph('글자 크기')).startsWith('창 1을 따름 · ') && await rowOf('줄 간격').locator('button.def').isHidden(), 'options/windows: an extra window shows what it follows in the empty input; no button: ' + await ph('줄 간격'));
 ok((await rowOf('글 정렬').locator('select option').first().textContent()).startsWith('창 1을 따름') && (await rowOf('줄 머리말').locator('select option').first().textContent()).startsWith('창 1을 따름') && (await rowOf('배경 흐림').locator('select option').first().textContent()).startsWith('창 1을 따름') && (await rowOf('글자 굵기').locator('select option').first().textContent()).startsWith('창 1을 따름'), 'options/windows: every choice list has "창 1을 따름" on top, with what window 1 has');
-ok((await rowOf('글꼴').locator('select option').first().textContent()).startsWith('창 1을 따름') && await rowOf('글꼴').locator('select').inputValue() === '', 'options/windows: the font list has it on top, and a new window follows');
+ok((await rowOf('글꼴').locator('input.wide').getAttribute('placeholder')).startsWith('창 1을 따름 · ') && await rowOf('글꼴').locator('input.wide').inputValue() === '', 'options/windows: the font box says what it follows (the empty box), and a new window follows');
 ok(await rowOf('배경 진하기').locator('button.def').isVisible() && await rowOf('시간 표시').locator('button.def').isVisible() && await rowOf('시간 표시').locator('button.def').textContent() === '기본값', 'options/windows: sliders and on / off switches have the "기본값" button, they do not follow');
 ok(await rowOf('시간 표시').locator('input[type=checkbox]').isChecked() && await rowOf('시간 표시').locator('button.def').isDisabled(), 'options/windows: a switch an extra window has no value for shows its default (on) and the 기본값 button is dim');
 await rowOf('줄 간격').locator('input').fill('5'); await rowOf('줄 간격').locator('input').dispatchEvent('change');
@@ -709,6 +733,32 @@ await opt.locator('h3', { hasText: 'AI 서버' }).click();
 ok(await opt.locator('.row b.label', { hasText: '서버 주소' }).isVisible(), 'options/translation: unfolding shows its rows');
 await opt.selectOption('.row:has(b.label:text-is("번역 방식")) select', 'openai');
 await control.waitForTimeout(1200);
+{ // the model name: one text box; its list is asked of the server (address + key as set) when the box gets the focus
+  const row = opt.locator('.row:has(b.label:text-is("모델 이름"))'), box = row.locator('input.wide'), pop = opt.locator('.sg-pop'), note = row.locator('.sg-state');
+  ok(await box.count() === 1 && await row.locator('select').count() === 0, 'options/translation: the model name is one text box');
+  await opt.locator('.row:has(b.label:text-is("서버 주소")) input').fill(''); await opt.locator('.row:has(b.label:text-is("서버 주소")) input').press('Tab'); await control.waitForTimeout(600);
+  await box.click(); await control.waitForTimeout(200);
+  ok(await note.textContent() === '서버 주소를 먼저 적어 주세요' && modelAsks.length === 0 && await pop.count() === 0, 'options/translation: without a server address nothing is asked');
+  await box.press('Tab');
+  await opt.locator('.row:has(b.label:text-is("서버 주소")) input').fill('http://ai.test/v1'); await opt.locator('.row:has(b.label:text-is("서버 주소")) input').press('Tab'); await control.waitForTimeout(600);
+  await box.click(); await control.waitForTimeout(800);
+  ok(modelAsks.length === 1 && modelAsks[0].url === 'http://ai.test/v1/models', 'options/translation: the focus asks the server for /models: ' + JSON.stringify(modelAsks.map(a => a.url)));
+  ok((await pop.locator('.sg-item').allTextContents()).join('|') === 'qwen3-8b|gemma-3-4b' && await note.isHidden() && cfgFile().api_model === '', 'options/translation: the models are listed once each, and the box is untouched');
+  await box.fill('gem'); await control.waitForTimeout(200);
+  ok((await pop.locator('.sg-item').allTextContents()).join('|') === 'gemma-3-4b', 'options/translation: typing narrows the model list');
+  await pop.locator('.sg-item').first().dispatchEvent('mousedown'); await control.waitForTimeout(700);
+  ok(cfgFile().api_model === 'gemma-3-4b' && await box.inputValue() === 'gemma-3-4b' && await pop.count() === 0, 'options/translation: a click on a model puts its name in');
+  await box.press('Tab');
+  for (const [mode, text] of [['down', '연결 확인 실패'], ['401', '연결 확인 실패'], ['bad', '모델 로드 실패']]) {
+    aiMode = mode; await box.click(); await control.waitForTimeout(800);
+    ok(await note.textContent() === text && await note.evaluate(e => e.classList.contains('bad')) && await pop.count() === 0 && await box.inputValue() === 'gemma-3-4b', `options/translation: the server says "${mode}": the orange note "${text}", the typed name stays`);
+    await box.press('Tab');
+  }
+  aiMode = 'ok'; await box.click(); await control.waitForTimeout(800);
+  ok(await note.isHidden() && await pop.locator('.sg-item').count() === 2, 'options/translation: the next try that works clears the note');
+  await box.press('Tab'); await box.fill(''); await box.press('Tab'); await control.waitForTimeout(500);
+  await opt.locator('.row:has(b.label:text-is("서버 주소")) input').fill(''); await opt.locator('.row:has(b.label:text-is("서버 주소")) input').press('Tab'); await control.waitForTimeout(500);
+}
 ok(cfgFile().translator === 'openai' && await opt.locator('h3', { hasText: '직접 설정한 서버' }).isVisible(), 'options/translation: all server cards stay when the method changes');
 await opt.locator('h3', { hasText: '직접 설정한 서버' }).click();
 await opt.selectOption('.row:has(b.label:text-is("서비스")) select', 'DeepL Free');
@@ -1245,6 +1295,9 @@ ok(errors.length === 0, 'page errors: ' + errors.join(' | '));
   ok(await optNew.locator('.row b.label:text-is("소리 대상")').count() === 1, 'macOS 14: the voice tab has its settings');
   ok(await optNew.locator('button:text-is("설치 (Metal · GPU 와 CPU)")').count() === 1 && await optNew.locator('button:text-is("설치 (CPU)")').count() === 0, 'macOS 14: one install button (Metal), not the Windows ones');
   ok(await hubNew.evaluate(() => window.cmrHub.voice.control.state.unsupported === undefined), 'macOS 14: the voice recognition is not marked unsupported');
+  await optNew.locator('#tabs li', { hasText: '보내기' }).click(); await optNew.waitForTimeout(300);
+  const mods = (await optNew.locator('.row:has(b.label:text-is("단축키")) .keybox').allTextContents()).join('|'), sendText = await optNew.locator('#body').innerText();
+  ok(mods === 'Control|Option|Shift' && sendText.includes('⌘V') && !/\bCtrl\b|\bAlt\b/.test(sendText), 'macOS: the key boxes and the notes say Control / Option / ⌘V: ' + mods);
   osKind = 'windows';
 }
 clearTimeout(watchdog);

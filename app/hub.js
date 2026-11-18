@@ -84,6 +84,13 @@ listen('rpc-test', async ev => {
   } catch (e) { emit('rpc-test-result', { id, error: String(e?.message || e).slice(0, 160), ms: ms(), who }); }
 });
 
+// the model list of the AI server (the model name box of the options asks when it gets the focus): from the address and key as they are set now
+listen('rpc-models', async ev => {
+  const { id } = ev.payload;
+  try { emit('rpc-models-result', { id, models: await translator.listModels(settings.cfg()) }); }
+  catch (e) { emit('rpc-models-result', { id, error: String((e && e.message) || e).slice(0, 160), kind: (e && e.kind) || 'connect' }); }
+});
+
 // ---- fake chat (until the capture loop is connected)
 const CODES = { party: 'P', guild: 'G', whisper: 'W', say: 'S', sys: '!SY' };
 let lineId = 0;
@@ -127,7 +134,6 @@ $('feed').onclick = () => {
   feedTimer = setInterval(() => { const [channel, name, text] = FAKE[feedIndex++ % FAKE.length]; fakeLine({ channel, name, text }); }, 1500);
 };
 $('add').onclick = () => { const id = windows.add(); hubLog('번역창 추가: 창 ' + id); };
-note(tr('준비됨. 와우 채팅은 매트릭스를 찾으면 바로 나옵니다 (가짜 채팅으로도 시험할 수 있습니다).'));
 invoke('options_hotkey_ok').catch(() => false).then(ok => note(tr('제목줄은 마우스를 올리면 나타납니다 | 우클릭 또는 ⚙: 옵션 | {open}: 옵션 | 클릭 관통 중에는 {keys}를 누른 채로 조작', {
   open: ok ? 'Ctrl+Alt+O' : tr('트레이 아이콘'), keys: (settings.cfg().interact_keys || ['Shift']).join('+') })));
 

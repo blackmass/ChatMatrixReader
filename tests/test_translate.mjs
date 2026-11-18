@@ -92,3 +92,19 @@ async function scenario(group, sc) {
   eq(await usage.total(), sc.usage_total, `${group} / ${sc.name} usage total`);
 }
 for (const group of ['openai', 'google', 'custom']) for (const sc of G[group]) await scenario(group, sc);
+
+// ---- the model list of the AI server (listModels): the models once each; a server that does not answer is "connect", an answer that is no list is "format"
+{
+  const mk = json => new Translator({ http: { json }, glossary: mkGlossary(mkFiles()), usage: new Usage(mkFiles()), now: () => 0, sleep: async () => {} });
+  const ids = await mk(async () => ({ data: [{ id: 'a' }, { id: 'b' }, { id: 'a' }] })).listModels({ api_url: 'http://x/v1' });
+  check(ids.join() === 'a,b', 'listModels: every model once');
+  let k = '';
+  try { await mk(async () => { throw new Error('connection refused'); }).listModels({ api_url: 'http://x/v1' }); } catch (e) { k = e.kind + '|' + e.message; }
+  check(k === 'connect|connection refused', 'listModels: no answer = connect: ' + k);
+  k = '';
+  try { await mk(async () => ({ hello: 1 })).listModels({ api_url: 'http://x/v1' }); } catch (e) { k = e.kind; }
+  check(k === 'format', 'listModels: an answer that is no model list = format');
+  k = '';
+  try { await mk(async () => ({ data: [{ name: 'x' }] })).listModels({ api_url: 'http://x/v1' }); } catch (e) { k = e.kind; }
+  check(k === 'format', 'listModels: entries without an id = format');
+}

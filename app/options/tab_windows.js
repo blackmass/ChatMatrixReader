@@ -4,7 +4,7 @@
 import { windowName } from '../winname.js';
 import { ALL } from '../winmanager.js';
 import { VOICE_ID } from '../core/winconf.js';
-import { choices as fontList } from '../fonts.js';
+import { entries as fontItems } from '../fonts.js';
 import { registry as widgetRegistry } from '../widgets/defaults.js';
 import { widgetsRow } from './widget_row.js';
 
@@ -39,8 +39,8 @@ export default {
         note: '체크한 채널의 글만 이 창에 나옵니다. 메인 창에서 뺀 채널을 다른 창에 따로 모아 볼 수 있습니다.' },
     ] },
     { title: '글', rows: [
-      { win: true, key: 'font_family', type: 'combo', list: fontList, blank: x => (x.sel === 1 ? '기본 (맑은 고딕)' : '창 1을 따름'), label: '글꼴', placeholder: '글꼴 이름', keywords: '폰트 font',
-        note: '프로그램 폴더의 fonts 폴더에 글꼴 파일(.ttf .otf .woff2)을 넣고 옵션 창을 다시 열면 목록에 나옵니다 (글꼴 이름 — 파일 이름). 윈도우에 설치된 글꼴도 목록에 있고, 없으면 "직접 입력"에 이름을 적으세요.' },
+      { win: true, key: 'font_family', type: 'suggest', items: () => fontItems(), blank: x => (x.sel === 1 ? '기본 (맑은 고딕)' : '창 1을 따름'), label: '글꼴', placeholder: '글꼴 이름', keywords: '폰트 font',
+        note: '프로그램 폴더의 fonts 폴더에 글꼴 파일(.ttf .otf .woff2)을 넣고 옵션 창을 다시 열면 목록에 나옵니다 (글꼴 이름과 파일 이름). 설치된 글꼴도 목록에 있습니다. 칸을 누르면 목록이 열리고, 목록에 없는 이름은 그대로 적어도 됩니다.' },
       { win: true, key: 'font_weight', type: 'select', label: '글자 굵기', keywords: '폰트 굵게 두껍게 얇게 bold weight',
         options: [[100, '100 Thin (가장 얇은)'], [200, '200 Extra Light (매우 얇은)'], [300, '300 Light (얇은)'], [400, '400 Normal (기본)'], [500, '500 Medium (약간 두꺼운)'],
           [600, '600 Semi Bold (중간 두꺼움)'], [700, '700 Bold (표준 두꺼움)'], [800, '800 Extra Bold (매우 두꺼움)'], [900, '900 Black (가장 두꺼운)']],

@@ -70,6 +70,15 @@ export async function listForOptions() {
   await loadAll({ register: false });
   try { system = await window.__TAURI__.core.invoke('system_fonts'); } catch { system = []; }
 }
+// the list of the font box: [{ value: family, sub: file name }] for the fonts of the fonts/ folder, then the installed ones (a { head } is a title line)
+export function entries() {
+  const seen = new Set(), out = [];
+  if (known.length) out.push({ head: tr('fonts 폴더의 글꼴') });
+  for (const k of known) { out.push({ value: k.family, sub: k.file }); seen.add(k.family); }
+  const rest = system.filter(n => !seen.has(n));
+  if (rest.length) { if (known.length) out.push({ head: tr('시스템에 설치된 글꼴') }); out.push(...rest.map(n => ({ value: n }))); }
+  return out;
+}
 export function choices() {
   const seen = new Set(), out = [];
   for (const k of known) { out.push([k.family, `${k.family}  —  ${k.file}`]); seen.add(k.family); }

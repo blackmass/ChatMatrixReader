@@ -54,7 +54,7 @@ const CARDS = [
         options: [['auto', '자동 (GPU가 있으면 GPU)'], ['cpu', 'CPU'], ['gpu', 'GPU']],
         get: cfg => deviceOf(cfg), patch: (cfg, v) => ({ voice_device: v }),
         note: '대부분의 환경에서는 Vulkan(GPU) 엔진과 large-v3-turbo 모델을 권장합니다. GPU는 Vulkan 엔진을 설치했을 때만 쓸 수 있습니다 (NVIDIA 그래픽카드에서도 Vulkan으로 동작합니다. CUDA 엔진은 예정입니다). CPU만 쓸 때는 large-v3-turbo가 말하는 속도를 따라가지 못할 수 있어서, small이나 base처럼 더 작은 모델을 쓰세요 (아래 "모델 목록과 속도"에서 직접 재 볼 수 있습니다). Mac에서는 Metal 엔진 하나에 GPU와 CPU가 모두 들어 있어서, 여기서 고르는 대로 계산합니다.' },
-      { key: 'voice_model', type: 'combo', when: 'restart', label: '모델', blank: '기본 (large-v3-turbo)', list: MODELS, placeholder: '모델 이름', keywords: '모델 model large turbo small base tiny',
+      { key: 'voice_model', type: 'suggest', when: 'restart', label: '모델', blank: '기본 (large-v3-turbo)', items: () => MODELS.map(m => ({ value: m })), placeholder: '모델 이름', keywords: '모델 model large turbo small base tiny',
         note: '큰 모델일수록 정확하지만 느리고 메모리를 많이 씁니다. 얼마나 느린지는 PC마다 달라서, 아래 "모델 목록과 속도"에서 모델을 받아 직접 재 보고 고르세요. 작은 모델은 빠른 대신 작은 소리, 잡음, 게임 용어와 이름에서 틀리기 쉽습니다.' },
       { type: 'custom', block: true, label: '모델 목록과 속도', keywords: '모델 속도 시험 벤치 benchmark 배율 삭제 받기 비교 느림 빠름', build: modelsRow,
         note: '어떤 모델이 설치되어 있는지 보고, 모델마다 받거나 지울 수 있습니다. 배율은 "인식에 걸린 시간 ÷ 말한 시간"입니다: ×0.4는 10초 분량을 4초에 처리한다는 뜻이고, ×1을 넘으면 말을 따라가지 못합니다. "실제 사용 배율"은 음성인식을 쓰는 동안 쌓이고(괄호는 문장 수), "시험 배율"은 같은 소리 파일로 잰 값입니다.' },

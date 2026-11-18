@@ -381,8 +381,14 @@ export class Translator {
     const base = openaiBase(cfg.api_url);
     const headers = {};
     if ((cfg.api_key || '').trim()) headers.Authorization = 'Bearer ' + cfg.api_key.trim();
-    const data = await this.http.json(base + '/models', null, headers, Math.min(Number(cfg.timeout ?? 30), 10));
-    try { return data.data.map(m => m.id); } catch { throw new TranslateError(tr('모델 목록 형식이 올바르지 않습니다')); }
+    // kind: 'connect' = the server did not answer (no connection, time out, an error code such as 401) | 'format' = it answered with something that is no model list
+    let data;
+    try { data = await this.http.json(base + '/models', null, headers, Math.min(Number(cfg.timeout ?? 30), 10)); }
+    catch (e) { throw Object.assign(new TranslateError(String((e && e.message) || e)), { kind: 'connect' }); }
+    let ids = null;
+    try { ids = data.data.map(m => m.id); } catch { /* not the OpenAI shape */ }
+    if (!Array.isArray(ids) || ids.some(x => typeof x !== 'string')) throw Object.assign(new TranslateError(tr('모델 목록 형식이 올바르지 않습니다')), { kind: 'format' });
+    return [...new Set(ids.filter(Boolean))];
   }
 
   // ---- Google
