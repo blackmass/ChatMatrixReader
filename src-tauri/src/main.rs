@@ -10,14 +10,9 @@ compile_error!("This program is for Windows and macOS.");
 mod audio;
 #[cfg(windows)]
 mod capture;
-#[cfg(not(windows))]
-mod capture {
-    //! The sound capture of the voice recognition is Windows only for now: on the other systems it says so.
-    use serde_json::Value;
-    use tauri::AppHandle;
-    pub fn start(_app: AppHandle, _id: String, _options: Value) -> Result<Value, String> { Err("sound capture is Windows only for now".into()) }
-    pub fn stop(_id: &str) {}
-}
+#[cfg(target_os = "macos")]
+#[path = "capture_mac.rs"]
+mod capture;
 mod capturelib;
 mod ext;
 mod extlib;

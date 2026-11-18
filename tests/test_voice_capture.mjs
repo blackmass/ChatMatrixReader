@@ -83,3 +83,19 @@ check(vc.state.capture === null, 'the capture ends: nothing is shown');
 vc.message({ type: 'warn', code: 'no_audio', msg: 'again' }); vc.message({ type: 'capture', mode: 'process', status: 'listening' });
 await vc.stop();
 check(vc.state.capture === null && vc.state.warn === '', 'turned off: no capture line, no warning');
+
+// ---- a Mac: the programs are told by name / bundle id, there is no Discord voice-chat session, and the choices differ
+{
+  const { targetsFor } = await import('../app/core/voice.js');
+  const { methodsFor, MAC_NAMES } = await import('../app/core/voice_target.js');
+  const m = c => targetOf(c, 'macos').target;
+  check(JSON.stringify(m({ voice_target: 'wow' }).names) === JSON.stringify(MAC_NAMES.wow) && m({ voice_target: 'wow' }).names.includes('world of warcraft*'), 'mac: WoW by its name and bundle id');
+  check(JSON.stringify(m({ voice_target: 'discord' }).names) === JSON.stringify(m({ voice_target: 'discord-all' }).names) && m({ voice_target: 'discord' }).skip_audio_service === false, 'mac: Discord and "all of Discord" are the same');
+  check(m({ voice_target: 'app', voice_app: 'Safari|renderer|x' }).names[0] === 'Safari' && m({ voice_target: 'app', voice_app: 'Safari|renderer|x' }).role === '', 'mac: a picked program has no job (role)');
+  check(targetOf({ voice_target: 'wow' }, 'windows').target.names[0] === 'wow*', 'windows: unchanged');
+  check(!targetsFor('macos').some(x => x[0] === 'discord-all') && targetsFor('windows').some(x => x[0] === 'discord-all'), 'the choices of "sound source" differ by system');
+  check(methodsFor('macos').length === 3 && methodsFor('macos')[2][1] !== methodsFor('windows')[2][1] && methodsFor('macos').map(x => x[0]).join() === 'auto,process,device', 'the methods keep their values but are described for the system');
+  check(captureOptions({ voice_target: 'wow' }, 'macos').options.target.names.length === 3, 'the capture is told the Mac names');
+  const sys = captureText({ mode: 'system', device: 'ScreenCaptureKit', program: 'Discord', reason: 'x failed' }, tr);
+  check(sys.includes('x failed'), 'a fallback to the whole system says why the program alone was not used');
+}

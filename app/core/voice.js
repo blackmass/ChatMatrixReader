@@ -20,13 +20,18 @@ import * as bench from './voice_bench.js';
 import { tr } from './i18n.js';
 import { captureOptions } from './voice_target.js';
 import { liveOf } from './voice_proto.js';
+import { OS } from '../platform.js';
 export const FOLDER = 'extensions/stt';
 export const ENGINES = ['cpu', 'vulkan', 'cuda', 'metal'];
 export const DEFAULT_MODEL = 'large-v3-turbo';   // the same on every engine (as in 2.x); the options say to take a smaller one when the CPU is too slow
 // whose sound is recognised (2.0's voice_target): the presets and 'app' = a program picked from the list (voice_app = its file name)
 // discord = the voice chat of Discord only, discord-all = everything Discord plays. (Discord's program and the session of its voice chat are not the
 // same: which session each preset means is settled with the sound capture; here only the choice is kept.)
-export const TARGETS = [['wow', '와우'], ['discord', '디스코드 (음성 대화)'], ['discord-all', '디스코드 (전체)'], ['system', '시스템 전체 소리'], ['app', '프로그램을 직접 고르기']];
+// (on a Mac there is no sound session to tell the voice chat of Discord from its other sounds: one Discord entry)
+export const targetsFor = os => (os === 'macos'
+  ? [['wow', '와우'], ['discord', '디스코드'], ['system', '시스템 전체 소리'], ['app', '프로그램을 직접 고르기']]
+  : [['wow', '와우'], ['discord', '디스코드 (음성 대화)'], ['discord-all', '디스코드 (전체)'], ['system', '시스템 전체 소리'], ['app', '프로그램을 직접 고르기']]);
+export const TARGETS = targetsFor(OS);
 export const LANGS = [['ko', '한국어'], ['en', 'English'], ['ja', '日本語'], ['zh', '中文'], ['es', 'Español'], ['pt', 'Português'], ['fr', 'Français'], ['de', 'Deutsch'], ['ru', 'Русский'], ['it', 'Italiano'], ['pl', 'Polski'], ['tr', 'Türkçe'], ['uk', 'Українська'], ['ar', 'العربية']];
 export const MODES = ['sentence', 'live'];
 export const MODELS = ['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v3-turbo'];

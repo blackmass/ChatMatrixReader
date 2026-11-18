@@ -3,7 +3,7 @@
 import { statusRow, installRow, modelsRow, statsRow, appPickerRow, sourcesRow } from './voice_rows.js';
 import { MODELS, TARGETS, LANGS, deviceOf } from '../core/voice.js';
 import { METHODS } from '../core/voice_target.js';
-import { voiceSupported, OS_VERSION } from '../platform.js';
+import { voiceSupported, OS_VERSION, isMac } from '../platform.js';
 import { tr } from '../core/i18n.js';
 
 const whisper = cfg => (cfg.voice_engine || 'whisper') !== 'openai';
@@ -26,12 +26,17 @@ const CARDS = [
     ] },
     { title: '인식 대상', note: '어느 프로그램의 소리를 글로 바꿀지 고릅니다.', rows: [
       { key: 'voice_target', type: 'select', when: 'live', label: '소리 대상', keywords: '디스코드 discord 와우 wow 프로그램 세션 소리 대상 캡처', options: TARGETS,
-        hints: { discord: '디스코드는 프로그램과 음성 대화의 소리 세션이 따로 있어서, 음성 대화의 소리만 가려 듣습니다.', 'discord-all': '디스코드가 내는 모든 소리를 듣습니다 (음성 대화 외의 알림음도 포함).', app: '아래 목록에서 소리를 내는 프로그램을 고릅니다.' } },
+        hints: isMac
+          ? { discord: '디스코드가 내는 모든 소리를 듣습니다 (Mac에서는 음성 대화의 소리만 가려 들을 수 없습니다).', system: 'Mac이 내는 모든 소리를 듣습니다 (이 프로그램의 소리는 뺍니다).', app: '아래 목록에서 프로그램을 고릅니다.' }
+          : { discord: '디스코드는 프로그램과 음성 대화의 소리 세션이 따로 있어서, 음성 대화의 소리만 가려 듣습니다.', 'discord-all': '디스코드가 내는 모든 소리를 듣습니다 (음성 대화 외의 알림음도 포함).', app: '아래 목록에서 소리를 내는 프로그램을 고릅니다.' } },
       { key: 'voice_app', type: 'custom', when: 'live', label: '프로그램', keywords: '프로세스 process 프로그램 목록 선택 exe', build: appPickerRow, block: true, show: cfg => cfg.voice_target === 'app',
-        note: '지금 소리를 내는 프로그램의 목록입니다. 프로그램을 켜고 소리를 낸 뒤 "목록 새로 고침"을 누르세요.' },
+        note: isMac ? '지금 실행 중인 프로그램의 목록입니다. 목록에 없으면 위 칸에 프로그램 이름을 직접 적을 수 있습니다.' : '지금 소리를 내는 프로그램의 목록입니다. 프로그램을 켜고 소리를 낸 뒤 "목록 새로 고침"을 누르세요.' },
       { key: 'voice_capture', type: 'select', when: 'live', label: '소리 받는 방식', keywords: '캡처 단독 프로세스 loopback 장치 게이트 capture 방식', options: METHODS,
-        hints: { auto: '대부분 이것이면 됩니다. 켜져 있는 동안 위쪽 상태 줄에 실제로 어떤 방식으로 받고 있는지 나옵니다.', process: 'Windows가 거부하면 소리를 받지 못하고, 다시 시도합니다.', device: '같은 장치에서 나오는 다른 프로그램의 소리가 섞이지 않도록, 대상 프로그램이 소리를 내는 동안만 통과시킵니다.' },
-        note: '프로그램만 따로 받는 것이 가장 정확합니다. 안 될 때 "장치 전체" 방식을 고르세요. 세부 기준은 고급 탭의 "음성인식" 항목에서 바꿉니다.' },
+        hints: isMac
+          ? { auto: '대부분 이것이면 됩니다. 켜져 있는 동안 위쪽 상태 줄에 실제로 어떤 방식으로 받고 있는지 나옵니다.', process: '프로그램만 따로 받지 못하면 소리를 받지 못하고, 다시 시도합니다.', device: '프로그램을 가리지 않고 Mac이 내는 모든 소리를 받습니다. 위의 "소리 대상"은 쓰이지 않습니다.' }
+          : { auto: '대부분 이것이면 됩니다. 켜져 있는 동안 위쪽 상태 줄에 실제로 어떤 방식으로 받고 있는지 나옵니다.', process: 'Windows가 거부하면 소리를 받지 못하고, 다시 시도합니다.', device: '같은 장치에서 나오는 다른 프로그램의 소리가 섞이지 않도록, 대상 프로그램이 소리를 내는 동안만 통과시킵니다.' },
+        note: isMac ? '프로그램만 따로 받는 것이 가장 정확합니다. 안 될 때 "자동"이 시스템 전체 소리로 바꿔 받습니다. 화면 기록 권한이 필요합니다 (시스템 설정 → 개인정보 보호 및 보안 → 화면 기록).'
+          : '프로그램만 따로 받는 것이 가장 정확합니다. 안 될 때 "장치 전체" 방식을 고르세요. 세부 기준은 고급 탭의 "음성인식" 항목에서 바꿉니다.' },
       { key: 'voice_lang', type: 'combo', when: 'live', label: '말하는 언어', blank: '자동 감지 (문장마다)', list: LANGS, placeholder: 'ko, en 처럼 언어 코드', keywords: '언어 language 한국어 영어 정확도',
         note: '상대가 쓰는 언어를 고르면 인식이 더 정확해집니다. 섞어 쓰면 자동 감지를 두세요.' },
     ] },
