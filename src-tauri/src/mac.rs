@@ -31,6 +31,8 @@ use objc2::{class, msg_send, sel};
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGEventSourceFlagsState(state: i32) -> u64;
+    fn CGEventSourceKeyState(state: i32, key: u16) -> bool;
+    fn CGEventSourceButtonState(state: i32, button: u32) -> bool;
     fn CGImageGetBitmapInfo(image: *const c_void) -> u32;
     fn CGPreflightScreenCaptureAccess() -> bool;
     fn CGRequestScreenCaptureAccess() -> bool;
@@ -183,15 +185,48 @@ const FLAG_SHIFT: u64 = 0x0002_0000;
 const FLAG_CONTROL: u64 = 0x0004_0000;
 const FLAG_OPTION: u64 = 0x0008_0000;
 
-/// Is this key held down right now? (virtual-key codes of Windows, as the pages speak them: 0x10 Shift, 0x11 Ctrl = Control, 0x12 Alt = Option;
-/// other keys are not looked at on macOS.)
+/// The key code of macOS (the position of the key on an ANSI keyboard: letters and digits are NOT in order) for a virtual-key code of Windows, which is how the
+/// pages name the keys (letters 0x41.., digits 0x30.., F1 0x70.., Enter 0x0D ...). None = a key that has no such place on a Mac.
+fn mac_key(vk: i32) -> Option<u16> {
+    const LETTERS: [u16; 26] = [0, 11, 8, 2, 14, 3, 5, 4, 34, 38, 40, 37, 46, 45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7, 16, 6];     // A .. Z
+    const DIGITS: [u16; 10] = [29, 18, 19, 20, 21, 23, 22, 26, 28, 25];                                                           // 0 .. 9
+    const FKEYS: [u16; 12] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111];                                            // F1 .. F12
+    Some(match vk {
+        0x41..=0x5A => LETTERS[(vk - 0x41) as usize],
+        0x30..=0x39 => DIGITS[(vk - 0x30) as usize],
+        0x70..=0x7B => FKEYS[(vk - 0x70) as usize],
+        0x0D => 36,   // Enter (Return)
+        0x20 => 49,   // Space
+        0x09 => 48,   // Tab
+        0x08 => 51,   // Backspace (the Mac "delete")
+        0x1B => 53,   // Esc
+        0x2D => 114,  // Insert (the Mac "help" key)
+        0x2E => 117,  // Delete (forward delete)
+        0x24 => 115,  // Home
+        0x23 => 119,  // End
+        0x21 => 116,  // Page Up
+        0x22 => 121,  // Page Down
+        0x25 => 123,  // Left
+        0x26 => 126,  // Up
+        0x27 => 124,  // Right
+        0x28 => 125,  // Down
+        0xC0 => 50,   // ` (backtick)
+        _ => return None,
+    })
+}
+
+/// Is this key held down right now? (virtual-key codes of Windows, as the pages speak them: 0x10 Shift, 0x11 Ctrl = Control, 0x12 Alt = Option; the mouse
+/// buttons 0x01 left, 0x02 right, 0x04 middle; letters, digits, F keys, Enter, Esc, the arrows and the like through mac_key.)
 pub fn key_down(vk: i32) -> bool {
-    let flags = unsafe { CGEventSourceFlagsState(1) };      // 1 = the state of the keyboard hardware
     match vk {
-        0x10 => flags & FLAG_SHIFT != 0,
-        0x11 => flags & FLAG_CONTROL != 0,
-        0x12 => flags & FLAG_OPTION != 0,
-        _ => false,
+        0x10 | 0x11 | 0x12 => {
+            let flags = unsafe { CGEventSourceFlagsState(1) };      // 1 = the state of the keyboard hardware
+            flags & match vk { 0x10 => FLAG_SHIFT, 0x11 => FLAG_CONTROL, _ => FLAG_OPTION } != 0
+        }
+        0x01 => unsafe { CGEventSourceButtonState(1, 0) },      // left
+        0x02 => unsafe { CGEventSourceButtonState(1, 1) },      // right
+        0x04 => unsafe { CGEventSourceButtonState(1, 2) },      // middle
+        _ => match mac_key(vk) { Some(k) => unsafe { CGEventSourceKeyState(1, k) }, None => false },
     }
 }
 
@@ -486,7 +521,8 @@ pub fn grab_focus(hwnd: isize) -> bool {
         let mut psn = [0u32; 2];
         GetCurrentProcess(&mut psn);
         SetFrontProcess(&psn);
-        for _ in 0..15 {
+        // (the system takes its time to make a program active when another one - the game - has the keyboard: up to 0.6 s, usually a fraction of it)
+        for _ in 0..60 {
             let active: Bool = msg_send![app, isActive];
             if active.as_bool() { break; }
             pump(0.01);
@@ -497,6 +533,28 @@ pub fn grab_focus(hwnd: isize) -> bool {
         let active: Bool = msg_send![app, isActive];
         active.as_bool()
     })
+}
+
+/// Does this window of ours have the keyboard now: it is the key window and this program is the active one. (No waiting: the system takes its time, see ask_keyboard.)
+pub fn has_keyboard(hwnd: isize) -> bool {
+    on_main(|| unsafe {
+        let key: Bool = msg_send![obj(hwnd), isKeyWindow];
+        let active: Bool = msg_send![shared_app(), isActive];
+        key.as_bool() && active.as_bool()
+    })
+}
+
+/// Asks once more for the keyboard: this window to be the key window (the system may take a second or more to do it; the box asks again every 0.2 s until it has it).
+pub fn ask_keyboard(hwnd: isize) {
+    on_main(|| unsafe {
+        let nothing: *const AnyObject = std::ptr::null();
+        let _: () = msg_send![obj(hwnd), makeKeyAndOrderFront: nothing];
+    });
+}
+
+/// Is this program the one in front? (`foreground` is no help: it looks for an ordinary window of the front program, and the send box is a floating one.)
+pub fn self_front() -> bool {
+    front_pid() == std::process::id() as i32
 }
 
 /// Gives the keyboard back to the game (`hwnd` is the window number of the game window). Does not wait.
@@ -544,14 +602,157 @@ pub fn installed_fonts() -> Vec<String> {
 }
 
 // ------------------------------------------------------------------------------------------------- the wheel over a click-through window
-// Not made yet on macOS (it needs an event tap and the permission "Input Monitoring"): the wheel over a window the mouse goes through goes to the
-// game, and a window that asks for the turns gets none.
+// A click-through window gets no mouse events, so the wheel over it would go to the game. An event tap (its own thread) sees every wheel turn of the session: a window
+// that asked for it (wheel_zone) has the turns over it taken away from the game (the tap swallows them) and told to the window at once (the sink: main.rs emits
+// 'wheel-turn' to it; wheel_since is the other way, as on Windows). Same job as the
+// mouse hook of win.rs. The tap can change events, so it needs the permission "Accessibility" (the one the auto-paste asks for) and may ask for "Input Monitoring":
+// it is made when the first window asks for the wheel (not at the start), and tried again every 3 s while it cannot be made.
 static ASKED_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static WHEEL_SEQ: AtomicU64 = AtomicU64::new(0);
+static WHEEL: Mutex<Vec<(u64, isize, i16)>> = Mutex::new(Vec::new());                  // (number, window, delta in the units of Windows: 120 = one notch)
+static ZONES: Mutex<Vec<(isize, bool, [f64; 4])>> = Mutex::new(Vec::new());            // (window, the turns DOWN too, its rectangle l, t, r, b in points, top left origin)
+static TAP: std::sync::atomic::AtomicPtr<c_void> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+static HOOK: Mutex<Option<(bool, Instant)>> = Mutex::new(None);                        // (made?, when it was tried): None = never tried
+static ASKED_LISTEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SINK: std::sync::OnceLock<Box<dyn Fn(isize, i16) + Send + Sync>> = std::sync::OnceLock::new();
+/// A turn of the wheel that was taken for a window is passed to this function at once (the window, the delta in Windows units).
+pub fn set_wheel_sink(f: impl Fn(isize, i16) + Send + Sync + 'static) { let _ = SINK.set(Box::new(f)); }
+// A trackpad gesture belongs to the window that got its first event, to the end (the fingers up and the glide after it): once a turn was taken, the events that
+// follow within 0.25 s are taken for the same window wherever the cursor is, else the rest of a gesture goes to the game (a zoom) the moment the window changes.
+static LOCK: Mutex<Option<(isize, Instant)>> = Mutex::new(None);
+const GESTURE_GAP: Duration = Duration::from_millis(250);
+
+type TapCallback = extern "C" fn(proxy: *mut c_void, kind: u32, event: *mut c_void, info: *mut c_void) -> *mut c_void;
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventTapCreate(tap: u32, place: u32, options: u32, events: u64, callback: TapCallback, info: *mut c_void) -> *mut c_void;
+    fn CGEventTapEnable(tap: *mut c_void, enable: bool);
+    fn CGEventGetLocation(event: *mut c_void) -> CGPoint;
+    fn CGEventGetIntegerValueField(event: *mut c_void, field: u32) -> i64;
+    fn CGRequestListenEventAccess() -> bool;
+}
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFMachPortCreateRunLoopSource(alloc: *const c_void, port: *mut c_void, order: isize) -> *mut c_void;
+    fn CFRunLoopGetCurrent() -> *mut c_void;
+    fn CFRunLoopAddSource(rl: *mut c_void, source: *mut c_void, mode: *const c_void);
+    fn CFRunLoopRun();
+    static kCFRunLoopCommonModes: *const c_void;
+}
+
+const EVENT_SCROLL: u32 = 22;
+const TAP_DISABLED_TIMEOUT: u32 = 0xFFFF_FFFE;
+const TAP_DISABLED_USER: u32 = 0xFFFF_FFFF;
+const FIELD_DELTA_AXIS_1: u32 = 11;
+const FIELD_IS_CONTINUOUS: u32 = 88;
+const FIELD_POINT_DELTA_AXIS_1: u32 = 96;
+
+extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _info: *mut c_void) -> *mut c_void {
+    unsafe {
+        if kind == TAP_DISABLED_TIMEOUT || kind == TAP_DISABLED_USER {          // (the system switches a tap off that was too slow, or by the user's input: on again)
+            let tap = TAP.load(Ordering::SeqCst);
+            if !tap.is_null() { CGEventTapEnable(tap, true); }
+            return event;
+        }
+        if kind != EVENT_SCROLL { return event; }
+        // positive = the content goes down = what is above comes into view (the system has already applied the "natural scrolling" setting): the same as the turn UP of Windows
+        let continuous = CGEventGetIntegerValueField(event, FIELD_IS_CONTINUOUS) != 0;
+        let mut delta = CGEventGetIntegerValueField(event, FIELD_POINT_DELTA_AXIS_1);
+        if delta == 0 { delta = CGEventGetIntegerValueField(event, FIELD_DELTA_AXIS_1) * 10; }
+        if delta == 0 { return event; }
+        // the page scrolls units x 100 / 120 pixels: a wheel notch (about 10 points) is a notch of Windows, a trackpad moves as far as the fingers do
+        let units = (delta as f64 * if continuous { 1.2 } else { 12.0 }).round().clamp(-32000.0, 32000.0) as i16;
+        let at = CGEventGetLocation(event);
+        let mut target: Option<isize> = None;
+        if let Ok(lock) = LOCK.try_lock() {
+            if let Some((h, at_t)) = *lock { if at_t.elapsed() < GESTURE_GAP { target = Some(h); } }
+        }
+        if target.is_none() {
+            if let Ok(zones) = ZONES.try_lock() {
+                for &(h, _down, r) in zones.iter() {
+                    if at.x >= r[0] && at.x < r[2] && at.y >= r[1] && at.y < r[3] { target = Some(h); break; }
+                }
+            }
+        }
+        let Some(h) = target else { return event };
+        if let Ok(mut lock) = LOCK.try_lock() { *lock = Some((h, Instant::now())); }
+        match SINK.get() {
+            Some(f) => f(h, units),
+            None => if let Ok(mut list) = WHEEL.try_lock() {
+                list.push((WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, h, units));
+                if list.len() > 200 { list.remove(0); }
+            },
+        }
+        std::ptr::null_mut()                                                      // the program in front does not get this turn
+    }
+}
+
+/// Makes the tap (in a thread of its own, which then serves it). true = it runs. Not made yet: false, and the permission is asked for once; tried again after 3 s.
+fn ensure_hook() -> bool {
+    if let Ok(h) = HOOK.lock() {
+        match *h {
+            Some((true, _)) => return true,
+            Some((false, at)) if at.elapsed() < Duration::from_secs(3) => return false,
+            _ => {}
+        }
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    std::thread::spawn(move || unsafe {
+        // session tap, at the head, one that may change events; only the wheel
+        let tap = CGEventTapCreate(1, 0, 0, 1u64 << EVENT_SCROLL, wheel_tap, std::ptr::null_mut());
+        if tap.is_null() { let _ = tx.send(false); return; }
+        TAP.store(tap, Ordering::SeqCst);
+        let source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
+        CGEventTapEnable(tap, true);
+        let _ = tx.send(true);
+        CFRunLoopRun();
+    });
+    let made = rx.recv_timeout(Duration::from_millis(500)).unwrap_or(false);
+    if !made && !ASKED_LISTEN.swap(true, Ordering::SeqCst) {
+        unsafe { CGRequestListenEventAccess(); CGRequestPostEventAccess(); }       // (the system asks the user once: Input Monitoring, Accessibility)
+    }
+    if let Ok(mut h) = HOOK.lock() { *h = Some((made, Instant::now())); }
+    made
+}
+
+/// The rectangle of a window of ours in the points of the event tap's screen (top left origin, y down).
+fn zone_rect(hwnd: isize) -> [f64; 4] {
+    on_main(|| unsafe {
+        let f: objc2_foundation::NSRect = msg_send![obj(hwnd), frame];
+        let screen_h = CGDisplay::main().bounds().size.height;
+        [f.origin.x, screen_h - (f.origin.y + f.size.height), f.origin.x + f.size.width, screen_h - f.origin.y]
+    })
+}
 
 pub fn start_wheel_hook() {}
-pub fn wheel_zone(_hwnd: isize, _on: bool, _usable: bool) {}
-pub fn wheel_since(_hwnd: isize, seq: u64) -> (u64, Vec<i16>) { (seq.max(WHEEL_SEQ.load(Ordering::Relaxed)), Vec::new()) }
+
+/// A window asks for the wheel turns over it (`usable` is not used here: only windows the mouse goes through ask). false = it cannot be had (no permission yet).
+pub fn wheel_zone(hwnd: isize, on: bool, _usable: bool, down: bool) -> bool {
+    if !on {
+        if let Ok(mut z) = ZONES.lock() { z.retain(|&(h, _, _)| h != hwnd); }
+        return true;
+    }
+    if !ensure_hook() { return false; }
+    let rect = zone_rect(hwnd);
+    if let Ok(mut z) = ZONES.lock() {
+        z.retain(|&(h, _, _)| h != hwnd);
+        z.push((hwnd, down, rect));
+    }
+    true
+}
+
+/// The turns told to `hwnd` after number `seq`: (the newest number, the deltas). Also keeps the rectangle of the window up to date (it may have been moved).
+pub fn wheel_since(hwnd: isize, seq: u64) -> (u64, Vec<i16>) {
+    let known = ZONES.lock().map(|z| z.iter().any(|e| e.0 == hwnd)).unwrap_or(false);
+    if known {
+        let rect = zone_rect(hwnd);
+        if let Ok(mut z) = ZONES.lock() { for e in z.iter_mut() { if e.0 == hwnd { e.2 = rect; } } }
+    }
+    let list = WHEEL.lock().map(|l| l.clone()).unwrap_or_default();
+    let newest = list.iter().map(|e| e.0).max().unwrap_or(seq).max(seq);
+    (newest, list.iter().filter(|e| e.0 > seq && e.1 == hwnd).map(|e| e.2).collect())
+}
 
 // ------------------------------------------------------------------------------------------------- the options hot key
 /// Not used on macOS: main.rs registers Ctrl+Option+O with the system's hot key service (no permission needed).

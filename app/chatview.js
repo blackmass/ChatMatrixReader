@@ -15,7 +15,7 @@ export const FADE_TICK_MS = 33;        // how often fading lines are drawn
 export const FADE_IDLE_MS = 250;       // how often the age of the lines is looked at while none is fading
 
 export const DEFAULT_LOOK = {
-  family: '', size: 12, trans_size: 0, trans_color: '', line_gap: 0, group_gap: 4, align: 'left', bottom: false, shadow: false,
+  family: '', size: 12, trans_size: 0, trans_color: '', line_gap: 0, line_h: 0, group_gap: 4, whole: false, max_groups: 0, align: 'left', bottom: false, shadow: false,
   font_weight: 400, outline: 0, outline_color: '#000000', bold_fix: 0, letter_spacing: 0, plain_text: false, text_opacity: 1.0, shadow_dx: 1, shadow_dy: 1, shadow_color: '#000000', indent: 4, fade_sec: 0,
 };
 
@@ -23,10 +23,11 @@ export const DEFAULT_LOOK = {
 export function lookFrom(opt) {
   return {
     family: opt('font_family', ''), size: Math.max(6, +opt('font_size', 11) || 11), trans_size: +opt('trans_font_size', 0) || 0, font_weight: Math.min(900, Math.max(100, Math.round((+opt('font_weight', 400) || 400) / 100) * 100)),
-    trans_color: opt('trans_color', '') || '', line_gap: +opt('line_spacing', 0) || 0, group_gap: +opt('group_spacing', 4) || 0,
+    trans_color: opt('trans_color', '') || '', line_gap: +opt('line_spacing', 0) || 0, line_h: +opt('line_height', 0) || 0, group_gap: +opt('group_spacing', 4) || 0,
+    whole: !!opt('whole_groups', false), max_groups: Math.max(0, Math.min(50, Math.round(+opt('max_groups', 0) || 0))),
     align: opt('align', 'left') || 'left', bottom: !!opt('bottom', false), shadow: !!opt('shadow', false),
     outline: Math.max(0, Math.min(30, Math.round(+opt('outline', 0) || 0))), outline_color: opt('outline_color', '#000000') || '#000000',
-    bold_fix: Math.max(0, Math.min(10, Math.round(+opt('bold_fix', 0) || 0))), letter_spacing: Math.max(-10, Math.min(20, +opt('letter_spacing', 0) || 0)), plain_text: !!opt('plain_text', false),
+    bold_fix: Math.max(-10, Math.min(10, Math.round(+opt('bold_fix', 0) || 0))), letter_spacing: Math.max(-10, Math.min(20, +opt('letter_spacing', 0) || 0)), plain_text: !!opt('plain_text', false),
     text_opacity: +opt('text_opacity', 1) || 0, shadow_dx: +opt('shadow_dx', 1) || 0, shadow_dy: +opt('shadow_dy', 1) || 0,
     shadow_color: opt('shadow_color', '#000000') || '#000000', indent: Math.max(0, +opt('indent', 4) || 0), fade_sec: Math.max(0, +opt('fade_sec', 0) || 0),
   };
@@ -58,9 +59,18 @@ export class ChatView {
     this.tip = document.createElement('div');
     this.tip.className = 'cv-tip';
     document.body.appendChild(this.tip);
+    // Whether the user is at the newest line, as of the last time the position was moved (by the user, or by us). When the heights change by themselves (a font
+    // that arrives later, the window made smaller, a new look) and it was at the bottom, it is put at the bottom again; one who is reading above is left where he is.
+    this._stuck = true;
+    scroll.addEventListener('scroll', () => { this._stuck = this.atBottom(); this.scheduleClip(); });
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => { if (this._stuck && !this.atBottom()) this.scroll.scrollTop = this.scroll.scrollHeight; this.scheduleClip(); });
+      ro.observe(this.list); ro.observe(scroll);
+    }
     this.list.addEventListener('mouseover', e => this.showTip(e));
     this.list.addEventListener('mousemove', e => this.moveTip(e));
-    this.list.addEventListener('mouseout', () => { this.tip.style.display = 'none'; this.polled = false; });
+    this.list.addEventListener('mouseout', () => { this.tip.style.display = 'none'; this.polled = false; this.hideSunk(); });
+    this.sink = null;                     // where the tip is drawn when not here: a window of its own (popup_host.js, set by the window page): { usable(), show(html, x, y), hide() }
     this.polled = false;                  // the tip on the screen was put there by tipAtPoint (the pointer of a click-through window), not by the mouse events
     this.setLook({});
   }
@@ -70,6 +80,7 @@ export class ChatView {
   // ------------------------------------------------------------------------------------------------ look
   setLook(look, model = null) {
     const before = JSON.stringify(this.look), fadeBefore = this.look.fade_sec;
+    const wasBottom = this._stuck !== false || this.atBottom();           // (asked BEFORE the new look changes the heights: afterwards a taller text is "not at the bottom")
     this.look = { ...DEFAULT_LOOK, ...look };
     if (this.look.fade_sec !== fadeBefore) this.touch();                 // a new time: counted from now (lines that are old do not vanish at once)
     const s = this.look, st = this.scroll.style;
@@ -79,9 +90,13 @@ export class ChatView {
     st.setProperty('--cv-trans-size', (s.trans_size > 0 ? s.trans_size : s.size) + 'px');
     st.setProperty('--cv-align', s.align);
     st.setProperty('--cv-text-alpha', Math.max(0, Math.min(1, s.text_opacity)));
-    const grow = s.bold_fix / 10;                                         // (the glyphs grow by half of the stroke on every side)
+    // bold_fix > 0: a stroke in the colour of the text makes the glyphs heavier (they grow by half of the stroke on every side; 0.1px a step).
+    // bold_fix < 0: a very thin stroke in the OUTLINE colour (black by default) is drawn over the edge of the glyphs, so they look thinner (0.03px a step): it paints
+    // over the edge, it does not take anything away. For text that looks heavier than it should on a dark background (Windows draws light text heavier than the game does).
+    const grow = Math.max(0, s.bold_fix) / 10, bite = Math.max(0, -s.bold_fix) * 0.03;
     st.setProperty('--cv-shadow', shadowList(s, grow));
-    st.setProperty('--cv-stroke', grow + 'px');
+    st.setProperty('--cv-stroke', +(grow || bite).toFixed(2) + 'px');
+    st.setProperty('--cv-stroke-color', s.bold_fix < 0 ? (s.outline_color || '#000') : 'currentColor');
     st.setProperty('--cv-spacing', s.letter_spacing ? (s.letter_spacing / 10) + 'px' : 'normal');
     st.setProperty('--cv-kern', s.plain_text ? 'none' : 'auto');
     st.setProperty('--cv-render', s.plain_text ? 'optimizeSpeed' : 'auto');
@@ -89,6 +104,8 @@ export class ChatView {
     this.indentPx = this.measureIndent();
     st.setProperty('--cv-indent', (s.align === 'left' ? this.indentPx : 0) + 'px');
     if (model && before !== JSON.stringify(this.look)) this.rebuild(model);
+    if (wasBottom) this.toBottom();                                      // the newest line stays in view when the look changes
+    this.scheduleClip();
     this.startTimer();
   }
 
@@ -110,10 +127,15 @@ export class ChatView {
     const s = this.look;
     const el = document.createElement('div');
     el.className = `cv-blk k-${b.kind}`;
-    const gap = s.line_gap, group = b.group ? s.group_gap : 0;
-    if (group > 0) el.style.marginTop = group + 'px';
-    const row = gap + Math.min(0, group);
-    if (row) el.style.lineHeight = `calc(1.3em + ${row}px)`;
+    // three different spaces: between groups (the first block of a group), between an original and its translation (the next block of the group), and
+    // between the rows of one block that wraps (the row height). Each one has its own setting, so none moves the others.
+    // The row height adds room above AND below every row (half each), so the first row of a block would move away from the block above and the last one from the
+    // block below. That half is taken off the margins again: the row height only changes the distance BETWEEN the rows of one block.
+    if (b.group) el.dataset.g = '1';                                     // (the first block of a group: see clip)
+    const half = s.line_h / 2;
+    const above = (b.group ? s.group_gap : s.line_gap) - half;
+    if (above) el.style.marginTop = above + 'px';
+    if (half) { el.style.lineHeight = `calc(1.3em + ${s.line_h}px)`; el.style.marginBottom = -half + 'px'; }
     if (this.indentPx && s.align === 'left') {
       el.style.paddingLeft = 'var(--cv-indent)';
       el.style.textIndent = b.indent ? '0' : 'calc(-1 * var(--cv-indent))';       // a translation is pushed in as a whole; any other line hangs
@@ -131,6 +153,7 @@ export class ChatView {
   }
 
   atBottom() { const e = this.scroll; return e.scrollHeight - e.scrollTop - e.clientHeight < 4; }
+  toBottom() { this._stuck = true; this.scroll.scrollTop = this.scroll.scrollHeight; }
 
   // the operations of one model change (and the model they came from, for the colours)
   apply(ops, model) {
@@ -158,15 +181,44 @@ export class ChatView {
     }
     if (stick) this.scroll.scrollTop = this.scroll.scrollHeight;
     this.fadeTick();
+    this.scheduleClip();
   }
 
   // draw everything again from the model (the look changed)
   rebuild(model) {
-    const stick = this.atBottom(), old = this.born.slice();
+    const stick = this._stuck || this.atBottom(), old = this.born.slice();
     this.list.replaceChildren(...model.blocks.map(b => this.makeBlock(b, model)));
     this.born = model.blocks.map((_, i) => old[i] ?? this.now());
     if (stick) this.scroll.scrollTop = this.scroll.scrollHeight;
     this.fadeTick();
+    this.scheduleClip();
+  }
+
+  // ------------------------------------------------------------------------------------------------ whole groups
+  // "온전한 묶음만" (look.whole) and "보일 묶음 수" (look.max_groups): at the newest line, the groups that would be cut at the top edge of the window (or are older than the
+  // number asked for) are hidden as a whole, so the window always shows 1, 2, 3 ... complete groups. Hidden = `visibility`, so nothing moves. While the user reads above
+  // (not at the newest line) everything is shown again.
+  scheduleClip() {
+    if (this._clipQueued) return;
+    this._clipQueued = true;
+    requestAnimationFrame(() => this.clip());
+  }
+  clip() {
+    this._clipQueued = false;
+    for (const el of this.list.querySelectorAll('.cv-clip')) el.classList.remove('cv-clip');
+    const kids = this.list.children, { whole, max_groups: max } = this.look;
+    if ((!whole && !(max > 0)) || !kids.length || !this.atBottom()) return;
+    const starts = [];                                                    // the index of the first block of every group
+    for (let i = 0; i < kids.length; i++) if (kids[i].dataset.g || i === 0) starts.push(i);
+    const last = starts.length - 1;
+    let first = max > 0 && starts.length > max ? starts.length - max : 0;           // the oldest group that stays
+    if (whole) {
+      const edge = this.scroll.getBoundingClientRect().top + (this.inset || 0);          // (inset: the part of the top the title bar covers, see overlay.js)
+      for (let g = last; g >= first; g--) {                              // from the newest back: the first one that starts above the edge is cut, so are all older ones
+        if (kids[starts[g]].getBoundingClientRect().top < edge - 1) { first = g === last ? last : g + 1; break; }     // (the newest stays, even when it is taller than the window)
+      }
+    }
+    for (let i = 0; i < starts[first]; i++) kids[i].classList.add('cv-clip');
   }
 
   // ------------------------------------------------------------------------------------------------ fading out
@@ -174,16 +226,21 @@ export class ChatView {
   fadeTick() {
     const sec = this.look.fade_sec, kids = this.list.children;
     const showAll = !this.atBottom();
-    let fading = false, head = 0;
+    let fading = false, head = 0, gone = false;
     for (let i = 0; i < kids.length; i++) {
       if (!kids[i].classList.contains('k-trans') && !kids[i].classList.contains('k-error')) head = i;       // a translation fades with its line
       const a = sec > 0 && !showAll ? fade.alpha(this.now() - this.born[head], sec, T.FADE_MS) : 1;
       const el = kids[i];
       if (a !== (el._a ?? 1)) { el._a = a; el.style.opacity = a >= 1 ? '' : String(a); el.style.visibility = a <= 0 ? 'hidden' : ''; }
       if (a > 0 && a < 1) fading = true;
+      if (a <= 0) gone = true;
     }
     this.fading = fading;
+    this.anyHidden = gone;                  // lines have faded away completely
+    this.anyFaded = gone || fading;         // ... or are on their way (a turn of the wheel brings them back, also in the 3 seconds of the fade)
   }
+
+  hasFaded() { return !!this.anyFaded; }
 
   // the user did something with the window (scrolled, changed the fade time): every line is as new again, the time starts over
   touch() {
@@ -202,14 +259,29 @@ export class ChatView {
   stop() { clearTimeout(this.timer); }
 
   // ------------------------------------------------------------------------------------------------ tooltips of item links
+  // the tip in a window of its own: it is not cut off by a small window, and it stays where it first appeared (it is not moved with the mouse)
+  sunk() { return this.sink && this.sink.usable() ? this.sink : null; }
+  hideSunk() { this._sunkEl = null; this.tip.style.display = 'none'; if (this.sink) this.sink.hide(); }
+  // the window of its own could not be made: this page draws the tip after all (and the next ones, `sunk()` says no for a while)
+  sinkShow(el, x, y, html) {
+    Promise.resolve(this.sink.show(html, x, y)).then(ok => {
+      if (ok !== false || (this._sunkEl !== el && this._tipEl !== el)) return;
+      this.tip.innerHTML = html; this.tip.style.display = 'block'; this.placeTip(x, y);
+    });
+  }
   showTip(e) {
     const el = e.target.closest?.('.cv-tipped');
+    if (this.sunk()) {
+      if (!el || el.parentElement.style.visibility === 'hidden') { if (this._sunkEl) this.hideSunk(); return; }
+      if (el !== this._sunkEl) { this._sunkEl = el; this.sinkShow(el, e.clientX, e.clientY, theme.tipHtml(el._tip)); }
+      return;
+    }
     if (!el || el.parentElement.style.visibility === 'hidden') { this.tip.style.display = 'none'; return; }
     this.tip.innerHTML = theme.tipHtml(el._tip);
     this.tip.style.display = 'block';
     this.moveTip(e);
   }
-  moveTip(e) { this.placeTip(e.clientX, e.clientY); }
+  moveTip(e) { if (!this.sunk()) this.placeTip(e.clientX, e.clientY); }
   placeTip(x, y) {
     if (this.tip.style.display === 'none') return;
     const w = this.tip.offsetWidth, h = this.tip.offsetHeight;
@@ -221,6 +293,10 @@ export class ChatView {
   tipAtPoint(x, y) {
     const el = x === null || x === undefined ? null : document.elementFromPoint(x, y)?.closest?.('.cv-tipped');
     if (!el || el.parentElement.style.visibility === 'hidden') { this.hideTip(); return false; }
+    if (this.sunk()) {
+      if (el !== this._tipEl || !this.polled) { this._tipEl = el; this.polled = true; this.sinkShow(el, x, y, theme.tipHtml(el._tip)); }
+      return true;
+    }
     // The tip stays where it first appeared (the 0.1 s pointer poll would make a following tip jerky); it moves only when the pointer goes to another link.
     if (el !== this._tipEl || !this.polled) {
       this.tip.innerHTML = theme.tipHtml(el._tip); this._tipEl = el;
@@ -230,5 +306,5 @@ export class ChatView {
     return true;
   }
   // takes a tip away that tipAtPoint put there (a tip of the mouse events goes away by itself)
-  hideTip() { if (!this.polled) return; this.polled = false; this._tipEl = null; this.tip.style.display = 'none'; }
+  hideTip() { if (!this.polled) return; this.polled = false; this._tipEl = null; this.tip.style.display = 'none'; this.hideSunk(); }
 }

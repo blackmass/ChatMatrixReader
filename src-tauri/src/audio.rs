@@ -9,7 +9,9 @@
 
 use serde_json::Value;
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub fn list_sessions() -> Result<Value, String> { crate::capture::list_apps() }      // (macOS: the programs ScreenCaptureKit lists; no sound sessions to read)
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn list_sessions() -> Result<Value, String> { Err("Windows only".into()) }
 #[cfg(not(windows))]
 pub fn probe(_pid: u32, _secs: f64, _save: bool, _full: bool, _device: &str) -> Result<Value, String> { Err("Windows only".into()) }

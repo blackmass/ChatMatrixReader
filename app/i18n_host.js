@@ -6,7 +6,10 @@
 // Parts of a page that show other people's text (the chat) are marked data-notr: nothing inside is touched.
 // Every window: `await startI18n(settings)` once, right after settings.load().
 import { files } from './fs.js';
-import { parseLocale, setTable, tr, pickLanguage, DEFAULT_LANG } from './core/i18n.js';
+import { parseLocale, setTable, tr, pickLanguage, DEFAULT_LANG, setTextFilter, macKeys } from './core/i18n.js';
+import { isMac } from './platform.js';
+
+if (isMac) setTextFilter(macKeys);                      // (every text shown by tr(), also the ones the DOM walker below translates)
 
 const HAN = /[가-힣]/;
 const ATTRS = ['placeholder', 'title', 'aria-label'];

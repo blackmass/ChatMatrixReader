@@ -2,13 +2,13 @@
 // something a web page or a config value can change; the only way in is the file extensions/stt/catalog.json that a person puts there by hand
 // (for trying other builds / mirrors; format at the bottom).
 //
-//   engine = one or more files in extensions/stt/engine-<kind>/ ; the one that is started is ENGINE_EXE
+//   engine = one or more files in extensions/stt/engine-<kind>/ ; the one that is started is exeName(kind)  (cmr-stt.exe; the Mac engine 'metal': cmr-stt)
 //   model  = one file extensions/stt/models/ggml-<name>.bin
 //
 // sha256: '' = not checked (the size the server announces is still checked). The engine addresses stay empty until the engine builds are
 // published (GitHub Actions of this repository); an engine without address says so instead of downloading.
 export const FOLDER = 'extensions/stt';
-export const ENGINE_EXE = 'cmr-stt.exe';
+export const exeName = kind => (kind === 'metal' ? 'cmr-stt' : 'cmr-stt.exe');
 export const CATALOG_FILE = FOLDER + '/catalog.json';
 
 const MODEL_URL = n => `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${n}.bin`;
@@ -17,18 +17,24 @@ export const BUILTIN = {
   // <engine-files> written by tools/engine_release.py when an engine is released (empty until then: the engine buttons say it is not up yet)
   engines: {
     cpu: { files: [
-      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/cmr-stt-cpu-windows-x64.exe', sha256: 'fd34757368f42f59d1c2e0e04510cbee1dc03ad6defd9aaf8cc15353f1b8b306' },
-      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/LICENSE-whisper.cpp.txt', sha256: 'bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285' },
-      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
-      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/BUILD-INFO-engine-cpu.txt', sha256: 'e9a9ddbcba600593ddef2cdbe117a1eadad8ea99ae6ed8bf001ea539100d436c' },
+      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/cmr-stt-cpu-windows-x64.exe', sha256: 'fd34757368f42f59d1c2e0e04510cbee1dc03ad6defd9aaf8cc15353f1b8b306' },
+      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-whisper.cpp.txt', sha256: '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d' },
+      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
+      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/BUILD-INFO-engine-cpu.txt', sha256: '135e7efe40fd23d2cbb81eb829536ef3c0494d9171e5fb937eb3de78aa1cbca6' },
     ] },
     vulkan: { files: [
-      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/cmr-stt-vulkan-windows-x64.exe', sha256: 'af4f281941be815c09fd4baef1e40e35e43f0e098d04b59a84c54022d6babb52' },
-      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/LICENSE-whisper.cpp.txt', sha256: 'bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285' },
-      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
-      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.1/BUILD-INFO-engine-vulkan.txt', sha256: 'a8d82e7c6ba99b4c242b4dbe43eb0b846a760645d3f3fcf966175104f6bff365' },
+      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/cmr-stt-vulkan-windows-x64.exe', sha256: 'af4f281941be815c09fd4baef1e40e35e43f0e098d04b59a84c54022d6babb52' },
+      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-whisper.cpp.txt', sha256: '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d' },
+      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
+      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/BUILD-INFO-engine-vulkan.txt', sha256: '64c346b3632dbccc33fdcdb9f51d1451d81e23f1331467bcbc21bb529b5eb875' },
     ] },
     cuda: { files: [] },
+    metal: { files: [
+      { name: 'cmr-stt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/cmr-stt-metal-macos-arm64', sha256: '3d95c240ade43e1f63a9dfd7497805bfcf8369fee44e25d5da4e288d2f86a3d6' },
+      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-whisper.cpp.txt', sha256: '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d' },
+      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
+      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/BUILD-INFO-engine-metal.txt', sha256: 'cd48da2f32c89826eb1b4a4c1043c9c10a51d9e8507c71c94bf9b82061c6143d' },
+    ] },
   },
   // </engine-files>
   models: {
@@ -42,7 +48,7 @@ export const BUILTIN = {
 };
 
 export const engineDir = kind => `${FOLDER}/engine-${kind}`;
-export const exePath = kind => `${engineDir(kind)}/${ENGINE_EXE}`;
+export const exePath = kind => `${engineDir(kind)}/${exeName(kind)}`;
 export const modelPath = name => `${FOLDER}/models/ggml-${name}.bin`;
 
 const okUrl = u => typeof u === 'string' && /^https?:\/\/[^\s]+$/.test(u);

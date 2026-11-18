@@ -15,12 +15,13 @@ export const MODES = ['always', 'voice', 'never'];
 export const KEYS = {
   id: 0, name: '', open_mode: 'never', channels: [], geometry: '', font_family: '', font_size: 0, bg_opacity: 1.0, text_opacity: 1.0,
   topmost: true, topmost_wow_only: false, click_through: false, hover_clear: false, blur: 0, shadow: false, head_mode: 'basic', align: 'left', bottom: false,
+  clear_on_open: false,                // an extra window: starts empty when it is opened (the hub's earlier lines are not given to it)
 };
 export const OPT_NUM = {
-  max_lines: [50, 5000], font_weight: [100, 900], trans_font_size: [0, 32], line_spacing: [-20, 40], group_spacing: [-20, 60], indent: [0, 16],
-  shadow_dx: [-8, 8], shadow_dy: [-8, 8], fade_sec: [0, 86400], outline: [0, 30], bold_fix: [0, 10], letter_spacing: [-10, 20],
+  max_lines: [50, 5000], font_weight: [100, 900], trans_font_size: [0, 32], line_spacing: [-20, 40], line_height: [-10, 40], group_spacing: [-20, 60], max_groups: [0, 50], indent: [0, 16],
+  shadow_dx: [-8, 8], shadow_dy: [-8, 8], fade_sec: [0, 86400], outline: [0, 30], bold_fix: [-10, 10], letter_spacing: [-10, 20],
 };
-export const OPT_BOOL = ['show_time', 'class_colors', 'swap_trans', 'plain_text'];
+export const OPT_BOOL = ['show_time', 'class_colors', 'swap_trans', 'plain_text', 'whole_groups'];
 export const OPT_STR = ['trans_color', 'shadow_color', 'outline_color'];
 // What an extra window can leave EMPTY to follow window 1 (shown as "창 1을 따름"): numbers and text that can be typed, and the choices (a list has
 // "창 1을 따름" on top). Not on / off switches and sliders: those are the window's own value with a "기본값" button.
@@ -79,7 +80,7 @@ export function normalize(items) {
       d.font_size = pyInt(d.font_size);
     } catch { d.bg_opacity = d.text_opacity = 1.0; d.font_size = 0; }
     try { d.blur = Math.min(3, Math.max(0, pyInt(d.blur))); } catch { d.blur = 0; }
-    for (const k of ['topmost', 'topmost_wow_only', 'click_through', 'hover_clear', 'bottom', 'shadow']) d[k] = truthy(d[k]);
+    for (const k of ['topmost', 'topmost_wow_only', 'click_through', 'hover_clear', 'bottom', 'shadow', 'clear_on_open']) d[k] = truthy(d[k]);
     if (!ALIGNS.includes(d.align)) d.align = 'left';
     if (!HEADS.includes(d.head_mode)) d.head_mode = 'basic';
     for (const k of follows) d[k] = null;

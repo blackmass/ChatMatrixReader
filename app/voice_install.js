@@ -5,7 +5,7 @@ import { tr } from './core/i18n.js';
 import { modelOf, scan, plan } from './core/voice.js';
 import { BENCH_DIR } from './core/voice_bench.js';
 import { FOLDER, CATALOG_FILE, mergeCatalog, engineDir, exePath, modelPath } from './core/voice_catalog.js';
-import { engineArgs, benchArgs, parseLine, controlFrame } from './core/voice_proto.js';
+import { engineArgs, benchArgs, parseLine, controlFrame, deviceArg } from './core/voice_proto.js';
 import { captureOptions } from './core/voice_target.js';
 
 const mb = n => (n >= 1024 * 1024 * 1024 ? (n / 1024 / 1024 / 1024).toFixed(1) + ' GB' : (n / 1024 / 1024).toFixed(0) + ' MB');
@@ -21,7 +21,7 @@ export function makeInstaller({ files, invoke, listen, getCfg }) {
   let current = null;           // id of the download in progress
   let stopped = false;
   const api = {
-    // what: 'cpu' | 'vulkan' | 'cuda' (the engine, and the model it would use) | 'model' (only the model that is wanted now)
+    // what: 'cpu' | 'vulkan' | 'cuda' | 'metal' (the engine, and the model it would use) | 'model' (only the model that is wanted now)
     //       | 'model:<name>' (only that model: the model list of the options)
     async install(what, report) {
       stopped = false;
@@ -37,7 +37,7 @@ export function makeInstaller({ files, invoke, listen, getCfg }) {
         for (const f of e.files) steps.push({ label: f.name, url: f.url, sha256: f.sha256, dest: `${engineDir(what)}/${f.name}` });
       } else {
         const have = (await files.list(FOLDER).catch(() => [])).filter(n => /^engine-.+\/$/.test(n));
-        engineKind = have.some(n => n === 'engine-vulkan/' || n === 'engine-cuda/') ? 'vulkan' : 'cpu';
+        engineKind = have.some(n => n === 'engine-vulkan/' || n === 'engine-cuda/' || n === 'engine-metal/') ? 'vulkan' : 'cpu';
       }
       const model = forced || modelOf(getCfg(), engineKind);
       const m = cat.models[model];
@@ -107,7 +107,7 @@ export function makeBencher({ files, invoke, listen, getCfg }) {
           try {
             const r = await runOne(p, model, file);
             if (cancelled) break;
-            onResult(model, p.engine === 'cpu' ? 'cpu' : 'gpu', { file, ...r });
+            onResult(model, deviceArg(p), { file, ...r });
           } catch (e) { if (cancelled) break; onFail(model, String((e && e.message) || e).slice(0, 200)); } finally { clearInterval(clock); }
         }
       } finally { running = false; report(''); }

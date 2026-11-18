@@ -5,10 +5,13 @@
 .cv-list { display: flex; flex-direction: column; opacity: var(--cv-text-alpha); text-align: var(--cv-align); }
 .cv-bottom .cv-list { min-height: 100%; justify-content: flex-end; }
 .cv-pad .cv-list::before { content: ''; display: block; flex: none; height: max(1.3em, 22px); }   /* room under the title bar */
-.cv-blk { white-space: pre-wrap; overflow-wrap: anywhere; text-shadow: var(--cv-shadow); -webkit-text-stroke-width: var(--cv-stroke, 0px); user-select: text; }
+.cv-blk { white-space: pre-wrap; overflow-wrap: anywhere; text-shadow: var(--cv-shadow); -webkit-text-stroke-width: var(--cv-stroke, 0px); -webkit-text-stroke-color: var(--cv-stroke-color, currentColor); user-select: text; }
 .cv-blk.k-trans, .cv-blk.k-error { font-size: var(--cv-trans-size); }
 .cv-tipped { cursor: help; }
+.cv-clip { visibility: hidden !important; }       /* a group that is not shown (온전한 묶음만 / 보일 묶음 수): it keeps its room */
 .cv-tip { position: fixed; z-index: 10; display: none; pointer-events: none; padding: 5px 7px; border: 1px solid #667; border-radius: 3px;
-          background: rgba(12, 12, 18, .96); color: #fff; font: 12px/1.3 "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif; max-width: 60vw; }
+          background: rgba(12, 12, 18, .96); color: #fff; font: 12px/1.3 "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif; box-sizing: border-box; max-width: min(var(--cv-tip-max, 250px), 60vw); }
+.cv-tip td { overflow-wrap: anywhere; }
+.cv-tip td[align=right] { white-space: nowrap; overflow-wrap: normal; padding-left: 12px; }
 /* a window the mouse goes through shows no scroll bar (it cannot be used) */
 body:not(.interactive) .cv-scroll { scrollbar-color: transparent transparent; }   /* (invisible, but its room stays: the text must not move when it shows) */

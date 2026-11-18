@@ -24,6 +24,7 @@ import * as hotkeys from './hotkeys.js';
 export const [IDLE, OPEN, BUSY, BACK] = ['idle', 'open', 'busy', 'back'];
 export const ARM_AFTER = 0.1;            // Enter only counts after it was let go once (a long hotkey press cannot submit anything)
 export const LOST_AFTER = 0.7;           // the user went to another program: the box is forgotten
+export const NO_FOCUS_AFTER = 3.0;       // the box was opened and this program never came to the front: the keyboard goes back to the game
 export const RETURN_WAIT = 1.5;          // waiting for Enter to be let go before the focus goes back
 export const PASTE_DELAY = 0.16;
 export const PASTE_TRIES = 40;           // waiting for the modifier keys to be up (40 x 25 ms)
@@ -94,9 +95,10 @@ export class SendBox {
     if (!(await this.io.openBox(this.label(cfg)))) {
       log.warn('보내기 입력줄: 포커스를 가져오지 못했습니다');
       await this.io.say('⚠ ' + tr('입력줄로 포커스를 가져오지 못했습니다'), true);
+      await this.giveBack();                                    // (the keyboard must not stay with this program without a window to type into: every key would only beep)
       return;
     }
-    this.state = OPEN; this.armed = false; this.lost = null; this.opened = this.now();
+    this.state = OPEN; this.armed = false; this.lost = null; this.everFront = false; this.opened = this.now();
     log.info('보내기 입력줄 열림');
   }
 
@@ -105,12 +107,20 @@ export class SendBox {
     if (!this.armed && now - this.opened >= ARM_AFTER && !(await this.io.returnDown())) this.armed = true;
     if (this.state === BUSY) return;
     if (!(await this.io.selfIsFront())) {
+      if (!this.everFront) {          // not in front yet (a Mac may take a second or more): wait; for good = the keyboard did not come
+        if (now - this.opened > NO_FOCUS_AFTER) {
+          log.warn('보내기 입력줄: 포커스를 받지 못해 닫음');
+          await this.io.say('⚠ ' + tr('입력줄로 포커스를 가져오지 못했습니다'), true);
+          await this.giveBack();
+        }
+        return;
+      }
       if (this.lost === null) this.lost = now;
       else if (now - this.lost > LOST_AFTER) {                 // the user switched to another program: forget the box
         log.info('보내기 입력줄: 포커스를 잃어 닫음');
         await this.close(false);
       }
-    } else this.lost = null;
+    } else { this.lost = null; this.everFront = true; }
   }
 
   // Enter in the input line -> true when it was taken
@@ -143,8 +153,12 @@ export class SendBox {
     const was = this.state === OPEN || this.state === BUSY;
     this.state = IDLE;
     await this.io.closeBox();
-    if (was && refocus) { this.state = BACK; this.step = 'return'; this.paste = paste; this.t0 = this.now(); this.stepAt = 0; this.tries = 0; }
+    if (was && refocus) this.startBack(paste);
   }
+
+  // the focus goes back to the game (the steps of backStep, one per tick)
+  startBack(paste = false) { this.state = BACK; this.step = 'return'; this.paste = paste; this.t0 = this.now(); this.stepAt = 0; this.tries = 0; }
+  async giveBack() { await this.io.closeBox(); this.startBack(false); }
 
   // The focus goes back. Never waits inside a step: every step is one tick (macOS tells which program is in front only while the
   // event loop runs).
@@ -163,7 +177,7 @@ export class SendBox {
       if (!(await this.io.gameIsFront(this.game))) { await this.io.say('⚠ ' + tr('자동 붙여넣기를 하지 않았습니다: 와우가 활성 창이 아닙니다'), true); this.state = IDLE; }
       else if ((await this.io.modsDown()) && this.tries < PASTE_TRIES) { this.tries++; this.stepAt = now + STEP; }          // wait until the modifier keys are up
       else {
-        if ((await this.io.paste()) === false) await this.io.say('⚠ ' + tr('자동 붙여넣기를 하지 않았습니다: 키 입력 권한이 없습니다 (시스템 설정 → 손쉬운 사용에서 Python 허용 후 다시 시작)'), true);
+        if ((await this.io.paste()) === false) await this.io.say('⚠ ' + tr('자동 붙여넣기를 하지 않았습니다: 키 입력 권한이 없습니다 (시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 ChatMatrix Reader를 허용한 뒤 다시 시작하세요)'), true);
         this.state = IDLE;
       }
     }

@@ -203,6 +203,19 @@ pub fn grab_focus(hwnd: isize) -> bool {
     }
 }
 
+/// Does this window have the keyboard now?
+pub fn has_keyboard(hwnd: isize) -> bool {
+    unsafe { GetForegroundWindow() == hwnd }
+}
+
+/// Asks once more for the keyboard (macOS needs this: see mac.rs). Windows: grab_focus has already waited for it.
+pub fn ask_keyboard(_hwnd: isize) {}
+
+/// Is a window of this program the one in front?
+pub fn self_front() -> bool {
+    is_mine(foreground())
+}
+
 pub fn window_title(hwnd: isize) -> String {
     let mut buf = [0u16; 256];
     let n = unsafe { GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
@@ -434,13 +447,13 @@ pub fn find_game(known: isize, title: &str) -> Option<GameWindow> {
 
 // ---------------------------------------------------------------------------------------------- the wheel over a click-through window
 // A click-through window gets no mouse messages, so the wheel over it would go to the game. A low-level mouse hook (its own thread) sees every
-// wheel turn: a window that asked for it (wheel_zone) has the turns UP over it taken away from the game (the hook swallows them) and told
+// wheel turn: a window that asked for it (wheel_zone) has the turns over it taken away from the game (the hook swallows them) and told
 // to the window (wheel_since), which then lets the user scroll back through the chat.
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 static WHEEL: Mutex<Vec<(u64, isize, i16)>> = Mutex::new(Vec::new());      // (number, window, delta)
-static ZONES: Mutex<Vec<(isize, bool)>> = Mutex::new(Vec::new());          // windows that want the wheel: (window, usable)  usable = the window takes the mouse itself
+static ZONES: Mutex<Vec<(isize, bool, bool)>> = Mutex::new(Vec::new());    // windows that want the wheel: (window, usable, down)  usable = the window takes the mouse itself; down = the turns DOWN too
 static WHEEL_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[repr(C)]
@@ -463,13 +476,16 @@ unsafe extern "system" fn wheel_proc(code: i32, w: usize, l: isize) -> isize {
     if code == 0 && w == 0x020A {                                          // WM_MOUSEWHEEL
         let info = &*(l as *const MsllHook);
         let delta = (info.mouseData >> 16) as i16;
-        // a window the mouse goes through (usable = false): only the turns UP are taken (the game would scroll its own chat with them).
+        // a window the mouse goes through (usable = false): only the turns UP are taken (the game would scroll its own chat with them); the turns DOWN too
+        // while the window asks for them (`down`: it has lines that faded away and a turn down brings them back).
         // A usable window gets the wheel from Windows itself, except while Shift / Ctrl / Alt is held (Windows then keeps the wheel for the program
         // in front, not for the window under the mouse): those turns, both ways, are taken here.
         let modifier = GetAsyncKeyState(0x10) < 0 || GetAsyncKeyState(0x11) < 0 || GetAsyncKeyState(0x12) < 0;
         if let Ok(zones) = ZONES.try_lock() {
-            for &(h, usable) in zones.iter() {
-                if !(if usable { modifier } else { delta > 0 }) {
+            for &(h, usable, down) in zones.iter() {
+                // (a window the mouse goes through takes the turns both ways: the wheel over it is not for the game; `down` is no longer asked)
+                let _ = down;
+                if !(if usable { modifier } else { true }) {
                     continue;
                 }
                 let mut r = RECT::default();
@@ -496,11 +512,12 @@ pub fn start_wheel_hook() {
     });
 }
 
-pub fn wheel_zone(hwnd: isize, on: bool, usable: bool) {
+pub fn wheel_zone(hwnd: isize, on: bool, usable: bool, down: bool) -> bool {
     if let Ok(mut z) = ZONES.lock() {
-        z.retain(|&(h, _)| h != hwnd);
-        if on { z.push((hwnd, usable)); }
+        z.retain(|&(h, _, _)| h != hwnd);
+        if on { z.push((hwnd, usable, down)); }
     }
+    true
 }
 
 /// The turns told to `hwnd` after number `seq`: (the newest number, the deltas).

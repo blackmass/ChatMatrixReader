@@ -3,7 +3,7 @@
 // has none that can be read, the file name without its ending is used. Fonts installed in Windows need no file: the exe lists them
 // (system_fonts) and their name can be picked or typed in the options.
 import { files } from './fs.js';
-import { familyFromSfnt, withoutTables, repairedLoca } from './core/sfnt.js';
+import { familyFromSfnt, repairedLoca, cleanFont } from './core/sfnt.js';
 import { tr } from './core/i18n.js';
 
 const EXT = /\.(ttf|otf|ttc|woff2?)$/i;
@@ -46,17 +46,17 @@ export async function loadAll({ register = true } = {}) {
     known.push({ family: e.family, file });
     if (!e.buf) { failed.push({ file, error: e.error }); continue; }
     if (!register || registered.has(file)) continue;
-    // the browser refuses a font when one of its tables is odd: then again without the old 'kern' table, then without the hinting too
-    let lastErr = null, done = false;
+    // The browser refuses a whole font when one of its tables is odd, and the game's old fonts have such tables. So: the file as it is; if that is refused,
+    // the font put together again from the parts that matter (core/sfnt.js cleanFont), with its hinting and, if that is refused too, without it.
     const fixed = repairedLoca(e.buf);                                   // (a glyph index that points outside 'glyf': old fonts)
-    for (const [fix, drop] of [[0, []], [1, []], [1, ['kern']], [1, ['kern', 'cvt ', 'fpgm', 'prep', 'gasp', 'hdmx', 'VDMX', 'LTSH', 'DSIG']]]) {
-      if (fix && !fixed) continue;
-      const base = fix ? fixed : e.buf;
-      const buf = drop.length ? withoutTables(base, drop) : base;
+    const base = fixed || e.buf;
+    let lastErr = null, done = false;
+    for (const [how, make] of [['', () => e.buf], ['index table repaired', () => fixed], ['rebuilt', () => cleanFont(base)], ['rebuilt, without hinting', () => cleanFont(base, { hinting: false })]]) {
+      const buf = make();
       if (!buf) continue;
       try {
         document.fonts.add(await new FontFace(e.family, buf.slice(0)).load()); registered.add(file); done = true;
-        report.push(`${e.family} <- ${file} (${buf.byteLength} bytes${fix ? ', index table repaired' : ''}${drop.length ? ', without ' + drop.join(' ').trim() : ''})`);
+        report.push(`${e.family} <- ${file} (${buf.byteLength} bytes${how ? ', ' + how : ''})`);
         break;
       } catch (err) { lastErr = err; }
     }
@@ -69,6 +69,15 @@ export async function loadAll({ register = true } = {}) {
 export async function listForOptions() {
   await loadAll({ register: false });
   try { system = await window.__TAURI__.core.invoke('system_fonts'); } catch { system = []; }
+}
+// the list of the font box: [{ value: family, sub: file name }] for the fonts of the fonts/ folder, then the installed ones (a { head } is a title line)
+export function entries() {
+  const seen = new Set(), out = [];
+  if (known.length) out.push({ head: tr('fonts 폴더의 글꼴') });
+  for (const k of known) { out.push({ value: k.family, sub: k.file }); seen.add(k.family); }
+  const rest = system.filter(n => !seen.has(n));
+  if (rest.length) { if (known.length) out.push({ head: tr('시스템에 설치된 글꼴') }); out.push(...rest.map(n => ({ value: n }))); }
+  return out;
 }
 export function choices() {
   const seen = new Set(), out = [];

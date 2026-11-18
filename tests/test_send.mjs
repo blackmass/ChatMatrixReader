@@ -97,10 +97,13 @@ const mkG = (text = 'a=b\n') => { const files = memoryFiles({ 'g.txt': text }); 
 }
 {
   const h = new up.LostHint();
-  eq(h.check(base, null, false, 0), null, 'lost: no game');
-  eq(h.check(base, {}, false, 1), ['show', true], 'lost: never found -> at once');
-  eq(h.check(base, {}, false, 2), null, 'lost: only once');
+  eq(h.check(base, null, false, 0), ['show', true], 'lost: never found -> the first-start guide at once, even with no game');
+  eq(h.check(base, null, false, 1), null, 'lost: only once');
+  eq(h.check(base, {}, false, 2), null, 'lost: the game starts and it is still not found: no second message');
   eq(h.check(base, {}, true, 3), ['hide', false], 'lost: hidden when read');
   const h2 = new up.LostHint(), seen = { ...base, last_pos: [1, 2, 3, 4] };
   eq([h2.check(seen, {}, false, 10), h2.check(seen, {}, false, 14), h2.check(seen, {}, false, 15.5)], [null, null, ['show', false]], 'lost: after 5 seconds when a position is known');
+  eq(h2.check(seen, null, false, 20), ['hide', false], 'lost: the game was closed: the hint goes');
+  const h3 = new up.LostHint();
+  eq([h3.check(seen, null, false, 0), h3.check(seen, null, false, 30), h3.check(seen, {}, false, 31)], [null, null, null], 'lost: a position is known and there is no game: nothing to say, and the wait starts when the game appears');
 }

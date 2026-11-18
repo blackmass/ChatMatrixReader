@@ -16,6 +16,23 @@ check(plan(base, inst).engine === 'vulkan' && plan(base, inst).model === 'large-
 check(plan({ ...base, voice_device: 'cpu' }, inst).engine === 'cpu', 'cpu asked: the CPU engine');
 check(plan({ ...base, voice_device: 'gpu' }, { engines: ['cpu'], models: ['base'] }).error === 'not_installed', 'GPU asked, only the CPU engine: cannot start');
 check(plan(base, { engines: ['cpu', 'vulkan', 'cuda'], models: ['large-v3-turbo'] }).engine === 'cuda', 'CUDA before Vulkan');
+// the Mac engine: one program for the GPU and the CPU; the plan says which one it is told to use
+{
+  const mac = { engines: ['metal'], models: ['large-v3-turbo'] };
+  const pa = plan(base, mac), pc = plan({ ...base, voice_device: 'cpu' }, mac), pg = plan({ ...base, voice_device: 'gpu' }, mac);
+  check(pa.engine === 'metal' && pa.device === 'gpu' && pg.device === 'gpu', 'metal: auto and GPU -> the GPU');
+  check(pc.engine === 'metal' && pc.device === 'cpu', 'metal: CPU asked -> the same engine, told to use the CPU');
+  const { engineArgs, benchArgs } = await import('../app/core/voice_proto.js');
+  const dev = a => a[a.indexOf('--device') + 1];
+  check(dev(engineArgs({}, pc)) === 'cpu' && dev(engineArgs({}, pg)) === 'gpu' && dev(benchArgs(pc, 'f.wav')) === 'cpu', 'the device of the plan goes to the engine');
+  const { exePath, exeName, mergeCatalog } = await import('../app/core/voice_catalog.js');
+  check(exePath('metal') === 'extensions/stt/engine-metal/cmr-stt' && exePath('cpu') === 'extensions/stt/engine-cpu/cmr-stt.exe' && exeName('vulkan') === 'cmr-stt.exe', 'the Mac engine has no .exe');
+  check(mergeCatalog('').engines.metal.files.length === 0 && mergeCatalog(JSON.stringify({ engines: { metal: { files: [{ name: 'cmr-stt', url: 'https://x/y' }] } } })).engines.metal.files[0].name === 'cmr-stt', 'the catalog knows metal');
+  const vc = new VoiceControl({ files: memoryFiles(), getCfg: () => base });
+  vc.applied = vc.snapshot(base, pg);
+  vc.state.installed = mac; vc.updatePending({ ...base, voice_device: 'cpu' });
+  check(vc.state.pending.includes('device'), 'metal: GPU -> CPU while running is "restart needed" (same engine, other device)');
+}
 check(plan({ ...base, voice_model: 'small' }, inst).error === 'no_model', 'a model that is not there');
 check(plan({ ...base, voice_engine: 'openai' }, inst).error === 'no_url' && plan({ ...base, voice_engine: 'openai', voice_oa_url: 'http://x/v1' }, { engines: [], models: [] }).engine === 'server', 'server: needs an address, not Whisper');
 

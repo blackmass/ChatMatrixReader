@@ -3,6 +3,10 @@
 import { TUNE, DEFAULT_TUNING } from '../core/timings.js';
 import { entries } from '../core/tuning.js';
 import { tr } from '../core/i18n.js';
+import { isMac } from '../platform.js';
+
+// timers of the Windows sound capture (sound sessions, the gate): a Mac has none of them, so they are not shown there
+const WINDOWS_ONLY = new Set(['VOICE_POLL_MS', 'VOICE_GATE_PERMILLE', 'VOICE_GATE_HOLD_MS', 'VOICE_LOSE_SEC']);
 
 const rowFor = ([name, def, min, max, unit, group, label, where, desc]) => ({
   type: 'number', key: 'tuning', label, when: group === '음성인식' ? 'live' : undefined, keywords: `${name} ${where} ${desc}`, min, max, unit, def,
@@ -29,7 +33,7 @@ export default {
       { type: 'button', label: '모두 기본값으로', keywords: '초기화 되돌리기 기본값', action: ctx => ctx.set({ tuning: {} }) },
     ] },
     { title: '진단: 창 상태', rows: [{ type: 'diag', label: '', keywords: '작업표시줄 포커스 포그라운드 진단 noactivate' }] },
-    ...[...groups].map(([title, list]) => ({ title, rows: list.map(rowFor) })),
+    ...[...groups].map(([title, list]) => ({ title, rows: list.filter(t => !(isMac && WINDOWS_ONLY.has(t[0]))).map(rowFor) })),
     ...[...fixed].map(([title, list]) => ({
       title: tr(title) + ' (' + tr('고정값') + ')',
       rows: list.map(e => ({ type: 'info', label: e.name, keywords: `${e.where} ${e.desc} ${e.unit}`, note: e.desc, text: () => `${e.value} ${tr(e.unit)}  ·  ${e.where}` })),

@@ -4,18 +4,28 @@
 //
 //   row = { key, apply?(ctx, value) (instead of a plain write: a choice that fills other settings too), type, label, note?, keywords?, def?, show?(cfg), validate?(value) -> '' | error text, ...type specific }
 //   types: check | number {min,max,step,unit} | text {placeholder, wide} | select {options: [[value, label]] | () => [...]} | textarea {rows}
-//          | hotkey (Ctrl/Alt/Shift + a key) | combo {list, placeholder} (a list and "직접 입력") | percent {min} (a slider, the value is 0..1) | color (#rrggbb or empty) | keys (Shift / Ctrl / Alt) | channels (chat channels) | routes (a choice per channel: { code: value })
+//          | hotkey (Ctrl/Alt/Shift + a key) | combo {list, placeholder} (a list and "직접 입력")
+//          | suggest {items(ctx), blank?, placeholder, needs?(cfg), cacheKey?(cfg), fail?} (ONE text box; its list drops down under it, filtered by what is typed, and a click puts the value in) | percent {min} (a slider, the value is 0..1) | color (#rrggbb or empty) | keys (Shift / Ctrl / Alt) | channels (chat channels) | routes (a choice per channel: { code: value })
 //          | file {path(cfg), files, rows} (a text file of the program folder with a save button) | info {text(cfg)} | button {label, action(ctx)}
 //          | custom {build(ctx) -> element, block?} (a live part a tab draws itself, e.g. the state of the voice recognition)
 //   ctx = { sel (window id of the row), cfg(), snapshot, get(row, cfg), put(row, value), def(row), reset(row), following(row), known(row) }
 //   (a row of a window is read and written through ctx: the main window's settings are at the top of the config, an extra window's in its
 //   entry; see options.js. A setting an extra window does not have of its own follows window 1: following(row) tells.)
-import { tr } from '../core/i18n.js';
+import { tr, macKeys } from '../core/i18n.js';
+import { isMac } from '../platform.js';
+const keyName = k => (isMac ? macKeys(k) : k);                 // (the key boxes: the setting keeps 'Ctrl' / 'Alt', a Mac shows Control / Option)
 export const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
 // the name of a channel, in the colour the chat shows it in (row.color(code))
 const named = (row, code) => { const s = el('span', '', row.names(code)); if (row.color) { s.style.color = row.color(code); s.dataset.ccode = code; } return s; };
+
+// ---- the list of a `suggest` row: one box for the whole page, so only one list is open at a time
+let openSg = null;                                               // { close(), place(), pop }
+const closeSg = () => { if (openSg) { const o = openSg; openSg = null; o.close(); } };
+// the page scrolls (also by itself, to bring the clicked box into view): the list follows its box, and is closed when the box is out of sight
+window.addEventListener('scroll', e => { if (openSg && !openSg.pop.contains(e.target)) openSg.place(); }, true);
+window.addEventListener('resize', closeSg);
 
 export const isData = row => !['info', 'button', 'file', 'examples', 'notice', 'logview', 'perf', 'diag', 'custom'].includes(row.type);
 
@@ -33,7 +43,7 @@ export function buildRow(row, ctx) {
     labelLine.append(a);
   }
   text.append(labelLine);
-  if (row.note) text.append(el('small', 'note', row.note));
+  if (row.note) for (const n of [].concat(row.note)) text.append(el('small', 'note', n));       // (a note may be a list: one line each)
   const hint = row.hints ? el('small', 'note hint') : null;       // row.hints { value: text }: what the chosen value means, under the label
   if (hint) text.append(hint);
   const ctl = el('div', 'ctl');
@@ -43,7 +53,14 @@ export function buildRow(row, ctx) {
   // an extra window's row that can be left empty to follow window 1: no "창 1 따르기" button, the empty input says it (a small dim text with window 1's value)
   const canFollow = !!(row.win && ctx.canFollow && ctx.canFollow(row));
   let followText = () => {};                                   // keeps the "창 1을 따름 · value" texts up to date (set by the row types that have them)
-  const mainShown = () => { const v = ctx.mainValue(row); return v === undefined || v === null || v === '' ? tr('기본') : String(v); };
+  // row.zeroEmpty: a number whose 0 means "no value" (hide after 0 s would hide at once; a lower line of size 0 is unreadable): the main window
+  // shows it as an EMPTY box (typing 0 empties it) with a dim text that says what empty means (row.zeroText(ctx, forExtraWindow)); an extra window
+  // keeps "empty = follow window 1" and shows that text behind it when window 1 has no value
+  const mainShown = () => {
+    const v = ctx.mainValue(row);
+    if (row.zeroEmpty && row.zeroText && (v === undefined || v === null || v === '' || Number(v) === 0)) return row.zeroText(ctx, true);
+    return v === undefined || v === null || v === '' ? tr('기본') : String(v);
+  };
 
   const commit = value => {
     const bad = row.validate ? row.validate(value) : '';
@@ -59,23 +76,37 @@ export function buildRow(row, ctx) {
     read = () => input.checked; write = v => { input.checked = !!v; };
     input.onchange = () => commit(input.checked);
   } else if (row.type === 'number') {
-    input = el('input'); input.type = 'number'; input.min = row.min; input.max = row.max; input.step = row.step || 1;
-    ctl.append(input); if (row.unit) ctl.append(el('span', 'unit', row.unit));
-    read = () => (input.value === '' ? (canFollow ? null : NaN) : Number(input.value)); write = v => { input.value = v === null || v === undefined ? '' : v; };
+    const blank0 = !!row.zeroEmpty && !canFollow;                 // the main window of a zeroEmpty row: 0 is the empty box
+    const lo = blank0 ? Math.max(1, Number(row.min) || 0) : row.min;
+    input = el('input'); input.type = 'number'; input.min = lo; input.max = row.max; input.step = row.step || 1;
+    // the unit may be a list too (one under the other): ['× 0.1px', '(음수는 × 0.03px)']
+    const unitEl = u => { if (!Array.isArray(u)) return el('span', 'unit', u); const b = el('span', 'unit multi'); for (const x of u) b.append(el('span', '', x)); return b; };
+    ctl.append(input); if (row.unit) ctl.append(unitEl(row.unit));
+    read = () => (input.value === '' ? (canFollow ? null : (blank0 ? 0 : NaN)) : Number(input.value));
+    write = v => { input.value = v === null || v === undefined || (blank0 && Number(v) === 0) ? '' : v; };
     input.onchange = () => {
       const v = read();
       if (v === null) { err.textContent = ''; root.classList.remove('bad'); commit(null); return; }          // emptied: follows window 1
-      if (!Number.isFinite(v) || v < row.min || v > row.max) { err.textContent = `${row.min} ~ ${row.max}`; root.classList.add('bad'); return; }
+      if (blank0 && v === 0) { input.value = ''; err.textContent = ''; root.classList.remove('bad'); commit(0); return; }   // 0 = no value = empty
+      if (!Number.isFinite(v) || v < lo || v > row.max) { err.textContent = `${lo} ~ ${row.max}`; root.classList.add('bad'); return; }
       commit(v);
     };
-    if (canFollow) {
-      // the arrows start from window 1's value (an empty input would start from 1): empty + up = window 1's value + one step
+    if (canFollow || blank0) {
+      // the arrows start from window 1's value (an empty input would start from 1): empty + up = window 1's value + one step.
+      // row.startAt(ctx, dir): where an empty box starts instead (a number, or undefined = the rule above)
       input.classList.add('follow-input');
+      if (row.zeroText) input.classList.add('wide-num');
       const step = Number(row.step) || 1, round = v => Math.round(v * 1e6) / 1e6;
       const nudge = dir => {
-        const cur = input.value === '' ? Number(ctx.mainValue(row)) : Number(input.value);
-        const base = Number.isFinite(cur) ? cur : Number(row.min) || 0;
-        const v = Math.min(row.max, Math.max(row.min, round(base + dir * step)));
+        let v;
+        const start = input.value === '' && row.startAt ? row.startAt(ctx, dir) : undefined;
+        if (start !== undefined) v = start;
+        else {
+          const cur = input.value === '' ? (canFollow ? Number(ctx.mainValue(row)) : NaN) : Number(input.value);
+          const base = Number.isFinite(cur) ? cur : (blank0 ? lo - step : Number(row.min) || 0);
+          v = round(base + dir * step);
+        }
+        v = Math.min(row.max, Math.max(lo, v));
         input.value = v; err.textContent = ''; root.classList.remove('bad'); commit(v);
       };
       const pad = el('span', 'stepper'), up = el('button', 'step', '▴'), down = el('button', 'step', '▾');
@@ -83,7 +114,7 @@ export function buildRow(row, ctx) {
       up.onclick = () => nudge(1); down.onclick = () => nudge(-1);
       pad.append(up, down); input.after(pad);
       input.addEventListener('keydown', e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); nudge(e.key === 'ArrowUp' ? 1 : -1); } });
-      followText = () => { input.placeholder = tr('창 1을 따름') + ' · ' + mainShown(); };
+      followText = () => { input.placeholder = blank0 ? (row.zeroText ? row.zeroText(ctx, false) : '') : tr('창 1을 따름') + ' · ' + mainShown(); };
     }
   } else if (row.type === 'text' || row.type === 'password') {
     input = el('input', row.wide ? 'wide' : ''); input.type = row.type === 'password' ? 'password' : 'text';
@@ -94,7 +125,7 @@ export function buildRow(row, ctx) {
     input.onchange = () => commit(read());
   } else if (row.type === 'hotkey') {
     // Shift / Ctrl / Alt boxes and a key list (catching the keys themselves is fragile: Enter would end the input)
-    const boxes = ['Ctrl', 'Alt', 'Shift'].map(k => { const l = el('label', 'keybox'); const c = el('input'); c.type = 'checkbox'; c.value = k; l.append(c, el('span', '', k)); ctl.append(l); return c; });
+    const boxes = ['Ctrl', 'Alt', 'Shift'].map(k => { const l = el('label', 'keybox'); const c = el('input'); c.type = 'checkbox'; c.value = k; l.append(c, el('span', '', keyName(k))); ctl.append(l); return c; });
     const KEYLIST = ['Enter', 'Space', 'Tab', 'Backspace', 'Insert', 'Delete', 'Home', 'End', 'PageUp', 'PageDown', 'Left', 'Up', 'Right', 'Down', '`',
       ...Array.from({ length: 12 }, (_, i) => 'F' + (i + 1)), ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'];
     input = el('select', 'hotkeykey');
@@ -130,6 +161,79 @@ export function buildRow(row, ctx) {
     sel.onchange = () => { if (sel.value === OWN) { own.hidden = false; own.focus(); } else commit(sel.value); };
     if (canFollow && blankOpt) followText = () => { blankOpt.textContent = tr('창 1을 따름') + ' · ' + mainShown(); };
     own.onchange = () => commit(own.value.trim());
+  } else if (row.type === 'suggest') {
+    // items(ctx) -> [{ value, text?, sub? } | { head }]  or a promise of it (a failed promise has `kind`: row.fail[kind] is the short orange note; `message` goes to its tooltip)
+    // blank: what an empty box means (shown as its dim text, and as the first line of the list). needs(cfg) -> a text when the list cannot be asked for yet.
+    input = el('input', 'wide'); input.type = 'text'; input.spellcheck = false; input.autocomplete = 'off';
+    const blankText = () => (canFollow ? tr('창 1을 따름') + ' · ' + mainShown() : (typeof row.blank === 'function' ? row.blank(ctx) : row.blank) || '');
+    input.placeholder = row.placeholder || '';
+    if (canFollow) input.classList.add('follow-input');
+    const state = el('small', 'sg-state'); state.hidden = true;
+    const pop = el('div', 'sg-pop');
+    ctl.append(state, input);
+    let items = [], rows = [], active = -1, typed = false, cache = null, seq = 0, isOpen = false;
+    const setState = (text, kind, title) => { state.hidden = !text; state.textContent = text || ''; state.className = 'sg-state' + (kind ? ' ' + kind : ''); state.title = title || ''; };
+    const place = () => {
+      const r = input.getBoundingClientRect(), below = innerHeight - r.bottom - 8, above = r.top - 8;
+      if (r.bottom < 0 || r.top > innerHeight) { close(); return; }
+      const up = pop.scrollHeight > below && above > below;
+      pop.style.left = r.left + 'px'; pop.style.minWidth = Math.max(r.width, 240) + 'px';
+      pop.style.maxHeight = Math.max(80, Math.min(280, up ? above : below)) + 'px';
+      if (up) { pop.style.top = ''; pop.style.bottom = (innerHeight - r.top + 2) + 'px'; } else { pop.style.bottom = ''; pop.style.top = (r.bottom + 2) + 'px'; }
+    };
+    const pick = v => { input.value = v; typed = false; close(); commit(v); };
+    const draw = () => {
+      const q = typed ? input.value.trim().toLowerCase() : '';
+      const hit = it => !q || String(it.value).toLowerCase().includes(q) || String(it.text || '').toLowerCase().includes(q) || String(it.sub || '').toLowerCase().includes(q);
+      const list = [], bl = blankText();
+      if (bl && !q) list.push({ value: '', text: bl, dim: true });
+      let head = null;
+      for (const it of items) { if (it.head) { head = it; continue; } if (!hit(it)) continue; if (head) { list.push(head); head = null; } list.push(it); }
+      rows = list; active = -1;
+      pop.replaceChildren(...list.map((it, i) => {
+        if (it.head) return el('div', 'sg-head', it.head);
+        const d = el('div', 'sg-item' + (it.dim ? ' dim' : '') + (it.value === input.value.trim() && !it.dim ? ' cur' : ''));
+        d.append(el('span', 'sg-main', it.text ?? it.value));
+        if (it.sub) d.append(el('small', 'sg-sub', it.sub));
+        d.onmousedown = e => { e.preventDefault(); pick(it.value); };
+        d.onmousemove = () => { active = i; mark(); };
+        return d;
+      }));
+      if (!isOpen) return;
+      if (!list.some(x => !x.head)) { pop.remove(); return; }
+      if (!pop.isConnected) document.body.append(pop);
+      place();
+    };
+    const mark = () => { [...pop.children].forEach((c, i) => c.classList.toggle('active', i === active)); const c = pop.children[active]; if (c && c.scrollIntoView) c.scrollIntoView({ block: 'nearest' }); };
+    const close = () => { isOpen = false; seq++; pop.remove(); if (openSg && openSg.pop === pop) openSg = null; };
+    const load = () => {
+      const need = row.needs ? row.needs(ctx.cfg()) : '';
+      if (need) { items = []; setState(need, 'dim'); draw(); return; }
+      const got = row.items(ctx);
+      if (!got || typeof got.then !== 'function') { items = got || []; setState(''); draw(); return; }
+      const key = row.cacheKey ? row.cacheKey(ctx.cfg()) : '', mine = ++seq;
+      if (cache && cache.key === key) { items = cache.items; draw(); }            // (the last answer at once, the new one replaces it)
+      setState(tr('불러오는 중…'), 'dim');
+      got.then(list => { if (mine !== seq) return; cache = { key, items: list }; items = list; setState(''); draw(); },
+        e => { if (mine !== seq) return; items = []; setState(tr((row.fail && row.fail[e && e.kind]) || '목록을 불러오지 못했습니다'), 'bad', String((e && e.message) || e)); draw(); });
+    };
+    const open = () => { if (isOpen) return; closeSg(); isOpen = true; openSg = { close, place, pop }; typed = false; load(); };
+    read = () => input.value.trim(); write = v => { input.value = v ?? ''; };
+    followText = () => { input.placeholder = blankText() || row.placeholder || ''; };
+    input.onfocus = open; input.onclick = open;
+    input.oninput = () => { typed = true; open(); draw(); };
+    input.onblur = () => close();
+    input.onchange = () => commit(read());
+    input.onkeydown = e => {
+      const sel = rows.map((x, i) => (x.head ? -1 : i)).filter(i => i >= 0);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault(); if (!isOpen) { open(); return; }
+        if (!sel.length) return;
+        const at = sel.indexOf(active), n = e.key === 'ArrowDown' ? (at < 0 ? 0 : Math.min(sel.length - 1, at + 1)) : (at < 0 ? sel.length - 1 : Math.max(0, at - 1));
+        active = sel[n]; mark();
+      } else if (e.key === 'Enter' && isOpen && active >= 0 && rows[active] && !rows[active].head) { e.preventDefault(); pick(rows[active].value); }
+      else if (e.key === 'Escape' && isOpen) { e.preventDefault(); close(); }
+    };
   } else if (row.type === 'select') {
     input = el('select');
     const optionList = () => (typeof row.options === 'function' ? row.options(ctx) : row.options);
@@ -163,7 +267,7 @@ export function buildRow(row, ctx) {
     input.onchange = () => commit(read());
     sw.onchange = () => { input.value = sw.value; commit(sw.value); };
   } else if (row.type === 'keys') {
-    const boxes = ['Shift', 'Ctrl', 'Alt'].map(k => { const l = el('label', 'keybox'); const c = el('input'); c.type = 'checkbox'; c.value = k; l.append(c, el('span', '', k)); ctl.append(l); return c; });
+    const boxes = ['Shift', 'Ctrl', 'Alt'].map(k => { const l = el('label', 'keybox'); const c = el('input'); c.type = 'checkbox'; c.value = k; l.append(c, el('span', '', keyName(k))); ctl.append(l); return c; });
     read = () => boxes.filter(b => b.checked).map(b => b.value);
     write = v => { const have = new Set(v || []); for (const b of boxes) b.checked = have.has(b.value); };
     row = { ...row, validate: v => (v.length ? '' : '하나는 꼭 체크해야 합니다') };

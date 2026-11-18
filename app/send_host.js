@@ -29,7 +29,7 @@ export function startSend({ settings, translator, capture, system }) {
   const io = {
     game: () => (capture.game.found ? { hwnd: capture.game.hwnd, title: capture.game.title || '' } : null),
     gameIsFront: async g => (await state(0)).fg === g.hwnd,
-    selfIsFront: async () => ours(await state(0)),
+    selfIsFront: async () => { const s = await state(0); return s.selfFront !== undefined ? !!s.selfFront : ours(s); },       // (the exe says: a program in front that is this one)
     comboDown: async ([mods, vk]) => {
       const s = await state(vk);
       return [...mods].every(m => s[m.toLowerCase()] === true) && s.keys[1] === true;
@@ -40,9 +40,9 @@ export function startSend({ settings, translator, capture, system }) {
       try {
         const g = io.game();
         await emit('input-open', { label, target: g ? g.title : '' });
-        await invoke('show_input', { label: 'main' });
+        await invoke('show_input', { label: 'main', place: settings.cfg().send_place || 'auto' });
         return true;
-      } catch (e) { log.warn('보내기 입력줄: ' + e); return false; }
+      } catch (e) { log.warn('보내기 입력줄: ' + e); try { await emit('input-close', {}); } catch { /* the box is hidden by the exe too */ } return false; }
     },
     closeBox: () => emit('input-close', {}),
     busyBox: text => emit('input-busy', { text }),
@@ -64,6 +64,10 @@ export function startSend({ settings, translator, capture, system }) {
     },
   };
   const box = new SendBox(io, () => settings.cfg());
+  listen('input-focus', ev => {          // (how long the box took to get the keyboard: for the log)
+    const p = ev.payload || {}, front = p.front ? 'this' : 'other';
+    if (p.ok) log.info('보내기 입력줄: 키보드 받음 ' + p.ms + 'ms'); else log.warn('보내기 입력줄: 키보드 못 받음 ' + p.ms + 'ms (front: ' + front + ')');
+  });
   listen('input-submit', ev => { prefix = ev.payload.prefix || ''; box.submit(ev.payload.text); });
   listen('input-cancel', () => { box.cancel(); });
   const timer = every('SEND_TICK_MS', () => box.tick().catch(e => log.error('보내기 점검: ' + e)));

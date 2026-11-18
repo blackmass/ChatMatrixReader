@@ -35,13 +35,14 @@ export function withGuild(pieces) {
 
 const fromSegments = seq => seq.map(([text, q, tip]) => piece(text, { quality: Object.hasOwn(chattext.QUALITY_COLORS, q) ? q : null, tip: tip || [] }));
 
-// what stands in front of a line: nothing, like the game's chat, except "(1)" for numbered channels and an arrow for a whisper you sent
+// what stands in front of a line: nothing, like the game's chat, except "[1]" for numbered channels and an arrow for a whisper you sent
+// (square brackets, as the game writes a channel: "[1. General] [Name]: text"; 2.x / 3.0.x used round ones)
 export function codePrefix(code, mode) {
   if (mode === 'nochan' || mode === 'body') return '';
-  if (code === '!VC') return tr('(음성)') + ' ';
-  if (mode === 'detail') return `(${SHOWN_CODE[code] ?? code}) `;
+  if (code === '!VC') return '[' + tr('음성') + '] ';
+  if (mode === 'detail') return `[${SHOWN_CODE[code] ?? code}] `;
   if (code === 'WT' || code === 'BT') return '→ ';
-  if (code.startsWith('C') && /^\d+$/.test(code.slice(1))) return `(${code.slice(1)}) `;
+  if (code.startsWith('C') && /^\d+$/.test(code.slice(1))) return `[${code.slice(1)}] `;
   return '';
 }
 

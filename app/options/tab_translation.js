@@ -8,6 +8,29 @@ import { CUSTOM_PRESETS, CUSTOM_PRESET_MANUAL } from '../core/translate.js';
 export const notKorean = cfg => { const t = (cfg.target_lang || '').trim(); return t !== '' && t !== '한국어' && t.toLowerCase() !== 'ko' && t.toLowerCase() !== 'korean'; };
 export const LANG_WARNING = '목표 언어가 한국어가 아니면 단어장과 프롬프트도 그 언어에 맞게 새로 써야 합니다. 지금 단어장의 뜻과 기본 프롬프트의 예시는 한국어라서, 그대로 두면 AI가 목표 언어와 상관없이 한국어로 번역할 수 있습니다.';
 
+// The model list of the AI server: the program (hub) asks the server with the address and key as they are set now ('rpc-models' -> 'rpc-models-result').
+// Resolves with [{ value }]; rejects with an Error that has `kind` ('connect' | 'format') for the note beside the box.
+let modelSeq = 0, modelReady = null;
+const modelWaiting = new Map();
+export async function requestModels() {
+  const { emit, listen } = window.__TAURI__.event;
+  if (!modelReady) {
+    modelReady = listen('rpc-models-result', ev => {
+      const r = ev.payload || {}, w = modelWaiting.get(r.id);
+      if (!w) return;
+      modelWaiting.delete(r.id); clearTimeout(w.timer);
+      if (r.error) w.rej(Object.assign(new Error(r.error), { kind: r.kind })); else w.res((r.models || []).map(value => ({ value })));
+    });
+  }
+  await modelReady;
+  return new Promise((res, rej) => {
+    const id = ++modelSeq;
+    const timer = setTimeout(() => { modelWaiting.delete(id); rej(Object.assign(new Error('timed out'), { kind: 'connect' })); }, 15000);
+    modelWaiting.set(id, { res, rej, timer });
+    emit('rpc-models', { id });
+  });
+}
+
 const applyPreset = (ctx, name) => {
   const p = CUSTOM_PRESETS[name];
   ctx.set(p ? { custom_preset: name, custom_url: p[0], custom_headers: p[1], custom_body_type: p[2], custom_body: p[3], custom_path: p[4] } : { custom_preset: '' });
@@ -32,7 +55,9 @@ export default {
     ] },
     { title: 'AI 서버', fold: true, open: cfg => cfg.translator === 'openai', rows: [
       { key: 'api_url', type: 'text', label: '서버 주소', wide: true, placeholder: 'http://localhost:1234/v1', keywords: 'openai lm studio ollama url' },
-      { key: 'api_model', type: 'text', label: '모델 이름', wide: true, placeholder: '비워 두면 서버 기본', keywords: '모델 model' },
+      { key: 'api_model', type: 'suggest', label: '모델 이름', placeholder: '비워 두면 서버 기본', keywords: '모델 model 목록', items: () => requestModels(),
+        needs: cfg => ((cfg.api_url || '').trim() ? '' : '서버 주소를 먼저 적어 주세요'), cacheKey: cfg => (cfg.api_url || '') + '|' + (cfg.api_key || ''), fail: { connect: '연결 확인 실패', format: '모델 로드 실패' },
+        note: '칸을 누르면 위의 서버에서 모델 목록을 가져와 보여 줍니다. 목록에 없는 이름은 그대로 적어도 됩니다.' },
       { key: 'api_key', type: 'password', label: 'API 키', wide: true, keywords: '키 key 토큰', note: '로컬 서버는 비워 둡니다.' },
       { key: 'temperature', type: 'number', label: '창의성 (temperature)', min: 0, max: 2, step: 0.1, keywords: '온도 temperature' },
       { key: 'max_tokens', type: 'number', label: '답변 최대 길이', min: 20, max: 4000, unit: '토큰' },

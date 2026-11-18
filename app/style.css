@@ -5,7 +5,8 @@ html, body { margin: 0; height: 100%; font-family: "Malgun Gothic", "Apple SD Go
 /* ---------- overlay (translation window) ---------- */
 body.overlay, body.input { background: transparent; overflow: hidden; user-select: none; }
 body.overlay #bg { position: fixed; inset: 0; background: rgba(30, 31, 34, var(--bg-alpha)); border-radius: 4px; }
-body.overlay #bar { position: fixed; left: 0; right: 0; top: 0; height: 22px; display: none; align-items: center; padding: 0 6px;
+body.overlay { --bar-h: 22px; }       /* the height of the title bar of a window (overlay.js reads it: the part of the lines it covers) */
+body.overlay #bar { position: fixed; left: 0; right: 0; top: 0; height: var(--bar-h); display: none; align-items: center; padding: 0 6px;
        background: rgba(60, 63, 70, 0.95); color: #ddd; font-size: 12px; cursor: move; }
 body.overlay #bar span { flex: 1; }
 body.overlay #bar button { border: 0; background: none; color: #ddd; font-size: 14px; cursor: pointer; }
@@ -66,7 +67,7 @@ body.hover-clear { opacity: 0; }
 #ctx { position: fixed; z-index: 50; min-width: 150px; max-height: 96vh; overflow-y: auto; padding: 4px 0; background: #25272c; border: 1px solid #3c3f46; border-radius: 6px;
        box-shadow: 0 4px 14px rgba(0, 0, 0, .5); font: 12px "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif; color: #dcdde0; user-select: none; }
 #ctx div { padding: 5px 14px 5px 22px; white-space: nowrap; cursor: default; position: relative; }
-#ctx div:hover:not(.off):not(.sep) { background: #3a3d44; }
+#ctx div:hover:not(.off):not(.sep), #ctx div.hot:not(.off):not(.sep) { background: #3a3d44; }       /* (.hot: a Mac gives no mouse-over to a window that is not active: popup.js marks the line under the cursor) */
 #ctx div.off { color: #6c6f77; }
 #ctx div.sep { height: 1px; padding: 0; margin: 4px 0; background: #3c3f46; }
 #ctx div.on::before { content: '✔'; position: absolute; left: 6px; color: #e0b84a; }

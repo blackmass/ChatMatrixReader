@@ -32,7 +32,8 @@ export function buildView(kind, style) {
 
 export class WidgetLayer {
   // root: the element the 8 containers are put into; defs: the Registry; `tipBox`: where the tip is written (made if not given)
-  constructor({ root, registry, tipBox = null }) {
+  constructor({ root, registry, tipBox = null, sink = null }) {
+    this.sink = sink;                                    // where the tip is drawn when not here: a window of its own { usable(), show(text, rect), hide() }
     this.root = root; this.registry = registry;
     root.classList.add('wlayer');
     this.places = new Map(ANCHORS.map(a => [a, root.appendChild(el('div', 'wa wa-' + a))]));
@@ -92,15 +93,28 @@ export class WidgetLayer {
       const r = it.node.getBoundingClientRect();
       if (x >= r.left - 3 && x <= r.right + 3 && y >= r.top - 3 && y <= r.bottom + 3) { hit = { it, r }; break; }
     }
-    if (!hit) { this.tip.hidden = true; return null; }
+    if (!hit) { this.tip.hidden = true; if (this._sunk) { this._sunk = null; this.sink.hide(); } return null; }
     const text = (hit.it.state && hit.it.state.tip) || hit.it.title;
+    if (this.sink && this.sink.usable()) {
+      this.tip.hidden = true;
+      const key = hit.it.entry.id + '\u0000' + text;
+      if (this._sunk !== key) {
+        this._sunk = key;
+        const r = hit.r;
+        Promise.resolve(this.sink.show(text, r)).then(ok => { if (ok === false && this._sunk === key) this.placeLocal(text, r); });      // (no window of its own: drawn here)
+      }
+      return hit.it.entry.id;
+    }
+    this.placeLocal(text, hit.r);
+    return hit.it.entry.id;
+  }
+  // the tip in this page: beside the widget, inside the window
+  placeLocal(text, r) {
     if (this.tip.textContent !== text) this.tip.textContent = text;
     this.tip.hidden = false;
-    // beside the widget, inside the window
     const w = this.tip.offsetWidth, h = this.tip.offsetHeight, vw = innerWidth, vh = innerHeight;
-    const left = Math.max(2, Math.min(vw - w - 2, hit.r.left + hit.r.width / 2 - w / 2));
-    const top = hit.r.top - h - 6 >= 2 ? hit.r.top - h - 6 : Math.min(vh - h - 2, hit.r.bottom + 6);
+    const left = Math.max(2, Math.min(vw - w - 2, r.left + r.width / 2 - w / 2));
+    const top = r.top - h - 6 >= 2 ? r.top - h - 6 : Math.min(vh - h - 2, r.bottom + 6);
     this.tip.style.left = left + 'px'; this.tip.style.top = Math.max(2, top) + 'px';
-    return hit.it.entry.id;
   }
 }

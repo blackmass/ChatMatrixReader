@@ -43,6 +43,18 @@ fn file_sha256(path: &Path) -> Result<String, String> {
 
 // ---- download -------------------------------------------------------------------------------------------------------
 
+/// An engine program that was downloaded must be allowed to run (macOS: a file written by a download has no "execute" right). Only the engine folders
+/// (extensions/<name>/engine-<kind>/); the models and the other files stay as they are. Windows has no such right: nothing to do.
+fn make_runnable(dest: &str, target: &Path) {
+    #[cfg(unix)]
+    if dest.replace('\\', "/").contains("/engine-") {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o755));
+    }
+    #[cfg(not(unix))]
+    let _ = (dest, target);
+}
+
 pub async fn download(app: AppHandle, root: PathBuf, id: String, url: String, dest: String, sha: Option<String>) -> Result<Value, String> {
     extlib::under_extension(&dest, false)?;
     let target = files::resolve(&root, &dest)?;
@@ -52,8 +64,8 @@ pub async fn download(app: AppHandle, root: PathBuf, id: String, url: String, de
     if target.is_file() {
         // already there: fine when it is the right file (or when no checksum was given)
         match &want {
-            Some(w) => { if file_sha256(&target)? == *w { return Ok(json!({ "ok": true, "skipped": true })); } }
-            None => return Ok(json!({ "ok": true, "skipped": true })),
+            Some(w) => { if file_sha256(&target)? == *w { make_runnable(&dest, &target); return Ok(json!({ "ok": true, "skipped": true })); } }
+            None => { make_runnable(&dest, &target); return Ok(json!({ "ok": true, "skipped": true })); }
         }
     }
     let flag = Arc::new(AtomicBool::new(false));
@@ -67,6 +79,7 @@ pub async fn download(app: AppHandle, root: PathBuf, id: String, url: String, de
     }
     let _ = std::fs::remove_file(&target);
     std::fs::rename(&part, &target).map_err(|e| e.to_string())?;
+    make_runnable(&dest, &target);
     Ok(json!({ "ok": true, "bytes": bytes }))
 }
 

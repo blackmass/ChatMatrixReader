@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0091 NEW)                    # (lets the Visual C++ runtime be chosen below)
+if(APPLE)                                       # (macOS 13 or later, Apple silicon only: what ScreenCaptureKit audio needs; set before project())
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "" FORCE)
+  set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "" FORCE)
+endif()
 project(cmr_stt LANGUAGES C CXX)
 # Windows: the runtime is linked into the program, so a user needs no "Visual C++ Redistributable"
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

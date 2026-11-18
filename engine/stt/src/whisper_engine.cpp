@@ -35,7 +35,7 @@ public:
         ctx_ = whisper_init_from_file_with_params(cfg_.model.c_str(), cp);
         if (!ctx_) { error = "cannot load the model " + cfg_.model + " (missing, damaged, or not a Whisper model file)"; return false; }
         // a GPU was asked for: it is used when this build has a GPU backend and a device for it, else whisper.cpp computes on the CPU
-        gpu_ = cp.use_gpu && ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr;
+        gpu_ = cp.use_gpu && (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr || ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU) != nullptr);
         return true;
     }
 
