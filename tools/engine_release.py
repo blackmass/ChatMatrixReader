@@ -49,6 +49,11 @@ def sha256_of(path):
     return h.hexdigest()
 
 
+def text_bytes(path):
+    """The bytes of a license text with LF line endings: the same text is CRLF in a Windows checkout and LF in a Mac one, and must be one file in the release."""
+    return open(path, "rb").read().replace(b"\r\n", b"\n")
+
+
 def read_version(path):
     text = open(path, encoding="utf-8-sig", errors="replace").read()
     for line in text.splitlines():
@@ -220,10 +225,11 @@ def main(argv):
             print(f"engine-{kind}: made from what the build left: {', '.join(made)}")
         ver, exe_sha = check_folder(kind, folder)
         for n, asset in (("LICENSE-whisper.cpp.txt", "LICENSE-whisper.cpp.txt"), ("LICENSE.txt", "LICENSE-ChatMatrixReader.txt")):
-            sha = sha256_of(os.path.join(folder, n))
+            data = text_bytes(os.path.join(folder, n))
+            sha = hashlib.sha256(data).hexdigest()
             if asset in shared and shared[asset][0] != sha:
-                raise SystemExit(f"{asset} differs between the engine folders: build all engines from the same state of the project")
-            shared[asset] = (sha, os.path.join(folder, n))
+                raise SystemExit(f"{asset} differs between the engine folders (even with the same line endings): build all engines from the same state of the project")
+            shared[asset] = (sha, data)
         exe_asset, info_asset = ASSET_OF[kind], f"BUILD-INFO-engine-{kind}.txt"
         files = [(EXE_OF[kind], exe_sha), ("LICENSE-whisper.cpp.txt", shared["LICENSE-whisper.cpp.txt"][0]), ("LICENSE.txt", shared["LICENSE-ChatMatrixReader.txt"][0])]
         info = build_info(tag, kind, ver, exe_sha, files, commit_text)
@@ -235,10 +241,10 @@ def main(argv):
         if not dry:
             shutil.copyfile(os.path.join(folder, EXE_OF[kind]), os.path.join(out_dir, exe_asset))
             open(os.path.join(out_dir, info_asset), "w", encoding="utf-8", newline="\n").write(info)
-    for asset, (sha, src) in shared.items():
+    for asset, (sha, data) in shared.items():
         assets.append((asset, sha))
         if not dry:
-            shutil.copyfile(src, os.path.join(out_dir, asset))
+            open(os.path.join(out_dir, asset), "wb").write(data)
     base = f"https://github.com/{REPO}/releases/download/{tag}/"
     sums = "".join(f"{sha}  {name}\n" for name, sha in sorted(set(assets)))
     if not dry:

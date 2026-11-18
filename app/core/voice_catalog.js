@@ -17,19 +17,24 @@ export const BUILTIN = {
   // <engine-files> written by tools/engine_release.py when an engine is released (empty until then: the engine buttons say it is not up yet)
   engines: {
     cpu: { files: [
-      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.2/cmr-stt-cpu-windows-x64.exe', sha256: 'fd34757368f42f59d1c2e0e04510cbee1dc03ad6defd9aaf8cc15353f1b8b306' },
-      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.2/LICENSE-whisper.cpp.txt', sha256: 'bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285' },
-      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.2/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
-      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.2/BUILD-INFO-engine-cpu.txt', sha256: 'a5581d4a84a69a8a64ce8a67a943c289fd1b766a652295cdd3de4b9d216afce9' },
+      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/cmr-stt-cpu-windows-x64.exe', sha256: 'fd34757368f42f59d1c2e0e04510cbee1dc03ad6defd9aaf8cc15353f1b8b306' },
+      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-whisper.cpp.txt', sha256: '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d' },
+      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
+      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/BUILD-INFO-engine-cpu.txt', sha256: '024c736cb79ebd87411d51aab8e9563b549ee2cbf493438d07c17001b25a2bb0' },
     ] },
     vulkan: { files: [
-      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.2/cmr-stt-vulkan-windows-x64.exe', sha256: 'af4f281941be815c09fd4baef1e40e35e43f0e098d04b59a84c54022d6babb52' },
-      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.2/LICENSE-whisper.cpp.txt', sha256: 'bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285' },
-      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.2/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
-      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.0.2/BUILD-INFO-engine-vulkan.txt', sha256: '3ac279d76508ce821993827a1cdbb3d8ea543a1856c2e7dcaf726f5e3333a308' },
+      { name: 'cmr-stt.exe', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/cmr-stt-vulkan-windows-x64.exe', sha256: 'af4f281941be815c09fd4baef1e40e35e43f0e098d04b59a84c54022d6babb52' },
+      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-whisper.cpp.txt', sha256: '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d' },
+      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
+      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/BUILD-INFO-engine-vulkan.txt', sha256: '45c4d4eded0f2ab7d883935517ce74822399b8eef21386b1b569601bfb917e16' },
     ] },
     cuda: { files: [] },
-    metal: { files: [] },
+    metal: { files: [
+      { name: 'cmr-stt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/cmr-stt-metal-macos-arm64', sha256: '3d95c240ade43e1f63a9dfd7497805bfcf8369fee44e25d5da4e288d2f86a3d6' },
+      { name: 'LICENSE-whisper.cpp.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-whisper.cpp.txt', sha256: '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d' },
+      { name: 'LICENSE.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/LICENSE-ChatMatrixReader.txt', sha256: '40e97155c76f7c5b7caa67e4905d9f838008ed01922f675f18f27fb0853abdf8' },
+      { name: 'BUILD-INFO.txt', url: 'https://github.com/blackmass/ChatMatrixReader/releases/download/v3.1.0/BUILD-INFO-engine-metal.txt', sha256: '80327dd79c5c0f1f46ad44fe1b73fa0fd645f67ea75e0248bcfac5a1a5b08736' },
+    ] },
   },
   // </engine-files>
   models: {
