@@ -19,7 +19,7 @@ The WoW addon **ChatMatrix** draws the chat as a small block of colored cells (t
   - `BUILD-INFO.txt` inside the release zip lists the SHA-256 of every file and the commit it was built from.
   - Voice recognition engines and models are checked against SHA-256 every time they are downloaded.
   - A list of the licenses of every library used (`THIRD-PARTY-NOTICES.txt`) is included.
-  - The program is not code-signed (cost), so Windows may show a warning.
+  - The program has not been code-signed so far (cost); an application for the free open-source code signing of SignPath Foundation has been submitted ([code signing policy](CODE_SIGNING_POLICY.md)). Until it is signed, Windows may show a warning (SmartScreen, Smart App Control).
 - **Self-contained**: no installer. Unzip it into a folder and run it: settings, logs, glossary and fonts all stay in that folder, and nothing is written to the registry. To remove it, delete the folder.
 
 # Features
@@ -53,6 +53,13 @@ You need both the addon and the program.
 - I did not register as an Apple developer, so a security warning appears on first run (right-click → Open). If needed, remove the quarantine with `xattr -dr com.apple.quarantine <folder path>` in the Terminal.
 - You must allow the **Screen & System Audio Recording** permission yourself. Run WoW in windowed (fullscreen window) mode.
 - Tested only on my own MacBook, so expect some rough edges.
+
+## Code signing policy
+`ChatMatrixReader.exe` of the Windows releases is the subject of an application for free code signing by SignPath Foundation. **Releases before the approval are not signed.** For signed releases this applies:
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/)
+
+What is signed, the team and roles, and the privacy policy are in [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) (privacy: nothing is sent except to the services you set up, such as the translation service).
 
 # First setup
 1. When you enable the addon in WoW, a **green matrix box** appears. Drag it to a place that is easy to see and fix it with `/cm lock`. Other UI must not cover it. To move it again, use `/cm unlock`.
@@ -99,9 +106,11 @@ Turns voice chat (Discord and the like) into text with Whisper and shows it in t
 - Limit: since the Midnight expansion, WoW restricts addons more strongly, so some messages (guild management, battlegrounds, boss fights) cannot be collected. There is a safety net, so everything else is collected (check "Other" in the addon options, and it depends on your own chat filter settings). It is not a big problem on NA servers. The recent official API patch notes suggest it may get better.
 - WoW Retail (live) and the Forever servers are tested because those are what I play. Classic and others are unknown; it may only need the version added to the toc.
 - Both Windows and Mac are tested. The Mac version was only tested on my MacBook, so expect more rough edges.
+- If **Smart App Control** of Windows 11 is on, it can block a program that is not signed (there is no "run anyway"). Until the signing is in place, turn it off to use the program (Windows Security → App & browser control).
 - Post-processing that changes colors (DLSS, HDR) can disturb recognition. Adjusting the color levels as in "First setup" fixes most cases (it is detected even with WoW brightness at 100%).
 
 # What goes out to the internet
+(The privacy policy in full: [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md#privacy-policy))
 - **Translation**: the chat text to be translated goes to the translation service you chose (Google Translate, or the AI server you set). Nothing is sent when translation is off.
 - **Checking for a new version**: at start the program reads the GitHub release information once (it can be turned off).
 - **Installing voice recognition**: the engine comes from this repository's releases, the models from Hugging Face.
