@@ -158,12 +158,16 @@ fn serve(path: &str) -> tauri::http::Response<Vec<u8>> {
 /// (the pages of a plugin, shown in a sandboxed frame: see docs). Nothing outside plugins/<id>/ is ever given (no "..", no drive or stream names, no link that leads out),
 /// and every answer carries a policy (CSP) that lets the page load only its own files and nothing from the network.
 fn serve_plugin(path: &str) -> tauri::http::Response<Vec<u8>> {
-    const CSP: &str = "default-src 'self' blob: data:; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; \
-        connect-src 'self' blob: data:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'";
+    // The policy names the plugin address itself (not 'self'): the pages are shown in a sandboxed frame, and WebKit (macOS) does not match 'self' there.
+    let me = if cfg!(windows) { "http://cmrplug.localhost" } else { "cmrplug://localhost" };
+    let csp = format!(
+        "default-src {me} blob: data:; script-src {me} 'unsafe-inline' blob:; style-src {me} 'unsafe-inline'; img-src {me} data: blob:; font-src {me} data:; \
+         connect-src {me} blob: data:; worker-src {me} blob:; frame-src 'none'; object-src 'none'; base-uri {me}; form-action 'none'"
+    );
     let decoded = percent_decode(path);
     let builder = tauri::http::Response::builder()
         .header("Cache-Control", "no-store")
-        .header("Content-Security-Policy", CSP)
+        .header("Content-Security-Policy", csp)
         .header("Access-Control-Allow-Origin", "*")
         .header("Cross-Origin-Resource-Policy", "cross-origin")
         .header("X-Content-Type-Options", "nosniff");
