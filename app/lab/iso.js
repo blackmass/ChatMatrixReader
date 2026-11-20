@@ -5,14 +5,14 @@
   if (k !== 'file') { if (globalThis.__TAURI__ && k !== '') await globalThis.__TAURI__.core.invoke('fs_append', { path: 'logs/lab_isolation.txt', text: '(lab module loaded, app/lab/RUN is: "' + k + '")\n' }).catch(() => {}); throw new Error('lab off'); }
 }
 const out = [];
-const ROUND = 2;
+const ROUND = 3;
 const say = t => out.push(t);
 const T = globalThis.__TAURI__;
 const kind = (await (T && T.core ? T.core.invoke('os_kind').catch(() => '?') : '?'));
 say(`== lab isolation round ${ROUND} ${new Date().toISOString()}  os=${kind}  page=${location.href}`);
 say(`page: typeof __TAURI__=${typeof T}, __TAURI_INTERNALS__=${typeof globalThis.__TAURI_INTERNALS__}`);
 
-try { await T.core.invoke('fs_append', { path: 'logs/lab_isolation.txt', text: '(lab round 2 started ' + new Date().toISOString() + ')\n' }); } catch (e) { /* the end tells */ }
+try { await T.core.invoke('fs_append', { path: 'logs/lab_isolation.txt', text: '(lab round 3 started ' + new Date().toISOString() + ')\n' }); } catch (e) { /* the end tells */ }
 const wait = (ms, v) => new Promise(r => setTimeout(() => r(v), ms));
 
 // 1. a worker from the app's folder
@@ -35,13 +35,14 @@ const frame = (sandbox, id) => new Promise(r => {
 });
 
 // 3. frames made from text (srcdoc, no files): the real calls of the exe (invoke), and a policy (CSP) that also holds a worker made inside
+const CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; img-src 'none'">`;
 const SRCDOC = `<!doctype html><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; img-src 'none'">
+@CSP@
 <script>
 (async () => {
   const r = [];
   let viol = 0; addEventListener('securitypolicyviolation', () => viol++);
-  const t = (name, fn) => Promise.resolve().then(fn).then(v => r.push(name + ' -> ' + v), e => r.push(name + ' -> blocked (' + (e && (e.name || e)) + ': ' + String(e && e.message || '').slice(0, 70) + ')'));
+  const t = (name, fn) => Promise.race([Promise.resolve().then(fn), new Promise((_, no) => setTimeout(() => no({ name: 'HANG', message: 'no answer in 4 s' }), 4000))]).then(v => r.push(name + ' -> ' + v), e => r.push(name + ' -> blocked (' + (e && (e.name || e)) + ': ' + String(e && e.message || '').slice(0, 70) + ')'));
   r.push('typeof __TAURI__=' + typeof window.__TAURI__ + ', origin=' + String(location.origin));
   await t('invoke os_kind', () => window.__TAURI__.core.invoke('os_kind'));
   await t('invoke fs_kind app', () => window.__TAURI__.core.invoke('fs_kind', { path: 'app' }));
@@ -66,18 +67,22 @@ const SRCDOC = `<!doctype html><meta charset="utf-8">
   parent.postMessage(r, '*');
 })();
 <\/script>`;
-const srcdocFrame = sandbox => new Promise(r => {
+const srcdocFrame = (sandbox, csp) => new Promise(r => {
   const f = document.createElement('iframe');
   f.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;border:0';
   if (sandbox) f.setAttribute('sandbox', 'allow-scripts');
-  f.srcdoc = SRCDOC;
+  f.srcdoc = SRCDOC.replace('@CSP@', csp ? CSP : '');
   const on = e => { if (e.source === f.contentWindow) { removeEventListener('message', on); f.remove(); r(e.data); } };
   addEventListener('message', on);
   document.body.append(f);
-  setTimeout(() => { removeEventListener('message', on); f.remove(); r(['srcdoc frame: no answer in 20 s']); }, 20000);
+  setTimeout(() => { removeEventListener('message', on); f.remove(); r(['srcdoc frame: no answer in 45 s']); }, 45000);
 });
 
-for (const [name, fn] of [['srcdoc frame, sandbox allow-scripts, policy: nothing may go out', () => srcdocFrame(true)], ['srcdoc frame, NO sandbox (control: same origin as the app)', () => srcdocFrame(false)]]) {
+for (const [name, fn] of [
+  ['A: sandbox allow-scripts + policy (nothing may go out)', () => srcdocFrame(true, true)],
+  ['B: sandbox allow-scripts, NO policy (does invoke work from it?)', () => srcdocFrame(true, false)],
+  ['C: no sandbox, NO policy (control: the app\'s own origin)', () => srcdocFrame(false, false)],
+]) {
   try { say(`-- ${name}`); for (const l of await fn()) say('   ' + l); } catch (e) { say('   error: ' + e); }
 }
 say('== end');
