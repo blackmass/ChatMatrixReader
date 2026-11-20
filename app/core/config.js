@@ -87,6 +87,7 @@ export const DEFAULTS = {
     voice_oa_format: 'json',   // openai: json | verbose_json
     voice_oa_timeout: 30,   // openai: seconds to wait for the server
     // window
+    tab_opacity: 1.0,   // how solid the tabs and the icon box of the title bar are (1 = whole)
     bg_opacity: 1.0,   // background (the dark area)
     text_opacity: 1.0,   // text, title bar, scrollbar
     topmost: true,   // above every other window

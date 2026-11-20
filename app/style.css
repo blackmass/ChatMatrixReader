@@ -48,6 +48,7 @@ body.overlay .lines { position: fixed; inset: 4px 8px; color: #fff; }
 /* the panes of a window that has tabs: all stand in the same place, the one that is not shown is invisible and takes no mouse */
 body.overlay .lines.off { opacity: 0; pointer-events: none; }
 /* While the title bar shows, the lines are not seen in the part it takes (the gap between the tab and the icons is empty: the window behind shows, the text must not) */
+body.overlay.outside.hide-tools.hide-tabs:not(.has-alert) .lines { clip-path: none !important; }
 body.overlay.interactive .lines, body.overlay.has-alert .lines { clip-path: inset(calc(var(--bar-h) - 4px) 0 0 0); }
 /* the edges for resizing (overlay.js edges()): none at the top, that is the title bar */
 .edge { position: fixed; z-index: 20; display: none; }

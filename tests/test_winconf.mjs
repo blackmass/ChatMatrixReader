@@ -7,7 +7,7 @@ for (const [fn, args, want] of JSON.parse(fs.readFileSync(path.join(HERE, 'golde
   // 3.0 differs from 2.0 here on purpose: "only while the voice recognition is on" can be set for every extra window (2.0 allowed it for window 2 only)
   if (fn === 'normalize' && Array.isArray(args[0]) && args[0].length === 1 && args[0][0] && args[0][0].id === 5 && args[0][0].open_mode === 'voice') want.find(c => c.id === 5).open_mode = 'voice';
   const got = w[fn](...args);
-  const no3 = v => { if (Array.isArray(v)) v.forEach(no3); else if (v && typeof v === 'object') { delete v.clear_on_open; delete v.dock_to; } return v; };       // (3.x only: an extra window can start empty)
+  const no3 = v => { if (Array.isArray(v)) v.forEach(no3); else if (v && typeof v === 'object') { delete v.clear_on_open; delete v.dock_to; delete v.tab_opacity; } return v; };       // (3.x only: an extra window can start empty)
   eq(no3(got), want, `${fn}(${JSON.stringify(args)})`);
 }
 

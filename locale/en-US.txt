@@ -938,3 +938,5 @@ fonts 폴더의 글꼴 = Fonts of the fonts folder
 마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다. 탭을 누르다가 창이 밀리는 일을 막습니다. = Stops the mouse from moving or resizing the window, so a click on a tab cannot push it.
 이 탭 독립시키기 = Make this tab a window of its own
 {name} 창의 탭으로 붙이기 = Attach as a tab of the window {name}
+탭 배경 진하기 = Tab background opacity
+창 위쪽의 이름 탭과 기능 버튼 상자의 배경과 테두리가 얼마나 진한지 정합니다. 100%면 또렷하게 보이고, 낮추면 흐려져 게임 화면 위에서 덜 거슬립니다. 글자는 그대로입니다. = Sets how solid the background and border of the name tabs and the box of function buttons at the top of the window are. 100% is clear; lower is fainter and less in the way over the game. The text stays as it is.

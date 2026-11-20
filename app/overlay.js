@@ -66,12 +66,12 @@ function syncBlur() {
   const blur = Number(opt('blur', 0)) || 0;                         // 0 off | 1 weak | 2 strong
   const bg = Number(opt('bg_opacity', 1));
   const shown = blur && !hovering && !resizing;                                  // while the window is cleared by the mouse, the blur behind it goes too
-  // with blur on, Windows paints the background (blur + tint) itself, so the page's own background layer is switched off
-  r.setProperty('--bg-alpha', shown ? 0 : bg);
-  const key = JSON.stringify([shown ? blur : 0, bg]);
+  // the colour of the background is always the page's own layer (#bg: it starts under the tabs); the system only blurs (a tint of almost nothing is left, some systems need one)
+  r.setProperty('--bg-alpha', bg);
+  const key = JSON.stringify([shown ? blur : 0]);
   if (key !== blurKey) {
     blurKey = key;
-    invoke('set_blur', { on: !!shown, state: blur === 2 ? 4 : 3, color: '#1e1f22', alpha: bg })
+    invoke('set_blur', { on: !!shown, state: blur === 2 ? 4 : 3, color: '#1e1f22', alpha: 0.004 })
       .then(ok => { if (shown && !ok) note(tr('블러: 윈도우가 거부함')); })
       .catch(e => note(tr('블러: {e}', { e })));
   }
@@ -94,7 +94,7 @@ function applyAll() {
   const barH = parseFloat(getComputedStyle(document.body).getPropertyValue('--bar-h')) || 22;
   for (const k of ['tools', 'tabs', 'frame']) document.body.classList.toggle('hide-' + k, !!opt('hide_' + k, false));      // ("평소에 인터페이스 숨기기": they show while the mouse is in the window)
   for (const p of panes) {
-    p.view.inset = opt('click_through', false) ? 0 : Math.max(0, barH - p.el.getBoundingClientRect().top);
+    p.view.inset = opt('click_through', false) || barGone ? 0 : Math.max(0, barH - p.el.getBoundingClientRect().top);
     const look = lookFrom((k, d) => popt(p.id, k, d));
     if (look.family && !fonts.known.some(k => k.family === look.family) && Date.now() - fontScan > 3000) {   // a font file may have been put into fonts/ meanwhile
       fontScan = Date.now();
@@ -108,6 +108,16 @@ function applyAll() {
   applyZ();
 }
 let fontScan = 0;
+// the bar is not seen: the mouse is out of the window and both the tabs and the icons are set to hide (and no tab has a mark): the lines are whole up to the top, like in a
+// click-through window (the room under the bar stays; only what the bar would cover is not taken away)
+let barGone = false;
+function syncBarGone() {
+  const gone = document.body.classList.contains('outside') && !!opt('hide_tools', false) && !!opt('hide_tabs', false) && !panes.some(p => p.alert && p !== active);
+  if (gone === barGone) return;
+  barGone = gone;
+  const barH = parseFloat(getComputedStyle(document.body).getPropertyValue('--bar-h')) || 22;
+  for (const p of panes) { p.view.inset = opt('click_through', false) || barGone ? 0 : Math.max(0, barH - p.el.getBoundingClientRect().top); p.view.scheduleClip(); }
+}
 
 // ---- the tabs: the windows that are tabs of this one (their option "탭으로 합칠 창") get a pane each, and a tab in the bar
 let started = false;                                                // (the first replay of the hub is asked for in start(); a pane that comes later asks for its own)
@@ -129,6 +139,8 @@ function syncPanes() {
 }
 function showTabs() {
   const bar = document.getElementById('bar'), space = document.getElementById('space'), multi = panes.length > 1, locked = !!opt('lock_window', false);
+  const ta = Math.min(1, Math.max(0.05, Number(opt('tab_opacity', 1)) || 1));                  // (the tabs and the icon box: how solid; the one under the mouse is a little more)
+  document.body.style.setProperty('--tab-alpha', String(ta)); document.body.style.setProperty('--tab-alpha-hover', String(Math.min(1, ta + 0.3)));
   document.body.classList.toggle('locked', locked);                    // ("창 고정": the bar does not drag the window, the edges do not resize it)
   for (const e of [bar, space]) { if (locked) e.removeAttribute('data-tauri-drag-region'); else e.setAttribute('data-tauri-drag-region', ''); }
   for (const p of panes) {
@@ -344,7 +356,8 @@ async function tick() {
       if (picked.trim() && picked !== lastCopied) { lastCopied = picked; try { window.__TAURI__.clipboardManager.writeText(picked); } catch { /* no clipboard */ } }
     }
     insidePrev = inside;
-    document.body.classList.toggle('outside', !inside);                              // (the title bar fades while the mouse is out of the window, see style.css)
+    document.body.classList.toggle('outside', !inside);
+    syncBarGone();                              // (the title bar fades while the mouse is out of the window, see style.css)
     const overMe = inside && !hovering;                                               // (a window cleared by the mouse shows no tips: its tip would float over nothing)
     widgetLayer.pointer(overMe ? (cx - x) / (window.devicePixelRatio || 1) : null, overMe ? (cy - y) / (window.devicePixelRatio || 1) : null);       // (the tip of a widget under the cursor: also while click-through)
     if (!inside && !getSelection().isCollapsed) getSelection().removeAllRanges();     // the cursor left: the marked text is released
