@@ -312,3 +312,10 @@ input.colortext.follow-input { width: 150px; }
 .pl-warn { display: block; margin: 10px 0; }
 .pl-buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
 .pl-card small, .pl-detail small.note { display: block; }
+.pl-frame { display: block; width: 100%; border: 0; background: transparent; color-scheme: normal; }
+.pl-hosts { margin: 4px 0; }
+.pl-hostrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.pl-hostrow code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pl-request { border: 1px solid var(--accent); border-radius: 6px; padding: 5px 8px; }
+.pl-hostadd { display: flex; gap: 8px; margin: 6px 0; }
+.pl-hostadd input { max-width: 260px; }

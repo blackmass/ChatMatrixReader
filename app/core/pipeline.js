@@ -40,6 +40,7 @@ const fromSegments = seq => seq.map(([text, q, tip]) => piece(text, { quality: O
 export function codePrefix(code, mode) {
   if (mode === 'nochan' || mode === 'body') return '';
   if (code === '!VC') return '[' + tr('음성') + '] ';
+  if (code === '!PLG') return '[' + tr('플러그인') + '] ';
   if (mode === 'detail') return `[${SHOWN_CODE[code] ?? code}] `;
   if (code === 'WT' || code === 'BT') return '→ ';
   if (code.startsWith('C') && /^\d+$/.test(code.slice(1))) return `[${code.slice(1)}] `;

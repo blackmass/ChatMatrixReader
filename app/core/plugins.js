@@ -8,7 +8,10 @@
 
 export const API_VERSION = 1;                         // the version of the plugin interface this program speaks
 export const MAX_OPTIONS = 50;
-export const PERMISSIONS = ['net', 'chat.inject', 'storage'];      // (a timer is not a permission: a plugin has its own setInterval; what costs is limited where it is called)
+export const MAX_WINDOWS = 3;
+export const PERMISSIONS = ['net', 'netAny', 'chat.inject', 'storage', 'widgets', 'windows'];
+export const MAX_USER_HOSTS = 30;                    // the hosts the user may allow for one plugin (netAny)
+export const MAX_REQUESTS = 10;                      // requests of hosts that wait for the user's answer      // (a timer is not a permission: a plugin has its own setInterval; what costs is limited where it is called)
 export const OPTION_TYPES = ['text', 'number', 'check', 'select'];
 export const RECOMMENDED_ID_LENGTH = 16;              // an id this long is not easy to guess or to clash with (a warning below this)
 
@@ -59,6 +62,27 @@ function cleanOptions(list, errors) {
   return out;
 }
 
+// the windows a plugin may have: [{ id, title, page, width, height }] (the user sees them in the list of windows; the plugin opens and closes them)
+const WIN_ID = /^[a-z0-9_-]{1,24}$/;
+const PAGE = /^[A-Za-z0-9_\-./]{1,200}\.html$/;
+const validPage = f => typeof f === 'string' && PAGE.test(f) && !f.includes('..') && !f.startsWith('/') && !f.includes('//');
+function cleanWindows(list, errors) {
+  if (list === undefined) return [];
+  if (!Array.isArray(list)) { errors.push('windows: must be a list'); return []; }
+  if (list.length > MAX_WINDOWS) errors.push(`windows: at most ${MAX_WINDOWS}`);
+  const out = [], seen = new Set();
+  for (const [i, w] of list.slice(0, MAX_WINDOWS).entries()) {
+    const at = `windows[${i}]`;
+    if (!isObj(w) || !WIN_ID.test(w.id || '') || seen.has(w.id)) { errors.push(`${at}: an id of letters, digits, '-' and '_' (no repeat) is needed`); continue; }
+    if (!validPage(w.page)) { errors.push(`${at}: page must be a .html file inside the folder`); continue; }
+    seen.add(w.id);
+    const size = (v, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(2000, Math.max(120, n)) : d; };
+    out.push({ id: w.id, title: str(w.title, 40) || w.id, page: w.page, width: size(w.width, 420), height: size(w.height, 300) });
+  }
+  return out;
+}
+export const windowsOf = manifest => manifest.windows || [];
+
 export function parseManifest(text, folder) {
   const errors = [], warnings = [];
   let m;
@@ -82,7 +106,7 @@ export function parseManifest(text, folder) {
   }
 
   // permissions: only the known ones, in the exact shape
-  const perms = { net: [], 'chat.inject': false, storage: false };
+  const perms = { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false };
   const p = m.permissions === undefined ? {} : m.permissions;
   if (!isObj(p)) errors.push('permissions: must be an object');
   else {
@@ -94,7 +118,7 @@ export function parseManifest(text, folder) {
         else if (!perms.net.includes(h)) perms.net.push(h);
       }
     }
-    for (const k of ['chat.inject', 'storage']) if (p[k] !== undefined) { if (typeof p[k] !== 'boolean') errors.push(`permissions.${k}: true or false`); else perms[k] = p[k]; }
+    for (const k of ['netAny', 'chat.inject', 'storage', 'widgets', 'windows']) if (p[k] !== undefined) { if (typeof p[k] !== 'boolean') errors.push(`permissions.${k}: true or false`); else perms[k] = p[k]; }
   }
   const reasons = {};
   if (m.reasons !== undefined) {
@@ -103,8 +127,10 @@ export function parseManifest(text, folder) {
   }
   for (const k of asked(perms)) if (!reasons[k]) warnings.push(`reasons.${k}: tell the user why "${k}" is needed (it is shown when they decide)`);
   const options = cleanOptions(m.options, errors);
-  for (const k of Object.keys(m)) if (!['id', 'name', 'version', 'api', 'author', 'description', 'main', 'optionsPage', 'permissions', 'reasons', 'options'].includes(k)) warnings.push(`"${k}" is not known to this program (ignored)`);
-  const manifest = { id: m.id, name, version, api: m.api, author: str(m.author, 80), description: str(m.description, 400), main, optionsPage, permissions: perms, reasons, options };
+  const windows = cleanWindows(m.windows, errors);
+  if (windows.length && !perms.windows) warnings.push('windows are declared but the permission "windows" is not asked for: they are not used');
+  for (const k of Object.keys(m)) if (!['id', 'name', 'version', 'api', 'author', 'description', 'main', 'optionsPage', 'permissions', 'reasons', 'options', 'windows'].includes(k)) warnings.push(`"${k}" is not known to this program (ignored)`);
+  const manifest = { id: m.id, name, version, api: m.api, author: str(m.author, 80), description: str(m.description, 400), main, optionsPage, permissions: perms, reasons, options, windows };
   return { ok: errors.length === 0, errors, warnings, manifest: errors.length ? null : manifest };
 }
 
@@ -112,21 +138,26 @@ export function parseManifest(text, folder) {
 export const asked = perms => PERMISSIONS.filter(k => (k === 'net' ? perms.net.length > 0 : !!perms[k]));
 
 // granted: what the user allowed, kept in the settings: { net: [host...], 'chat.inject': bool, storage: bool }
-const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net : [], 'chat.inject': !!(g && g['chat.inject']), storage: !!(g && g.storage) });
+const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net.filter(validHost).slice(0, MAX_USER_HOSTS + 20) : [], netAny: !!(g && g.netAny), 'chat.inject': !!(g && g['chat.inject']), storage: !!(g && g.storage), widgets: !!(g && g.widgets), windows: !!(g && g.windows) });
 
 // what is asked for and not yet allowed: [{ perm, host? }]
 export function missing(manifest, granted) {
   const g = grantedOf(granted), out = [], p = manifest.permissions;
   for (const h of p.net) if (!g.net.includes(h)) out.push({ perm: 'net', host: h });
+  if (p.netAny && !g.netAny) out.push({ perm: 'netAny' });
   if (p['chat.inject'] && !g['chat.inject']) out.push({ perm: 'chat.inject' });
   if (p.storage && !g.storage) out.push({ perm: 'storage' });
+  if (p.widgets && !g.widgets) out.push({ perm: 'widgets' });
+  if (p.windows && !g.windows) out.push({ perm: 'windows' });
   return out;
 }
 
 // what the plugin may do now: only what the manifest asks for AND the user allowed (a permission that was removed from the manifest is not used any more)
 export function effective(manifest, granted) {
   const g = grantedOf(granted), p = manifest.permissions;
-  return { net: p.net.filter(h => g.net.includes(h)), 'chat.inject': p['chat.inject'] && g['chat.inject'], storage: p.storage && g.storage };
+  // netAny: besides the hosts of the manifest, the hosts the user allowed one by one (they are in granted.net)
+  const netAny = !!(p.netAny && g.netAny);
+  return { net: netAny ? g.net.slice(0, MAX_USER_HOSTS + p.net.length) : p.net.filter(h => g.net.includes(h)), netAny, 'chat.inject': p['chat.inject'] && g['chat.inject'], storage: p.storage && g.storage, widgets: p.widgets && g.widgets, windows: p.windows && g.windows };
 }
 
 // is this address one the plugin may fetch? (https only; the host must be one of the allowed ones, exactly)
@@ -137,7 +168,7 @@ export function netAllowed(eff, url) {
 }
 
 // what a plugin asks for, as one text: when it changes (a new permission, a new host), the user is asked again
-export const permsKey = manifest => JSON.stringify([manifest.id, [...manifest.permissions.net].sort(), !!manifest.permissions['chat.inject'], !!manifest.permissions.storage]);
+export const permsKey = manifest => JSON.stringify([manifest.id, [...manifest.permissions.net].sort(), !!manifest.permissions['chat.inject'], !!manifest.permissions.netAny, !!manifest.permissions.storage, !!manifest.permissions.widgets, !!manifest.permissions.windows, (manifest.windows || []).map(w => w.id).sort()]);
 
 // a value of an option, made right for its declaration (a wrong one becomes the default)
 export function cleanOptionValue(def, v) {
@@ -152,5 +183,20 @@ export function cleanOptionValue(def, v) {
   if (def.type === 'select') return def.choices.some(c => c.value === v) ? v : def.default;
   return typeof v === 'string' ? v.slice(0, 500) : def.default;
 }
-// the values of all the options: what the user set (cleaned) over the defaults; options the manifest does not declare are dropped
-export const optionValues = (manifest, saved) => Object.fromEntries(manifest.options.map(d => [d.key, saved && d.key in saved ? cleanOptionValue(d, saved[d.key]) : d.default]));
+// The values of all the options: what was set (cleaned for the declared ones) over the defaults. A plugin that draws its own options page (optionsPage) keeps its own settings here
+// too (any key of letters, digits and '_' with a value JSON can hold; 100 keys, 100 KB in all): they are not shown by the program, they are only kept and given back.
+export const FREE_KEYS = 100;
+export const FREE_BYTES = 100_000;
+export function optionValues(manifest, saved) {
+  const out = Object.fromEntries(manifest.options.map(d => [d.key, saved && d.key in saved ? cleanOptionValue(d, saved[d.key]) : d.default]));
+  if (!isObj(saved)) return out;
+  const declared = new Set(manifest.options.map(d => d.key));
+  let n = 0, bytes = 0;
+  for (const [k, v] of Object.entries(saved)) {
+    if (declared.has(k) || !KEY.test(k) || n >= FREE_KEYS) continue;
+    let t; try { t = JSON.stringify(v); } catch { t = undefined; }
+    if (t === undefined || bytes + t.length > FREE_BYTES) continue;
+    out[k] = JSON.parse(t); n++; bytes += t.length;
+  }
+  return out;
+}

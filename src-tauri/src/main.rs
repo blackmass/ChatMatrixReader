@@ -251,6 +251,8 @@ async fn plugin_fetch(url: String, method: Option<String>, headers: Option<Vec<(
     let mut res = req.send().await.map_err(describe)?;
     let status = res.status().as_u16();
     let final_url = res.url().to_string();
+    // a redirect that was not followed (it leads to a host the user has not allowed): the plugin is told where it goes, so that it can ask for that host
+    let location = res.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     let ctype = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     let limit = max_bytes.unwrap_or(2_000_000).min(5_000_000);
     let mut data: Vec<u8> = Vec::new();
@@ -260,7 +262,7 @@ async fn plugin_fetch(url: String, method: Option<String>, headers: Option<Vec<(
         }
         data.extend_from_slice(&chunk);
     }
-    Ok(json!({ "status": status, "body": String::from_utf8_lossy(&data), "url": final_url, "type": ctype }))
+    Ok(json!({ "status": status, "body": String::from_utf8_lossy(&data), "url": final_url, "type": ctype, "location": location }))
 }
 
 /// The plugin is stopped: its address stops working.

@@ -968,3 +968,16 @@ plugins 폴더에 플러그인이 없습니다. 플러그인을 폴더째 넣고
 (로그가 없습니다) = (no log)
 plugins 폴더의 플러그인을 켜고, 허용할 권한을 고릅니다 = Turn on the plugins of the plugins folder and choose the permissions to allow
 플러그인 목록 = Plugin list
+플러그인 설정 = Plugin settings
+창에 위젯 올리기 = Put widgets on the windows
+플러그인 전용 창 열기 = Open windows of its own
+플러그인이 꺼져 있습니다 = The plugin is off
+플러그인 창 = Plugin windows
+원하는 사이트에 접속 (사이트는 하나씩 허용) = Connect to sites of its choice (each site is allowed one by one)
+허용한 사이트 = Allowed sites
+아직 허용한 사이트가 없습니다. = No site is allowed yet.
+제거 = Remove
+허용 = Allow
+거부 = Refuse
+플러그인이 접속을 요청했습니다: = The plugin asked to connect to:
+직접 추가 = Add by hand

@@ -1123,15 +1123,17 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
 {
   const PID = 'e2e-plugin-0123456789abcdef';
   files.set(`plugins/${PID}/plugin.json`, JSON.stringify({ id: PID, name: '시험 플러그인', version: '1.0.0', api: 1,
-    permissions: { net: ['example.com'], 'chat.inject': true, storage: true }, reasons: { net: 'a', 'chat.inject': 'b', storage: 'c' }, options: [{ key: 'n', type: 'number', default: 3 }] }));
+    permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true }, reasons: { net: 'a', netAny: 'f', 'chat.inject': 'b', storage: 'c', widgets: 'd', windows: 'e' }, options: [{ key: 'n', type: 'number', default: 3 }],
+    windows: [{ id: 'main', title: '플러그인 창', page: 'window.html', width: 300, height: 200 }] }));
   files.set('plugins/broken-one/plugin.json', '{ not json');
   files.set('plugins/not-a-plugin/readme.txt', 'x');
-  await control.evaluate(() => window.cmrHub.plugins.scan());
+  await control.evaluate(async () => { window.cmrHub.plugins.watch = false; await window.cmrHub.plugins.scan(); });         // (the frames of this test are empty pages: they never answer "are you there?"; the watchdog has a test of its own below)
+  const KEY = await control.evaluate(id => import('./core/plugins.js').then(p => p.permsKey(window.cmrHub.plugins.registry.get(id).manifest)), PID);       // (the user has decided about it: no window asks)
   const list = () => control.evaluate(() => window.cmrHub.plugins.list().map(p => ({ id: p.id, ok: p.ok, running: p.running, enabled: p.enabled, missing: p.missing.length, errors: p.errors.length })));
   const l0 = await list();
-  ok(l0.find(p => p.id === PID).ok && l0.find(p => p.id === PID).missing === 3 && !l0.find(p => p.id === PID).running, 'plugins: a good plugin is found; nothing is allowed yet (3 to approve), it is not running: ' + JSON.stringify(l0));
+  ok(l0.find(p => p.id === PID).ok && l0.find(p => p.id === PID).missing === 6 && !l0.find(p => p.id === PID).running, 'plugins: a good plugin is found; nothing is allowed yet (6 to approve), it is not running: ' + JSON.stringify(l0));
   ok(l0.find(p => p.id === 'broken-one').ok === false && l0.find(p => p.id === 'not-a-plugin').errors === 1, 'plugins: a broken plugin.json and a folder without one are found, with errors');
-  await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { [id]: { enabled: true, granted: { net: ['example.com'], 'chat.inject': true, storage: true }, options: { n: 7 } } } })), PID);
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true }, options: { n: 7 } } } })), [PID, KEY]);
   await control.waitForTimeout(600);
   const fr = await control.evaluate(id => { const f = document.querySelector(`#plugin-frames iframe[data-plugin="${id}"]`); return f ? { sandbox: f.getAttribute('sandbox'), src: f.src } : null; }, PID);
   ok(fr && fr.sandbox === 'allow-scripts' && fr.src === `http://cmrplug.localhost/tok-${PID}/background.html`, 'plugins: enabled: it runs in a sandboxed frame at its own address: ' + JSON.stringify(fr));
@@ -1146,35 +1148,84 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   const r2 = await asked('storage.set', { key: 'last', value: { id: 5 } }); const r3 = await asked('storage.get', { key: 'last' });
   ok(r2.ok && r3.ok && r3.value.id === 5, 'plugins: storage set / get');
   const r4 = await asked('net.fetch', { url: 'https://example.com/list' }); const r5 = await asked('net.fetch', { url: 'https://evil.org/list' });
+  ok(pluginFetches.filter(f => f.url === 'https://example.com/list').at(-1).headers.some(([k, v]) => k === 'User-Agent' && v.includes('Mozilla/5.0')) && pluginFetches.at(-1).headers.some(([k]) => k === 'Accept-Language'), 'plugins: a request looks like a browser one (User-Agent, Accept-Language) unless the plugin says otherwise');
   ok(r4.ok && r4.value.status === 200 && pluginFetches.at(-1).hosts.join() === 'example.com' && r5.ok === false && r5.error.code === 'denied', 'plugins: net.fetch to an allowed host goes through the exe command with the hosts; another host is denied: ' + JSON.stringify(r5));
   const r6 = await asked('options.get'); ok(r6.ok && r6.value.n === 7, 'plugins: the options of the user reach the plugin');
+  // netAny: the plugin asks for a host, the user allows it (a command of the plugin tab), then it is used without a restart
+  const rh = await asked('net.requestHost', { host: 'forum.example.org' }); const rf = await asked('net.fetch', { url: 'https://forum.example.org/list' });
+  ok(rh.ok && rh.value === 'pending' && rf.ok === false && rf.error.code === 'denied', 'plugins/netAny: a new host waits for the user, it cannot be used yet: ' + JSON.stringify(rh));
+  ok((await control.evaluate(id => window.cmrHub.plugins.list().find(p => p.id === id).requested, PID)).join() === 'forum.example.org', 'plugins/netAny: the request is in the state for the plugin tab');
+  await opt.evaluate(([id]) => window.__TAURI__.event.emit('plugin-command', { cmd: 'grantHost', id, host: 'forum.example.org' }), [PID]); await control.waitForTimeout(600);
+  const same = await control.evaluate(id => document.querySelectorAll(`#plugin-frames iframe[data-plugin="${id}"]`).length, PID);
+  const rf2 = await asked('net.fetch', { url: 'https://forum.example.org/list' });
+  ok(rf2.ok && pluginFetches.at(-1).hosts.includes('forum.example.org') && same === 1 && (await control.evaluate(id => window.cmrHub.plugins.list().find(p => p.id === id).requested.length, PID)) === 0, 'plugins/netAny: after the user allows it the host can be fetched, the plugin was not restarted, the request is gone: ' + JSON.stringify(rf2).slice(0, 80));
+  await opt.evaluate(([id]) => window.__TAURI__.event.emit('plugin-command', { cmd: 'removeHost', id, host: 'forum.example.org' }), [PID]); await control.waitForTimeout(500);
+  const rf3 = await asked('net.fetch', { url: 'https://forum.example.org/list' });
+  ok(rf3.ok === false && rf3.error.code === 'denied', 'plugins/netAny: a host that is taken away is denied again');
+  // a widget of the plugin: registered, turned on in the window by the user, drawn, its state painted; gone when the plugin stops
+  const WID = PID + ':status';
+  const rw = await asked('widgets.register', { id: 'status', label: '플러그인 상태', kind: 'light', styles: [{ id: 'dot', label: '점' }], hint: { place: 'inside', anchor: 'top-left' } });
+  ok(rw.ok && rw.value === WID, 'plugins/widgets: the plugin registers a widget: ' + JSON.stringify(rw));
+  await control.evaluate(w => import('./settings.js').then(m => m.set({ widgets: { [w]: { place: 'inside', anchor: 'top-left', style: 'dot', show: 'always' } } })), WID);
+  await control.waitForTimeout(500);
+  ok(await main.locator(`.widget[data-id="${WID}"]`).count() === 1, 'plugins/widgets: a window that has it turned on draws it');
+  await asked('widgets.update', { id: 'status', state: { text: '감시 중', tone: 'ok', active: true, tip: '팁입니다' } }); await control.waitForTimeout(500);
+  ok((await main.locator(`.widget[data-id="${WID}"]`).textContent()).includes('감시 중'), 'plugins/widgets: its state is painted');
+  // a window of the plugin: made in the list of windows when the plugin is on, opened by the plugin, its page in a sandboxed frame, not deletable, basic settings only
+  const pw = await control.evaluate(id => (window.cmrHub && import('./settings.js').then(m => m.cfg().child_windows.find(c => c.owner === id))), PID);
+  ok(pw && pw.kind === 'page' && pw.owner_win === 'main' && pw.page === 'window.html' && pw.name === '플러그인 창' && pw.geometry === '300x200' && pw.open_mode === 'never' && pw.channels.length === 0, 'plugins/windows: its window is in the list of windows: ' + JSON.stringify(pw));
+  ok(!(await control.evaluate(i => window.cmrHub.windows.isOpen(i), pw.id)), 'plugins/windows: it is not open until the plugin opens it');
+  const ro = await asked('windows.open', { id: 'main' }); await control.waitForTimeout(500);
+  ok(ro.ok && await control.evaluate(i => window.cmrHub.windows.isOpen(i), pw.id), 'plugins/windows: the plugin opens it');
+  const wp = await open('overlay.html?label=win' + pw.id, { width: 300, height: 200 }); await control.waitForTimeout(800);
+  const pf = await wp.evaluate(() => { const f = document.querySelector('.pl-page'); return f ? { sandbox: f.getAttribute('sandbox'), src: f.src } : null; });
+  ok(pf && pf.sandbox === 'allow-scripts' && pf.src === `http://cmrplug.localhost/tok-${PID}/window.html`, 'plugins/windows: its page is a sandboxed frame at the address of the plugin: ' + JSON.stringify(pf));
+  ok(await wp.locator('#lines').count() === 1 && await wp.locator('.cv-blk').count() === 0, 'plugins/windows: no chat in it');
+  await wp.close();
+  await control.evaluate(i => window.cmrHub.windows.remove(i), pw.id); await control.waitForTimeout(300);
+  ok(await control.evaluate(i => import('./settings.js').then(m => m.cfg().child_windows.some(c => c.id === i)), pw.id), 'plugins/windows: it cannot be deleted by hand');
+  await opt.locator('#tabs li', { hasText: '창' }).first().click(); await opt.waitForSelector('.wintool');
+  await opt.selectOption('.wintool select', String(pw.id)); await control.waitForTimeout(500);
+  const hasRow = t => opt.locator('.row:not([hidden]) b.label', { hasText: new RegExp('^' + t + '$') }).count();
+  ok(await hasRow('항상 맨 위에') === 1 && await hasRow('클릭 관통') === 1 && await hasRow('글꼴') === 0 && await hasRow('글 정렬') === 0 && await hasRow('온전한 묶음만') === 0, 'plugins/windows: its settings are the basic ones only (order, mouse, background), no text settings');
+  ok(await opt.locator('.wintool select option[disabled]').count() === 1 && await opt.locator('.wintool button', { hasText: '삭제' }).isHidden(), 'plugins/windows: in the list of windows below ours after a line, and no delete button');
+  await opt.selectOption('.wintool select', '1'); await opt.locator('#tabs li', { hasText: '일반' }).click();
+  // the watchdog: a page that does not answer is started again
+  await control.evaluate(() => { const a = window.cmrHub.plugins; a.dog.timeoutMs = 1000; a.dog.start('e2e-plugin-0123456789abcdef', Date.now() - 5000); a.watch = true; });
+  await tick(12000);
+  await control.evaluate(() => { window.cmrHub.plugins.watch = false; window.cmrHub.plugins.dog.timeoutMs = 20000; });
+  ok((await control.evaluate(id => window.cmrHub.plugins.logs.get(id) || [], PID)).some(l => l.includes('did not answer')), 'plugins/watchdog: a page that does not answer is started again (the log says so)');
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true }, options: { n: 7 } } } })), [PID, KEY]);
+  await control.waitForTimeout(500);
   // a message from anything that is not the frame of a plugin is ignored
   const stray = await control.evaluate(() => new Promise(res => { const t = setTimeout(() => res('ignored'), 300); const old = window.cmrHub.plugins.post.send; window.cmrHub.plugins.post.send = () => { clearTimeout(t); window.cmrHub.plugins.post.send = old; res('answered'); };
     window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, id: 1, method: 'chat.inject', args: { text: 'x' } }, source: window })); }));
   ok(stray === 'ignored', 'plugins: a message not from a plugin frame is ignored');
   // taking a permission away restarts it and the permission is gone
-  await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { [id]: { enabled: true, granted: { net: ['example.com'], storage: true }, options: { n: 7 } } } })), PID);
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], storage: true }, options: { n: 7 } } } })), [PID, KEY]);
   await control.waitForTimeout(600);
   const r7 = await asked('chat.inject', { text: 'not allowed now' });
   ok(r7.ok === false && r7.error.code === 'denied', 'plugins: a permission taken away is gone (the plugin was restarted)');
-  await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { [id]: { enabled: false, granted: {}, options: {} } } })), PID);
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: false, granted: {}, options: {} } } })), [PID, KEY]);
   await control.waitForTimeout(500);
   ok(!(await list()).find(p => p.id === PID).running && await control.evaluate(() => document.querySelectorAll('#plugin-frames iframe').length) === 0, 'plugins: disabled: the frame is gone');
+  ok(await main.locator(`.widget[data-id="${WID}"]`).count() === 0 && (await control.evaluate(() => window.cmrHub.plugins ? 1 : 0)) === 1, 'plugins/widgets: the plugin stopped: its widget is not drawn any more');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: {} })));
 }
 
 // ---- plugins: the user is asked about a new plugin (one after the other), and the plugin tab
 {
   const A = 'e2e-review-aaaaaaaaaaaa', B = 'e2e-review-bbbbbbbbbbbb';
   for (const k of [...files.keys()]) if (k.startsWith('plugins/')) files.delete(k);
-  for (const [id, name] of [[A, '알파'], [B, '베타']]) files.set(`plugins/${id}/plugin.json`, JSON.stringify({ id, name, version: '1.0.0', api: 1, author: '누군가', description: '설명입니다',
-    permissions: { net: ['example.com'], 'chat.inject': true }, reasons: { net: '글 목록을 가져옵니다', 'chat.inject': '새 글을 알립니다' }, options: [{ key: 'n', type: 'number', label: '횟수', min: 1, max: 9, default: 3 }] }));
+  for (const [id, name] of [[A, '알파'], [B, '베타']]) files.set(`plugins/${id}/plugin.json`, JSON.stringify({ id, name, version: '1.0.0', api: 1, author: '누군가', description: '설명입니다', ...(id === B ? { optionsPage: 'options.html' } : {}),
+    permissions: { net: ['example.com'], ...(id === A ? { netAny: true } : {}), 'chat.inject': true }, reasons: { net: '글 목록을 가져옵니다', netAny: '사이트를 고릅니다', 'chat.inject': '새 글을 알립니다' }, options: [{ key: 'n', type: 'number', label: '횟수', min: 1, max: 9, default: 3 }] }));
   await control.evaluate(() => import('./settings.js').then(m => m.set({ plugins: {} })));
   await control.waitForTimeout(400);
   await control.evaluate(() => window.cmrHub.plugins.scan());
   await opt.waitForSelector('.pl-modal', { timeout: 4000 });
   const title = () => opt.locator('.pl-card h3').textContent();
   await opt.screenshot({ path: path.join(OUT, 'options_plugin_ask.png') });
-  ok((await title()).includes('알파') && (await opt.locator('.pl-card').textContent()).includes('1 / 2') && await opt.locator('.pl-card input[type=checkbox]').count() === 2
+  ok((await title()).includes('알파') && (await opt.locator('.pl-card').textContent()).includes('1 / 2') && await opt.locator('.pl-card input[type=checkbox]').count() === 3
     && (await opt.locator('.pl-card').textContent()).includes('example.com') && (await opt.locator('.pl-card').textContent()).includes('새 글을 알립니다'), 'plugins/review: a new plugin is asked about first: its name, 1 of 2, what it asks for with the reasons: ' + await title());
   ok(await opt.locator('#tabs li.active .name').textContent() === '플러그인', 'plugins/review: the options window shows the plugin tab');
   await opt.locator('.pl-card input[data-host="example.com"]').uncheck();                  // (the user takes the host away)
@@ -1189,12 +1240,33 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   ok(await opt.locator('.pl-modal').count() === 0 && eb && eb.enabled === false && typeof eb.asked === 'string' && Object.keys(eb.granted).length === 0, 'plugins/review: "do not turn on" is remembered and nothing is allowed: ' + JSON.stringify(eb));
   await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(500);
   ok(await opt.locator('.pl-modal').count() === 0, 'plugins/review: a plugin that was decided about is not asked about again');
-  // the tab
+  // the tab: netAny: the hosts the plugin asked for wait for the user; the hosts the user allowed are listed and can be taken away
+  await opt.locator('.wl-item', { hasText: '알파' }).click(); await control.waitForTimeout(300);
+  await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { ...m.cfg().plugins, [id]: { ...m.cfg().plugins[id], requested: ['pending.example.net'] } } })), A); await control.waitForTimeout(500);
+  ok((await opt.locator('.pl-request').textContent()).includes('pending.example.net') && await opt.locator('.wd .pl-h', { hasText: '허용한 사이트' }).count() === 1, 'plugins/netAny: a host the plugin asked for waits in the tab with Allow / Refuse');
+  await opt.locator('.pl-request button', { hasText: '허용' }).click(); await control.waitForTimeout(600);
+  ok((await cfgOf(A)).granted.net.includes('pending.example.net') && await opt.locator('.pl-request').count() === 0 && (await opt.locator('.pl-hosts').textContent()).includes('pending.example.net'), 'plugins/netAny: Allow: the host is allowed and listed');
+  await opt.locator('.pl-hostadd input').fill('by-hand.example.org'); await opt.locator('.pl-hostadd button').click(); await control.waitForTimeout(500);
+  ok((await cfgOf(A)).granted.net.includes('by-hand.example.org'), 'plugins/netAny: a host can also be added by hand');
+  await opt.locator('.pl-hostrow', { hasText: 'pending.example.net' }).locator('button', { hasText: '제거' }).click(); await control.waitForTimeout(500);
+  ok(!(await cfgOf(A)).granted.net.includes('pending.example.net'), 'plugins/netAny: a host can be taken away');
   ok(await opt.locator('.wl-item').count() === 2 && await opt.locator('.wl-item', { hasText: '알파' }).locator('.wl-badge').count() === 0 || true, 'plugins/tab: the list');
   await opt.locator('.wl-item', { hasText: '베타' }).click(); await control.waitForTimeout(300);
   ok((await opt.locator('.wd').textContent()).includes('누군가') && (await opt.locator('.wd').textContent()).includes('설명입니다') && await opt.locator('.wd .pl-opt input[type=number]').count() === 1, 'plugins/tab: the detail: who made it, the description, its option');
   await opt.locator('.wd .pl-opt input[type=number]').fill('42'); await opt.locator('.wd .pl-opt input[type=number]').dispatchEvent('change'); await control.waitForTimeout(500);
   ok((await cfgOf(B)).options.n === 9, 'plugins/tab: an option is kept and cut to its limits (9): ' + JSON.stringify((await cfgOf(B)).options));
+  // its own options page: a sandboxed frame at its address; what the frame says goes to the hub (the same bridge), the height it tells is kept
+  const uiFrame = await opt.evaluate(i => { const f = document.querySelector(`.pl-frame[data-plugin="${i}"]`); return f ? { sandbox: f.getAttribute('sandbox'), src: f.src } : null; }, B);
+  ok(uiFrame && uiFrame.sandbox === 'allow-scripts' && uiFrame.src === `http://cmrplug.localhost/tok-${B}/options.html`, 'plugins/tab: its options page is in a sandboxed frame at its own address: ' + JSON.stringify(uiFrame));
+  await opt.evaluate(i => { const f = document.querySelector(`.pl-frame[data-plugin="${i}"]`); window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, event: 'height', value: 321 }, source: f.contentWindow }));
+    window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, id: 7, method: 'options.set', args: { mine: { x: [1] }, n: 5 } }, source: f.contentWindow })); }, B);
+  await control.waitForTimeout(600);
+  ok(await opt.evaluate(i => document.querySelector(`.pl-frame[data-plugin="${i}"]`).style.height, B) === '321px', 'plugins/tab: the height the page tells is used');
+  const ob = (await cfgOf(B)).options;
+  ok(ob.mine && ob.mine.x[0] === 1 && ob.n === 5, 'plugins/tab: what the options page saves reaches the settings through the hub: ' + JSON.stringify(ob));
+  await opt.evaluate(i => { const f = document.querySelector(`.pl-frame[data-plugin="${i}"]`); window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, id: 8, method: 'options.set', args: { n: 1 } }, source: window })); }, B);
+  await control.waitForTimeout(300);
+  ok((await cfgOf(B)).options.n === 5, 'plugins/tab: a message that is not from that frame is ignored');
   await opt.locator('.wl-item', { hasText: '베타' }).locator('.switch').click(); await control.waitForTimeout(400);
   ok(await opt.locator('.pl-modal').count() === 1 && (await title()).includes('플러그인 켜기'), 'plugins/tab: turning on a plugin with permissions that are not allowed asks first');
   await opt.locator('.pl-card button', { hasText: '취소' }).click(); await control.waitForTimeout(300);

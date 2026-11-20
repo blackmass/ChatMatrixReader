@@ -15,7 +15,7 @@ const parse = (o, folder = ID) => p.parseManifest(JSON.stringify(o), folder);
 { // a good manifest
   const r = parse(good());
   check(r.ok && r.errors.length === 0 && r.warnings.length === 0, 'plugins: a good manifest is accepted: ' + JSON.stringify(r.errors.concat(r.warnings)));
-  eq(r.manifest.permissions, { net: ['example.com', 'api.example.com'], 'chat.inject': true, storage: true }, 'plugins: the permissions are cleaned');
+  eq(r.manifest.permissions, { net: ['example.com', 'api.example.com'], netAny: false, 'chat.inject': true, storage: true, widgets: false, windows: false }, 'plugins: the permissions are cleaned');
   eq(r.manifest.main, 'background.html', 'plugins: main defaults to background.html');
   eq(r.manifest.options.map(o => [o.key, o.type, o.default]), [['url', 'text', ''], ['interval', 'number', 60], ['on', 'check', false], ['mode', 'select', 'b']], 'plugins: the options with their defaults');
 }
@@ -55,10 +55,10 @@ const parse = (o, folder = ID) => p.parseManifest(JSON.stringify(o), folder);
   eq(p.missing(m, null).map(x => x.perm + (x.host ? ':' + x.host : '')), ['net:example.com', 'net:api.example.com', 'chat.inject', 'storage'], 'plugins: nothing allowed yet: everything is missing');
   const g = { net: ['example.com'], 'chat.inject': true, storage: true };
   eq(p.missing(m, g).map(x => x.host), ['api.example.com'], 'plugins: one host is still to be allowed');
-  eq(p.effective(m, g), { net: ['example.com'], 'chat.inject': true, storage: true }, 'plugins: what may be done = asked AND allowed');
-  eq(p.effective(m, { net: ['other.org', 'example.com'], storage: true }), { net: ['example.com'], 'chat.inject': false, storage: true }, 'plugins: an allowed host the manifest does not name is not used');
+  eq(p.effective(m, g), { net: ['example.com'], netAny: false, 'chat.inject': true, storage: true, widgets: false, windows: false }, 'plugins: what may be done = asked AND allowed');
+  eq(p.effective(m, { net: ['other.org', 'example.com'], storage: true }), { net: ['example.com'], netAny: false, 'chat.inject': false, storage: true, widgets: false, windows: false }, 'plugins: an allowed host the manifest does not name is not used');
   const none = p.effective(parse({ ...good(), permissions: {} }).manifest, g);
-  eq(none, { net: [], 'chat.inject': false, storage: false }, 'plugins: a permission removed from the manifest is not used any more');
+  eq(none, { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false }, 'plugins: a permission removed from the manifest is not used any more');
   const eff = p.effective(m, g);
   check(p.netAllowed(eff, 'https://example.com/a?b=1') && !p.netAllowed(eff, 'http://example.com/') && !p.netAllowed(eff, 'https://api.example.com/') && !p.netAllowed(eff, 'https://example.com.evil.org/')
     && !p.netAllowed(eff, 'https://user:pw@example.com/') && !p.netAllowed(eff, 'not a url') && !p.netAllowed(eff, 'https://EXAMPLE.com@evil.org/'), 'plugins: an address is allowed only for an exact host over https');
@@ -71,5 +71,29 @@ const parse = (o, folder = ID) => p.parseManifest(JSON.stringify(o), folder);
   const def = k => a.options.find(o => o.key === k);
   eq([p.cleanOptionValue(def('interval'), '5'), p.cleanOptionValue(def('interval'), 1), p.cleanOptionValue(def('interval'), 'x'), p.cleanOptionValue(def('on'), 1), p.cleanOptionValue(def('mode'), 'zz'), p.cleanOptionValue(def('mode'), 'a'), p.cleanOptionValue(def('url'), 5), p.cleanOptionValue(def('url'), 'abc')],
     [30, 30, 60, false, 'b', 'a', '', 'abc'], 'plugins: option values are made right for their declaration');
-  eq(p.optionValues(a, { interval: 100, stranger: 1, url: 'u' }), { url: 'u', interval: 100, on: false, mode: 'b' }, 'plugins: option values = the user\'s over the defaults, an undeclared one dropped');
+  eq(p.optionValues(a, { interval: 100, stranger: 1, url: 'u' }), { url: 'u', interval: 100, on: false, mode: 'b', stranger: 1 }, 'plugins: option values = the user\'s over the defaults; a key of the plugin\'s own settings is kept');
+  eq(Object.keys(p.optionValues(a, { 'bad key': 1, ok_key: { a: 1 }, fn: () => 1, big: 'x'.repeat(p.FREE_BYTES + 1) })).sort(), ['interval', 'mode', 'ok_key', 'on', 'url'], 'plugins: a bad key, a value JSON cannot hold, a value that is too big: dropped');
+}
+{ // the windows of a plugin
+  const w = o => parse({ ...good(), permissions: { ...good().permissions, windows: true }, reasons: { ...good().reasons, windows: 'w' }, windows: o });
+  const r = w([{ id: 'main', title: '내 창', page: 'ui/window.html', width: 500, height: 50 }]);
+  check(r.ok && r.manifest.windows[0].width === 500 && r.manifest.windows[0].height === 120 && r.manifest.permissions.windows === true, 'plugins: a window is declared (the size is kept inside 120..2000)');
+  eq(w([{ id: 'a', page: 'w.html' }]).manifest.windows[0], { id: 'a', title: 'a', page: 'w.html', width: 420, height: 300 }, 'plugins: a window: the title and the size have defaults');
+  for (const bad of [[{ id: 'A b', page: 'w.html' }], [{ id: 'a', page: '../w.html' }], [{ id: 'a', page: 'w.js' }], [{ id: 'a', page: 'w.html' }, { id: 'a', page: 'w.html' }], 'x', Array.from({ length: 4 }, (_, i) => ({ id: 'w' + i, page: 'w.html' }))])
+    check(!w(bad).ok, 'plugins: a bad windows list is refused: ' + JSON.stringify(bad).slice(0, 60));
+  check(parse({ ...good(), windows: [{ id: 'a', page: 'w.html' }] }).warnings.some(x => x.includes('windows')), 'plugins: windows without the permission: a warning');
+  const m1 = w([{ id: 'a', page: 'w.html' }]).manifest, m2 = w([{ id: 'a', page: 'w.html' }, { id: 'b', page: 'w.html' }]).manifest;
+  check(p.permsKey(m1) !== p.permsKey(m2), 'plugins: a new window asks the user again');
+}
+{ // netAny: the hosts are not in the manifest, the user allows them one by one
+  const m = parse({ ...good(), permissions: { ...good().permissions, netAny: true }, reasons: { ...good().reasons, netAny: 'x' } });
+  check(m.ok && m.manifest.permissions.netAny === true && m.warnings.length === 0, 'plugins: netAny is accepted: ' + JSON.stringify(m.errors.concat(m.warnings)));
+  const mm = m.manifest;
+  eq(p.missing(mm, { net: ['example.com', 'api.example.com'], 'chat.inject': true, storage: true }).map(x => x.perm), ['netAny'], 'plugins: netAny is a permission to approve');
+  eq(p.effective(mm, { net: ['example.com'], netAny: false }).net, ['example.com'], 'plugins: netAny not allowed: only the hosts of the manifest');
+  eq(p.effective(mm, { net: ['example.com', 'forum.example.org', 'bad host', 'localhost'], netAny: true }).net, ['example.com', 'forum.example.org'], 'plugins: netAny allowed: the hosts the user allowed count (a wrong one does not)');
+  check(p.effective(mm, { net: ['forum.example.org'], netAny: true }).netAny === true && p.effective(mm, { net: [], netAny: false }).netAny === false, 'plugins: effective tells netAny');
+  const plain = parse(good()).manifest;
+  eq(p.effective(plain, { net: ['example.com', 'forum.example.org'], netAny: true }).net, ['example.com'], 'plugins: without netAny in the manifest a granted host that it does not name is not used');
+  check(p.permsKey(plain) !== p.permsKey(mm), 'plugins: netAny asks the user again');
 }

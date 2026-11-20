@@ -12,6 +12,8 @@ import { FOLLOW, KEYS, MAIN_KEY, HOST_KEYS, followsMain, followValue, dockHost }
 import { buildCards, isData } from './options/form.js';
 import { TABS } from './options/tabs.js';
 import { noteChannelColor } from './options/channels.js';
+import { registry as widgetRegistry } from './widgets/defaults.js';
+import { syncPluginDefs } from './widgets/registry.js';
 
 await settings.load({ readOnly: true });
 await startI18n(settings);
@@ -183,6 +185,7 @@ $('revertAll').onclick = () => {
 };
 
 settings.onChange(() => refresh());
+{ const { emit, listen } = window.__TAURI__.event; listen('widget-defs', e => syncPluginDefs(widgetRegistry, e.payload.defs)); emit('widget-defs-hello', {}); }          // (the widgets of the plugins are in the list of the widgets)
 const showTitle = () => { try { window.__TAURI__.window.getCurrentWindow().setTitle(tr('ChatMatrix 옵션')).catch(() => {}); } catch { /* no such window function */ } };
 showTitle(); addEventListener('cmr-language', showTitle);
 try { window.__TAURI__.window.getCurrentWindow().setAlwaysOnTop(false).catch(() => {}); } catch { /* no window api */ }   // (an ordinary window: never above the others)

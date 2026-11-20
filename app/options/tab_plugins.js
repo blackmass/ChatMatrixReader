@@ -2,10 +2,13 @@
 // allows each one), its options (declared in its plugin.json) and its log. The state comes from the hub (app/plugin_host.js: event 'plugin-state'); what the user does goes back as
 // 'plugin-command'. A plugin nobody has decided about yet is shown in a window of its own first (askApprovals), one plugin after the other.
 import { tr } from '../core/i18n.js';
+import { isMac } from '../platform.js';
 
 const { emit, listen } = window.__TAURI__.event;
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const SEL_KEY = 'cmr-plugin-sel';
+const invoke = window.__TAURI__.core.invoke;
+const BASE = isMac ? 'cmrplug://localhost/' : 'http://cmrplug.localhost/';
 
 let state = [];                                        // the list the hub told
 const redraws = new Set();                             // the panels that are drawn now (they draw again when the state changes)
@@ -22,6 +25,9 @@ listen('plugin-state', ev => {
   askApprovals();
 });
 listen('plugin-result', ev => { const k = ev.payload.cmd + '|' + ev.payload.id, r = waiting.get(k); if (r) { waiting.delete(k); r(ev.payload); } });
+// the answers of the hub to the calls of the options pages of the plugins (frames in this window): to the frame that asked
+const uiFrames = new Map();                            // plugin id -> { frame, post(msg) }
+listen('plugin-ui-reply', ev => { const { id, from, seq, ok, value, error } = ev.payload; const u = from === 'opt:' + id ? uiFrames.get(id) : null; if (u) u.post(ok ? { cmr: 1, id: seq, ok: true, value } : { cmr: 1, id: seq, ok: false, error }); });
 emit('plugin-hello', {});
 
 // a command to the hub; resolves with its answer (or { error } when none comes)
@@ -36,6 +42,9 @@ const PERMS = {
   net: () => tr('인터넷 접속'),
   'chat.inject': () => tr('채팅창에 글 넣기'),
   storage: () => tr('자기 저장 공간 쓰기'),
+  widgets: () => tr('창에 위젯 올리기'),
+  windows: () => tr('플러그인 전용 창 열기'),
+  netAny: () => tr('원하는 사이트에 접속 (사이트는 하나씩 허용)'),
 };
 const pendingList = () => state.filter(x => x.review && x.ok && !decided.has(x.id)).sort((a, b) => a.id.localeCompare(b.id));
 const nameOf = p => (p.manifest && p.manifest.name) || p.id;
@@ -45,9 +54,12 @@ const asks = p => {
   const m = p.manifest;
   if (!m) return [];
   const out = [];
+  if (m.permissions.netAny) out.push({ key: 'netAny', label: PERMS.netAny(), reason: m.reasons.netAny });
   if (m.permissions.net.length) out.push({ key: 'net', label: PERMS.net(), reason: m.reasons.net, hosts: m.permissions.net });
   if (m.permissions['chat.inject']) out.push({ key: 'chat.inject', label: PERMS['chat.inject'](), reason: m.reasons['chat.inject'] });
   if (m.permissions.storage) out.push({ key: 'storage', label: PERMS.storage(), reason: m.reasons.storage });
+  if (m.permissions.widgets) out.push({ key: 'widgets', label: PERMS.widgets(), reason: m.reasons.widgets });
+  if (m.permissions.windows) out.push({ key: 'windows', label: PERMS.windows(), reason: m.reasons.windows });
   return out;
 };
 
@@ -73,7 +85,7 @@ function permBoxes(p, start, onChange) {
     root.append(block);
   }
   if (!asks(p).length) root.append(el('small', 'note', tr('이 플러그인은 특별한 권한을 요구하지 않습니다.')));
-  return { root, granted: () => ({ net: boxes.filter(b => b.dataset.host && b.checked).map(b => b.dataset.host), 'chat.inject': !!boxes.find(b => b.dataset.key === 'chat.inject' && b.checked), storage: !!boxes.find(b => b.dataset.key === 'storage' && b.checked) }) };
+  return { root, granted: () => ({ net: boxes.filter(b => b.dataset.host && b.checked).map(b => b.dataset.host), 'chat.inject': !!boxes.find(b => b.dataset.key === 'chat.inject' && b.checked), storage: !!boxes.find(b => b.dataset.key === 'storage' && b.checked), netAny: !!boxes.find(b => b.dataset.key === 'netAny' && b.checked), widgets: !!boxes.find(b => b.dataset.key === 'widgets' && b.checked), windows: !!boxes.find(b => b.dataset.key === 'windows' && b.checked) }) };
 }
 
 // ---------------------------------------------------------------- the window that asks (a plugin nobody decided about yet)
@@ -92,8 +104,7 @@ function showApproval(p, opts = {}) {
   card.append(el('small', 'note', [m.author ? tr('만든 이: {a}', { a: m.author }) : '', tr('버전 {v}', { v: m.version })].filter(Boolean).join(' · ')));
   if (m.description) card.append(el('p', 'pl-desc', m.description));
   card.append(el('p', 'pl-ask', tr('이 플러그인이 요구하는 권한입니다. 허용할 것을 고르세요:')));
-  const start = { net: opts.review ? m.permissions.net : p.granted.net || [], 'chat.inject': opts.review ? m.permissions['chat.inject'] : !!p.granted['chat.inject'], storage: opts.review ? m.permissions.storage : !!p.granted.storage };
-  if (!opts.review) for (const k of ['net', 'chat.inject', 'storage']) { if (k === 'net') start.net = m.permissions.net; else start[k] = m.permissions[k]; }      // (turning it on: everything it asks is checked, the user may take some away)
+  const start = { net: m.permissions.net, 'chat.inject': m.permissions['chat.inject'], storage: m.permissions.storage, widgets: m.permissions.widgets, windows: m.permissions.windows, netAny: m.permissions.netAny };      // (everything it asks is checked at first, the user may take some away)
   const boxes = permBoxes(p, start);
   card.append(boxes.root);
   card.append(el('small', 'note pl-warn', tr('플러그인은 격리된 곳에서 실행되고 허용한 권한만 쓸 수 있습니다. 믿을 수 있는 곳에서 받은 플러그인인지 확인하세요. 권한은 나중에 이 탭에서 바꿀 수 있습니다.')));
@@ -129,8 +140,10 @@ function askApprovals() {
 
 // ---------------------------------------------------------------- the tab
 function panel() {
-  const root = el('div', 'wm'), listBox = el('div', 'wl'), detail = el('div', 'wd pl-detail');
+  const root = el('div', 'wm'), listBox = el('div', 'wl'), detail = el('div', 'wd pl-detail'), top = el('div', 'pl-top'), ui = el('div', 'pl-ui');
+  detail.append(top, ui);
   root.append(listBox, detail);
+  let uiFor = '', uiOptions = '';                                  // the plugin whose options page is in `ui`, and the options it was last told
   let sel = ''; try { sel = localStorage.getItem(SEL_KEY) || ''; } catch { /* the first one */ }
   let hashInfo = { id: '', hash: '', files: [], open: false }, logText = { id: '', text: '' };
 
@@ -165,9 +178,46 @@ function panel() {
     }
   }
 
+  // The options page of a plugin (plugin.json "optionsPage"): a sandboxed frame at the address of the plugin, below the rest. It stays where it is while the rest is drawn again
+  // (a frame that is moved or made again would start over); it is made again only for another plugin.
+  async function syncUi(p) {
+    const page = p && p.ok && p.manifest.optionsPage;
+    const want = page ? p.id : '';
+    if (want !== uiFor) {
+      const old = uiFor && uiFrames.get(uiFor);
+      if (old) { old.stop(); uiFrames.delete(uiFor); }
+      ui.textContent = ''; uiFor = want; uiOptions = '';
+      if (!want) return;
+      const token = await invoke('plugin_token', { id: p.id }).catch(() => '');
+      if (uiFor !== want || !token) return;
+      ui.append(el('hr', 'pl-line'), el('h4', 'pl-h', tr('플러그인 설정')));
+      const frame = el('iframe', 'pl-frame');
+      frame.setAttribute('sandbox', 'allow-scripts');                // (no same-origin: the page has no way to this window or to the exe)
+      frame.dataset.plugin = p.id; frame.style.height = '120px';
+      const post = msg => { try { frame.contentWindow.postMessage(msg, '*'); } catch { /* gone */ } };
+      const onMessage = e => {
+        if (e.source !== frame.contentWindow) return;
+        const m = e.data;
+        if (!m || m.cmr !== 1) return;
+        if (m.event === 'hello') { const cur = state.find(x => x.id === want); if (cur) { uiOptions = JSON.stringify(cur.options); post({ cmr: 1, event: 'options', value: cur.options }); } return; }
+        if (m.event === 'height') { const h = Math.max(40, Math.min(1500, Number(m.value) || 0)); frame.style.height = h + 'px'; return; }
+        if (typeof m.id === 'number' && typeof m.method === 'string') emit('plugin-ui', { id: want, from: 'opt:' + want, seq: m.id, method: m.method, args: m.args });
+      };
+      window.addEventListener('message', onMessage);
+      uiFrames.set(want, { frame, post, stop: () => { window.removeEventListener('message', onMessage); frame.remove(); } });
+      frame.src = BASE + token + '/' + p.manifest.optionsPage;
+      ui.append(frame);
+    } else if (want) {                                               // the same plugin: only what changed is told
+      const cur = JSON.stringify(p.options), u = uiFrames.get(want);
+      if (u && cur !== uiOptions) { uiOptions = cur; u.post({ cmr: 1, event: 'options', value: p.options }); }
+    }
+  }
+
   function drawDetail() {
+    const detail = top;
     detail.textContent = '';
     const p = state.find(x => x.id === sel) || state[0];
+    syncUi(p);
     if (!p) { detail.append(el('small', 'note', tr('왼쪽에서 플러그인을 고르세요.'))); return; }
     sel = p.id;
     const head = el('div', 'pl-head');
@@ -212,9 +262,32 @@ function panel() {
 
     // permissions
     detail.append(el('h4', 'pl-h', tr('권한')));
-    const start = { net: p.granted.net || [], 'chat.inject': !!p.granted['chat.inject'], storage: !!p.granted.storage };
+    const start = { net: p.granted.net || [], 'chat.inject': !!p.granted['chat.inject'], storage: !!p.granted.storage, widgets: !!p.granted.widgets, windows: !!p.granted.windows, netAny: !!p.granted.netAny };
     const boxes = permBoxes(p, start, () => ask('grant', p.id, { granted: boxes.granted() }));
     detail.append(boxes.root);
+    // netAny: the hosts the user allows one by one, and the ones the plugin has asked for and wait for an answer
+    if (p.manifest.permissions.netAny && p.granted.netAny) {
+      detail.append(el('h4', 'pl-h', tr('허용한 사이트')));
+      const mine = (p.granted.net || []).filter(h => !p.manifest.permissions.net.includes(h));
+      const box = el('div', 'pl-hosts');
+      if (!mine.length) box.append(el('small', 'note', tr('아직 허용한 사이트가 없습니다.')));
+      for (const h of mine) {
+        const row = el('div', 'pl-hostrow'), rm = el('button', 'btn', tr('제거'));
+        rm.onclick = () => ask('removeHost', p.id, { host: h });
+        row.append(el('code', '', h), rm); box.append(row);
+      }
+      detail.append(box);
+      for (const h of p.requested || []) {
+        const row = el('div', 'pl-hostrow pl-request');
+        const yes = el('button', 'btn', tr('허용')), no = el('button', 'btn', tr('거부'));
+        yes.onclick = () => ask('grantHost', p.id, { host: h }); no.onclick = () => ask('denyHost', p.id, { host: h });
+        row.append(el('span', '', tr('플러그인이 접속을 요청했습니다:') + ' '), el('code', '', h), yes, no); detail.append(row);
+      }
+      const add = el('div', 'pl-hostadd'), inp = el('input'), addBtn = el('button', 'btn', tr('직접 추가'));
+      inp.type = 'text'; inp.placeholder = 'example.com'; inp.dataset.hostAdd = '1';
+      addBtn.onclick = async () => { const r = await ask('grantHost', p.id, { host: inp.value.trim() }); if (r.error) { inp.classList.add('bad'); inp.title = r.error; } else inp.value = ''; };
+      add.append(inp, addBtn); detail.append(add);
+    }
     if (p.missing.length) detail.append(el('small', 'note pl-missing', tr('요구하는 권한 중 허용하지 않은 것이 있습니다. 허용하지 않은 것은 쓸 수 없습니다.')));
 
     // options (declared in plugin.json)
@@ -249,13 +322,14 @@ function panel() {
 
   function draw() {
     // while the user is typing in the right part it is not drawn again under their hands
-    const typing = detail.contains(document.activeElement) && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
+    const ae = document.activeElement;                                              // (a switch or a box that was just clicked has the focus too: it must be drawn again to show the new state)
+    const typing = top.contains(ae) && (ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || (ae.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(ae.type)));
     drawList();
     if (!typing) drawDetail();
   }
   redraws.add(draw);
   draw();
-  const observer = new MutationObserver(() => { if (!root.isConnected) { redraws.delete(draw); observer.disconnect(); } });
+  const observer = new MutationObserver(() => { if (!root.isConnected) { redraws.delete(draw); observer.disconnect(); const old = uiFor && uiFrames.get(uiFor); if (old) { old.stop(); uiFrames.delete(uiFor); uiFor = ''; } } });
   observer.observe(document.body, { childList: true, subtree: true });
   return root;
 }

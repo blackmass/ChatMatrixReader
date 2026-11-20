@@ -20,7 +20,7 @@ const upperSize = x => { const r = { win: true, key: 'font_size' }; const n = Nu
 const isMain = ctx => ctx.sel === 1;
 const child = ctx => ctx.sel !== 1;
 
-export default {
+const tab = {
   id: 'windows', title: '창', subtitle: '번역창 목록과 모양',
   cards: [
     { title: '이 창', rows: [
@@ -183,17 +183,33 @@ export default {
       const kids = env.cfg().child_windows, sel = env.sel();
       for (const c of kids) if (!known.has(c.id)) { known.add(c.id); env.select(c.id); return; }       // a window was just made: show it
       pick.textContent = '';
-      for (const [id, name] of [[1, nameFor(env.cfg(), 1)], ...kids.map(c => [c.id, nameFor(env.cfg(), c.id)])]) {
+      const plug = kids.filter(c => c.owner);
+      for (const [id, name] of [[1, nameFor(env.cfg(), 1)], ...kids.filter(c => !c.owner).map(c => [c.id, nameFor(env.cfg(), c.id)])]) {
         const o = document.createElement('option'); o.value = id; o.textContent = `${id} · ${name}`; pick.append(o);
       }
+      if (plug.length) {                                                                // (the windows of the plugins: below ours, after a line)
+        const line = document.createElement('option'); line.disabled = true; line.textContent = '── ' + tr('플러그인 창') + ' ──'; pick.append(line);
+        for (const c of plug) { const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.id} · ${nameFor(env.cfg(), c.id)}`; pick.append(o); }
+      }
       pick.value = String(kids.some(c => c.id === sel) || sel === 1 ? sel : 1);
-      const dh = dockHost(kids, sel), isOpen = sel === 1 || open.has(sel);
-      state.textContent = dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
-      toggle.hidden = sel === 1 || !!dh; toggle.textContent = isOpen ? '닫기' : '열기';
-      del.hidden = sel === 1 || sel === VOICE_ID; if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
+      const dh = dockHost(kids, sel), isOpen = sel === 1 || open.has(sel), mine = kids.find(c => c.id === sel), owned = !!(mine && mine.owner);
+      const off = owned && !((env.cfg().plugins || {})[mine.owner] || {}).enabled;
+      state.textContent = off ? tr('플러그인이 꺼져 있습니다') : dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
+      toggle.hidden = sel === 1 || !!dh || off; toggle.textContent = isOpen ? '닫기' : '열기';
+      del.hidden = sel === 1 || sel === VOICE_ID || owned;                                  // (the window of a plugin is not deleted here: it goes with its plugin) if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
     }
     return { el, refresh };
   },
 };
+
+// The windows of a plugin show only the basic settings (the order of the windows, the background, the mouse, the lock ...): what is inside the window is the plugin's
+const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
+const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
+for (const card of tab.cards) for (const row of card.rows) {
+  if (PLUGIN_ROWS.has(row.key)) continue;
+  const was = row.show;
+  row.show = (c, x) => !pluginWindow(x) && (!was || was(c, x));
+}
+export default tab;
 
 function btn(text) { const b = document.createElement('button'); b.textContent = text; return b; }

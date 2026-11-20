@@ -7,7 +7,7 @@ import { normalizeWidgets } from '../widgets/registry.js';
 export const SPEECH_CODES = ['!MS', '!MY', '!ME', '!MW', '!MP', '!BE', '!BW'];
 export const ETC = '!ETC';
 export const KNOWN = ['S', 'Y', 'E', 'P', 'PL', 'R', 'RL', 'RW', 'I', 'IL', 'G', 'O', 'W', 'B', 'WT', 'BT', 'CM',
-  ...Array.from({ length: 10 }, (_, i) => `C${i + 1}`), '!NPC', '!VC'];
+  ...Array.from({ length: 10 }, (_, i) => `C${i + 1}`), '!NPC', '!VC', '!PLG'];
 export const VOICE_ID = 2;
 export const ALIGNS = ['left', 'center', 'right'];
 export const HEADS = ['detail', 'basic', 'nochan', 'body'];
@@ -15,6 +15,7 @@ export const MODES = ['always', 'voice', 'never'];
 export const KEYS = {
   id: 0, name: '', open_mode: 'never', channels: [], geometry: '', font_family: '', font_size: 0, bg_opacity: 1.0, text_opacity: 1.0, tab_opacity: 1.0,
   topmost: true, topmost_wow_only: false, click_through: false, hover_clear: false, blur: 0, shadow: false, head_mode: 'basic', align: 'left', bottom: false,
+  owner: '', owner_win: '', kind: '', page: '',     // a window of a PLUGIN: the plugin's id, the name the plugin gave it, kind 'page' (the page of the plugin is shown instead of the chat), the page (core/plugins.js)
   dock_to: 0,                          // an extra window: the id of the window it is a TAB of (0 = a window of its own); see dockHost
   clear_on_open: false,                // an extra window: starts empty when it is opened (the hub's earlier lines are not given to it)
 };
@@ -99,6 +100,11 @@ export function normalize(items) {
     if (d.topmost_wow_only) d.topmost = false;
     if (typeof d.name !== 'string') d.name = '';
     try { d.dock_to = Math.max(0, pyInt(d.dock_to)); } catch { d.dock_to = 0; }
+    d.owner = typeof d.owner === 'string' && /^[a-z0-9_-]{1,100}$/.test(d.owner) ? d.owner : '';
+    d.owner_win = typeof d.owner_win === 'string' && /^[a-z0-9_-]{1,24}$/.test(d.owner_win) ? d.owner_win : '';
+    d.page = typeof d.page === 'string' && /^[A-Za-z0-9_\-./]{1,200}\.html$/.test(d.page) && !d.page.includes('..') && !d.page.startsWith('/') && !d.page.includes('//') ? d.page : '';
+    d.kind = d.kind === 'page' && d.owner && d.page ? 'page' : '';                 // (a page window needs its plugin and its page)
+    if (!d.kind) { d.owner = ''; d.owner_win = ''; d.page = ''; }
     if (d.dock_to === d.id) d.dock_to = 0;
     out.push(d);
   }

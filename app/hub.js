@@ -195,6 +195,8 @@ every('HUB_TICK_MS', () => {
 });
 report('hub', emit);
 
-const plugins = startPlugins({ settings, files, publish, pipeline, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen });        // (the plugins folder: docs/PLUGINS.md)
+const plugins = startPlugins({ settings, files, publish, pipeline, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen, widgets, windows });        // (the plugins folder: docs/PLUGINS.md)
+
+windows.setPluginCheck((owner, name) => plugins.windowAllowed(owner, name));       // (a window of a plugin opens only while its plugin runs and may have it)
 
 window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice, plugins };

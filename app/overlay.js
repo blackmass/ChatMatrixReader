@@ -5,6 +5,7 @@ import { startI18n } from './i18n_host.js';
 import { tr } from './core/i18n.js';
 import { windowTitle, windowName, nameFor } from './winname.js';
 import { ChatView, lookFrom } from './chatview.js';
+import { PageView } from './pageview.js';
 import { WindowFeed } from './core/windowfeed.js';
 import { MAIN } from './core/pipeline.js';
 import * as winconf from './core/winconf.js';
@@ -14,6 +15,7 @@ import { isMac } from './platform.js';
 import { T, every } from './core/timings.js';
 import { WidgetLayer } from './widgets/render.js';
 import { defaultRegistry } from './widgets/defaults.js';
+import { syncPluginDefs } from './widgets/registry.js';
 import { report, add as perfAdd } from './core/perf.js';
 import { popup } from './popup_host.js';
 
@@ -42,13 +44,46 @@ function makePane(id) {
   let el = id === wid ? document.getElementById('lines') : null;
   if (!el) { el = document.createElement('div'); el.id = 'lines-' + id; el.dataset.notr = ''; document.getElementById('lines').after(el); }
   el.classList.add('lines');
-  const p = { id, el, view: new ChatView(el), feed: new WindowFeed(id, () => cfg, () => paneConf(id)), tab: null, alert: false, seen: 0, firstLive: Infinity, replay: true };
+  const pc = id === MAIN ? null : cfg.child_windows.find(c => c.id === id && c.kind === 'page') || null;          // a window of a plugin: its page instead of the chat
+  const p = { id, el, view: pc ? new PageView(el) : new ChatView(el), feed: new WindowFeed(id, () => cfg, () => paneConf(id)), tab: null, alert: false, seen: 0, firstLive: Infinity, replay: true };
   panes.push(p);
+  if (pc) startPage(p, pc);
   return p;
+}
+
+// The page of a plugin window: a sandboxed frame at the address of the plugin (the hub gives the secret part only while the plugin runs and may have the window); the calls of the page
+// go to the hub by events and its answers come back the same way (the bridge of the plugin checks everything), like the options page of a plugin.
+function startPage(p, pc) {
+  const frame = document.createElement('iframe'), from = 'win:' + p.id, BASE = isMac ? 'cmrplug://localhost/' : 'http://cmrplug.localhost/';
+  frame.className = 'pl-page'; frame.setAttribute('sandbox', 'allow-scripts');
+  p.el.classList.add('page'); p.el.append(frame);
+  const post = msg => { try { frame.contentWindow.postMessage(msg, '*'); } catch { /* gone */ } };
+  const ask = (method, args, seq) => emit('plugin-ui', { id: pc.owner, name: pc.owner_win, from, seq, method, args });
+  addEventListener('message', e => {
+    if (e.source !== frame.contentWindow) return;
+    const m = e.data;
+    if (!m || m.cmr !== 1) return;
+    if (m.event === 'hello') { ask('options.get', {}, -1); return; }                      // (the options the plugin asks for come as an event: seq -1)
+    if (typeof m.id === 'number' && m.id >= 0 && typeof m.method === 'string') ask(m.method, m.args, m.id);
+  });
+  listen('plugin-ui-reply', e => {
+    const r = e.payload;
+    if (r.from !== from) return;
+    if (r.seq === -1) { if (r.ok) post({ cmr: 1, event: 'options', value: r.value }); return; }
+    post(r.ok ? { cmr: 1, id: r.seq, ok: true, value: r.value } : { cmr: 1, id: r.seq, ok: false, error: r.error });
+  });
+  listen('plugin-page-reply', e => {
+    if (e.payload.from !== from) return;
+    if (!e.payload.token) { p.el.append(Object.assign(document.createElement('div'), { className: 'pl-page-off', textContent: tr('플러그인이 꺼져 있습니다') })); frame.hidden = true; return; }
+    frame.src = BASE + e.payload.token + '/' + pc.page;
+  });
+  emit('plugin-page', { from, owner: pc.owner, name: pc.owner_win });
+  settings.onChange(() => ask('options.get', {}, -1));                                     // (the options of the plugin changed: the page is told)
 }
 const host = makePane(wid);
 let active = host, view = host.view, feed = host.feed;               // (of the pane that is shown)
-const widgetLayer = new WidgetLayer({ root: document.getElementById('widgets'), registry: defaultRegistry() });
+const widgetRegistry = defaultRegistry();                            // (the program's own widgets; what the plugins register comes by 'widget-defs')
+const widgetLayer = new WidgetLayer({ root: document.getElementById('widgets'), registry: widgetRegistry });
 let widgetIds = '';
 window.__cmrWidgets = widgetLayer;                                   // (for the tests)
 // the widgets of this window (docs/WIDGETS.md): drawn from the settings; a widget that is turned on asks the hub for its state
@@ -575,6 +610,8 @@ async function start() {
   };
   await listen('voice-lamp', e => lamp(e.payload));
   await listen('widget-state', e => widgetLayer.state(e.payload.id, e.payload.state));
+  await listen('widget-defs', e => { syncPluginDefs(widgetRegistry, e.payload.defs); applyWidgets(); });          // (the widgets the plugins registered: drawn when a window has them on)
+  emit('widget-defs-hello', {});
   // macOS: the turns of the wheel the exe took for this window arrive one by one as they happen (Windows: asked for with wheel_since, every round of the loop)
   await listen('wheel-turn', e => {
     const u = Number(e.payload);

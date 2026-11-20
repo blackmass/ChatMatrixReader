@@ -14,7 +14,7 @@ export const KINDS = {
   text: { styles: ['plain'] },
 };
 
-export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}:[a-z0-9][a-z0-9_.-]{0,47}$/i;          // owner:name
+export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,99}:[a-z0-9][a-z0-9_.-]{0,47}$/i;         // owner:name (the owner of a plugin's widget is the id of the plugin: up to 100)
 
 const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
 const num = (v, lo, hi, d) => { v = Number(v); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
@@ -58,6 +58,14 @@ export class Registry {
   get(id) { return this.defs.get(id) || null; }
   list() { return [...this.defs.values()]; }
 }
+
+// The definitions the plugins have registered (the hub keeps them and tells every page): the registry of a page gets exactly these besides its own (core:) ones.
+export function syncPluginDefs(registry, defs) {
+  const want = new Map((Array.isArray(defs) ? defs : []).filter(d => d && typeof d.id === 'string' && !d.id.startsWith('core:')).map(d => [d.id, d]));
+  for (const d of registry.list()) if (d.owner !== 'core' && !want.has(d.id)) registry.unregister(d.id);
+  for (const d of want.values()) { const have = registry.get(d.id); if (!have || JSON.stringify(have) !== JSON.stringify(checkSafe(d))) { try { registry.register(d); } catch { /* a wrong definition is not shown */ } } }
+}
+const checkSafe = d => { try { return checkDef(d); } catch { return null; } };
 
 // ---- the settings of a window: { id: entry }
 export function normalizeEntry(e) {

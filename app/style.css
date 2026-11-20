@@ -115,3 +115,8 @@ body.hover-clear { opacity: 0; }
 #ctx div.off { color: #6c6f77; }
 #ctx div.sep { height: 1px; padding: 0; margin: 4px 0; background: #3c3f46; }
 #ctx div.on::before { content: '✔'; position: absolute; left: 6px; color: #e0b84a; }
+
+/* the window of a plugin: its page fills the room under the bar */
+body.overlay .lines.page { inset: var(--bar-h) 0 0 0; overflow: hidden; padding: 0; clip-path: none !important; }
+.pl-page { display: block; width: 100%; height: 100%; border: 0; background: transparent; color-scheme: normal; }
+.pl-page-off { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9aa0a6; font-size: 13px; }

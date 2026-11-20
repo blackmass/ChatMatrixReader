@@ -7,7 +7,7 @@ for (const [fn, args, want] of JSON.parse(fs.readFileSync(path.join(HERE, 'golde
   // 3.0 differs from 2.0 here on purpose: "only while the voice recognition is on" can be set for every extra window (2.0 allowed it for window 2 only)
   if (fn === 'normalize' && Array.isArray(args[0]) && args[0].length === 1 && args[0][0] && args[0][0].id === 5 && args[0][0].open_mode === 'voice') want.find(c => c.id === 5).open_mode = 'voice';
   const got = w[fn](...args);
-  const no3 = v => { if (Array.isArray(v)) v.forEach(no3); else if (v && typeof v === 'object') { delete v.clear_on_open; delete v.dock_to; delete v.tab_opacity; } return v; };       // (3.x only: an extra window can start empty)
+  const no3 = v => { if (Array.isArray(v)) v.forEach(no3); else if (v && typeof v === 'object') { delete v.clear_on_open; delete v.dock_to; delete v.tab_opacity; delete v.owner; delete v.owner_win; delete v.kind; delete v.page; } return v; };       // (3.x only: an extra window can start empty)
   eq(no3(got), want, `${fn}(${JSON.stringify(args)})`);
 }
 
@@ -38,4 +38,16 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   check(JSON.stringify([2, 3, 4, 5, 6, 7, 8].map(i => w.dockHost(L, i))) === '[0,1,0,0,0,1,0]', 'dockHost: a tab of window 1 is valid; a tab of a tab, of itself, of a missing window or none is not');
   check(JSON.stringify(w.dockedOf(L, 1)) === '[3,7]' && w.dockedOf(L, 3).length === 0, 'dockedOf: the tabs of a window, in the order of the list');
   check(w.normalize([{ id: 3, dock_to: 3 }]).find(c => c.id === 3).dock_to === 0 && w.normalize([{ id: 3, dock_to: '1' }]).find(c => c.id === 3).dock_to === 1 && w.newConf(3).dock_to === 0, 'dock_to: cleaned (itself = none, text numbers read, default none)');
+}
+
+// ---- a window of a plugin (kind 'page'): it keeps its plugin, its name and its page; without them it is an ordinary window
+{
+  const ok = w.normalize([{ id: 5, owner: 'my-plugin-id', owner_win: 'main', kind: 'page', page: 'ui/window.html' }]).find(c => c.id === 5);
+  check(ok.kind === 'page' && ok.owner === 'my-plugin-id' && ok.owner_win === 'main' && ok.page === 'ui/window.html', 'winconf: a plugin window keeps owner, name and page');
+  for (const bad of [{ page: '../x.html' }, { page: '/x.html' }, { page: 'x.js' }, { owner: 'Bad Owner' }, { owner_win: 'a b' }]) {
+    const c = w.normalize([{ id: 5, owner: 'my-plugin-id', owner_win: 'main', kind: 'page', page: 'w.html', ...bad }]).find(x => x.id === 5);
+    check(c.kind === '' || (c.owner === 'my-plugin-id' && !bad.owner && !bad.page) || c.owner_win === '', 'winconf: a bad ' + JSON.stringify(bad) + ' is cleaned: ' + JSON.stringify([c.kind, c.owner, c.owner_win, c.page]));
+  }
+  const plain = w.normalize([{ id: 5, kind: 'page' }]).find(c => c.id === 5);
+  check(plain.kind === '' && plain.owner === '' && plain.page === '', 'winconf: kind page without an owner and a page is an ordinary window');
 }

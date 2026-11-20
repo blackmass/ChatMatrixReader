@@ -44,7 +44,7 @@ export class WidgetLayer {
   }
   // the settings of the window: { id: entry } -> the widgets that are drawn (the others are taken away). -> the ids that are drawn
   set(widgets) {
-    const want = drawn(widgets), ids = new Set(want.map(w => w.id));
+    const want = drawn(widgets).filter(w => this.registry.get(w.id)), ids = new Set(want.map(w => w.id));       // (a widget nobody provides now, e.g. of a plugin that is off, is not drawn; its settings stay)
     for (const [id, it] of this.items) if (!ids.has(id)) { it.node.remove(); this.items.delete(id); }
     for (const e of want) {
       const def = this.registry.get(e.id), kind = def ? def.kind : 'text';

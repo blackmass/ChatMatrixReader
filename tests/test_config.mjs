@@ -8,7 +8,7 @@ import { DEFAULTS, normalize, migrate, ConfigStore, VERSION } from '../app/core/
 import { Events } from '../app/core/events.js';
 
 log.quiet = true;
-const no3 = c => { for (const w of (c && c.child_windows) || []) { delete w.clear_on_open; delete w.dock_to; delete w.tab_opacity; } if (c) { delete c.whole_groups; delete c.hide_tools; delete c.hide_tabs; delete c.hide_frame; delete c.tab_alert; delete c.lock_window; delete c.tab_opacity; delete c.max_groups; delete c.send_place; delete c.main_name; } return c; };      // (3.x only: an extra window can start empty)
+const no3 = c => { for (const w of (c && c.child_windows) || []) { delete w.clear_on_open; delete w.dock_to; delete w.tab_opacity; delete w.owner; delete w.owner_win; delete w.kind; delete w.page; } if (c) { delete c.whole_groups; delete c.hide_tools; delete c.hide_tabs; delete c.hide_frame; delete c.tab_alert; delete c.lock_window; delete c.tab_opacity; delete c.max_groups; delete c.send_place; delete c.main_name; } return c; };      // (3.x only: an extra window can start empty)
 const G = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config.json'), 'utf8'));
 const D = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config_defaults.json'), 'utf8'));
 const same = (a, b, msg) => { const x = canon(a), y = canon(b); if (x === y) check(true, msg); else { check(false, msg); console.log('   got     ', x.slice(0, 500)); console.log('   expected', y.slice(0, 500)); } };

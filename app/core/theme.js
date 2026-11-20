@@ -14,7 +14,7 @@ export const OTHER_COLORS = {
   '!LT': '#00aa00', '!CY': '#00aa00', '!MN': '#ffff00', '!CI': '#8080ff', '!AC': '#ffff00', '!GA': '#40ff40',
   '!OP': '#8080ff', '!PI': '#8080ff', '!TS': '#ffffff', '!BH': '#ff4040', '!BA': '#4090ff', '!BN': '#ffa040',
   '!MS': '#ffff9e', '!MY': '#ff4040', '!ME': '#ff8040', '!MW': '#ffb5f0', '!MP': '#aaaaff', '!BE': '#ffdd00', '!BW': '#ffdd00',
-  '!UN': '#b8b8b8', '!AD': '#ffffff', '!CL': '#bf8080', '!PG': '#ff5050', '!BI': '#66ccff', '!CN': '#ffc0c0', '!VC': '#9fe8ff',
+  '!UN': '#b8b8b8', '!AD': '#ffffff', '!CL': '#bf8080', '!PG': '#ff5050', '!BI': '#66ccff', '!CN': '#ffc0c0', '!VC': '#9fe8ff', '!PLG': '#c9b6ff',
   '!TI': '#ffff00', '!TM': '#ffff00',
 };
 export const PING_COLORS = { '◈': '#4da3ff', '⚑': '#4ddc6b', '⚠': '#ff4545', '⚔': '#ff9a2e', '▼': '#4da3ff' };

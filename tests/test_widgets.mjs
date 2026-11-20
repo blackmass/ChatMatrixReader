@@ -1,5 +1,5 @@
 // The widgets (docs/WIDGETS.md): definitions, the settings of a window, the state store, the official voice widget, the hub.
-import { check } from './helpers.mjs';
+import { check, eq } from './helpers.mjs';
 import * as W from '../app/widgets/registry.js';
 import { voiceWidgetState, VOICE_WIDGET, VOICE_ID } from '../app/widgets/core_voice.js';
 import { defaultRegistry } from '../app/widgets/defaults.js';
@@ -81,3 +81,15 @@ hub.publish(VOICE_ID, { value: 0.6 });
 check(sent.length === 1, 'the same state again: nothing is sent');
 sent.length = 0; handlers['widget-hello']({ payload: { ids: [VOICE_ID, 'none:here'] } });
 check(sent.length === 1 && sent[0][1].id === VOICE_ID, 'a window that asks (it was opened) gets the states it needs');
+
+{ // the definitions of the plugins reach a page's registry: exactly these besides the program's own
+  const reg = new W.Registry(); reg.register(VOICE_WIDGET);
+  const PL = 'a-long-plugin-id-0123456789abcdef-0123456789';
+  const def = n => ({ id: `${PL}:${n}`, label: n, kind: 'text' });
+  W.syncPluginDefs(reg, [def('one'), def('two'), { id: 'core:evil', label: 'x' }, null]);
+  eq(reg.list().map(d => d.id).sort(), [`${PL}:one`, `${PL}:two`, 'core:voice-level'], 'widgets: the plugin definitions are put in; a core: id from outside and a null are not');
+  W.syncPluginDefs(reg, [def('two')]);
+  eq(reg.list().map(d => d.id).sort(), [`${PL}:two`, 'core:voice-level'], 'widgets: one that is not told any more is taken out, the program\'s own stays');
+  let n = 0; reg.onChange(() => n++); W.syncPluginDefs(reg, [def('two')]);
+  eq(n, 0, 'widgets: the same definitions again change nothing');
+}

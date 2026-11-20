@@ -13,6 +13,7 @@ export function startWindows({ settings }) {
   const open = new Set();                      // ids of the extra windows that are open now
   const manual = new Set();                    // opened by hand (open mode "직접 열 때만")
   const closedBy = new Map();                  // id -> the open mode it had when the user closed it with the X (only for now: see below)
+  let pluginCheck = null;                      // (owner, name) -> may the window of this plugin be open now? (set by plugin_host.js)
   let voiceOn = false;                         // the voice recognition is on (or starting)
   const children = () => settings.cfg().child_windows;
   const conf = id => children().find(c => c.id === id);
@@ -30,7 +31,7 @@ export function startWindows({ settings }) {
       do {
         again = false;
         for (const c of children()) {
-          const want = !winconf.dockHost(children(), c.id) && layout.wantedOpen(c, manual, voiceOn, closedBy.get(c.id) === c.open_mode ? new Set([c.id]) : new Set());
+          const want = !winconf.dockHost(children(), c.id) && (!c.owner || !!(pluginCheck && pluginCheck(c.owner, c.owner_win))) && layout.wantedOpen(c, manual, voiceOn, closedBy.get(c.id) === c.open_mode ? new Set([c.id]) : new Set());
           if (want && !open.has(c.id)) {
             try { await invoke('open_overlay', { label: layout.labelOf(c.id) }); open.add(c.id); } catch (e) { log.error('번역창을 열지 못했습니다: ' + e); }
           } else if (!want && open.has(c.id)) { open.delete(c.id); await invoke('close_overlay', { label: layout.labelOf(c.id) }).catch(() => {}); }
@@ -50,7 +51,7 @@ export function startWindows({ settings }) {
       return id;
     },
     remove(id) {                                    // (window 2 is the voice window: it stays)
-      if (id < 2 || id === winconf.VOICE_ID) return;
+      if (id < 2 || id === winconf.VOICE_ID || (conf(id) && conf(id).owner)) return;                  // (the window of a plugin is not deleted by hand: it goes with the plugin)
       manual.delete(id); closedBy.delete(id);
       setChildren(children().filter(c => c.id !== id));
     },
@@ -75,6 +76,7 @@ export function startWindows({ settings }) {
     isOpen: id => id === 1 || open.has(id) || (id > 1 && (h => h > 0 && (h === 1 || open.has(h)))(winconf.dockHost(children(), id))),
     openIds: () => [...open],
     sync,
+    setPluginCheck: fn => { pluginCheck = fn; sync(); },
   };
 
   // what the windows and the options window tell

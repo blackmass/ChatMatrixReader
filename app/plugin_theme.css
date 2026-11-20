@@ -1,5 +1,5 @@
 /* The look of the options of a plugin (the same as the options window of the program):  <link rel="stylesheet" href="__sdk/theme.css"> */
-:root { --bg: #1e1f22; --panel: #2b2d31; --text: #e6e6e6; --dim: #9aa0a6; --line: #3c3f46; --accent: #e6c66e; --bad: #ff8a80; color-scheme: dark; }
+:root { --bg: #1e1f22; --panel: #2b2d31; --text: #e6e6e6; --dim: #9aa0a6; --line: #3c3f46; --accent: #e6c66e; --bad: #ff8a80; }       /* (no color-scheme here: a different one would make the frame opaque, and the options window shows through it) */
 html, body { margin: 0; background: transparent; color: var(--text); font: 14px "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif; }
 body { padding: 8px 2px; }
 label { display: block; margin: 8px 0 3px; }
