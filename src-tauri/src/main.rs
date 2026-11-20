@@ -104,6 +104,12 @@ fn mime(path: &str) -> &'static str {
         "otf" => "font/otf",
         "woff" => "font/woff",
         "woff2" => "font/woff2",
+        "mjs" => "text/javascript; charset=utf-8",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        "txt" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
 }
@@ -145,6 +151,42 @@ fn serve(path: &str) -> tauri::http::Response<Vec<u8>> {
             .header("Content-Type", "text/plain; charset=utf-8")
             .body(format!("not found: {}", file.display()).into_bytes())
             .unwrap(),
+    }
+}
+
+/// The plugin address: cmrplug://localhost/<id>/<file> (Windows: http://cmrplug.localhost/<id>/<file>) answers with plugins/<id>/<file> of the program folder
+/// (the pages of a plugin, shown in a sandboxed frame: see docs). Nothing outside plugins/<id>/ is ever given (no "..", no drive or stream names, no link that leads out),
+/// and every answer carries a policy (CSP) that lets the page load only its own files and nothing from the network.
+fn serve_plugin(path: &str) -> tauri::http::Response<Vec<u8>> {
+    const CSP: &str = "default-src 'self' blob: data:; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; \
+        connect-src 'self' blob: data:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'";
+    let decoded = percent_decode(path);
+    let builder = tauri::http::Response::builder()
+        .header("Cache-Control", "no-store")
+        .header("Content-Security-Policy", CSP)
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Cross-Origin-Resource-Policy", "cross-origin")
+        .header("X-Content-Type-Options", "nosniff");
+    let forbidden = |b: tauri::http::response::Builder| b.status(403).body(b"forbidden".to_vec()).unwrap();
+    let (id, rest) = decoded.split_once('/').unwrap_or((decoded.as_str(), ""));
+    let rest = if rest.is_empty() { "index.html" } else { rest };
+    let id_ok = !id.is_empty() && id.len() <= 100 && id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'_');
+    if !id_ok || rest.contains("..") || rest.contains(':') || rest.contains('\\') || rest.starts_with('/') {
+        return forbidden(builder);
+    }
+    let root = base_dir().join("plugins").join(id);
+    let file = root.join(rest);
+    // a link or junction inside the plugin folder must not lead out of it
+    let inside = match (std::fs::canonicalize(&root), std::fs::canonicalize(&file)) {
+        (Ok(r), Ok(f)) => f.starts_with(&r),
+        _ => false,
+    };
+    if !inside {
+        return builder.status(404).header("Content-Type", "text/plain; charset=utf-8").body(b"not found".to_vec()).unwrap();
+    }
+    match std::fs::read(&file) {
+        Ok(bytes) => builder.status(200).header("Content-Type", mime(rest)).body(bytes).unwrap(),
+        Err(_) => builder.status(404).header("Content-Type", "text/plain; charset=utf-8").body(b"not found".to_vec()).unwrap(),
     }
 }
 
@@ -953,6 +995,9 @@ fn main() {
         //  reqwest client is used, by http_request below, and that writes nothing to disk)
         .register_uri_scheme_protocol("cmr", |_ctx, request| {
             serve(request.uri().path().trim_start_matches('/'))
+        })
+        .register_uri_scheme_protocol("cmrplug", |_ctx, request| {
+            serve_plugin(request.uri().path().trim_start_matches('/'))
         })
         .invoke_handler(tauri::generate_handler![
             capture_start,
