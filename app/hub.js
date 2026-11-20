@@ -194,4 +194,6 @@ every('HUB_TICK_MS', () => {
 });
 report('hub', emit);
 
+import('./lab/iso.js').catch(() => {});       // (a test for the plugin work: only when the folder app/lab/ is there; it writes logs/lab_isolation.txt)
+
 window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice };
