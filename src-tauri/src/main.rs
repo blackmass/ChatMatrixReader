@@ -18,6 +18,7 @@ mod ext;
 mod extlib;
 mod files;
 mod placement;
+mod pluginlib;
 mod procrole;
 // everything that calls the operating system directly: the same functions in both files (win.rs: Windows, mac.rs: macOS)
 #[cfg(windows)]
@@ -154,9 +155,9 @@ fn serve(path: &str) -> tauri::http::Response<Vec<u8>> {
     }
 }
 
-/// The plugin address: cmrplug://localhost/<id>/<file> (Windows: http://cmrplug.localhost/<id>/<file>) answers with plugins/<id>/<file> of the program folder
-/// (the pages of a plugin, shown in a sandboxed frame: see docs). Nothing outside plugins/<id>/ is ever given (no "..", no drive or stream names, no link that leads out),
-/// and every answer carries a policy (CSP) that lets the page load only its own files and nothing from the network.
+/// The plugin address: cmrplug://localhost/<token>/<file> (Windows: http://cmrplug.localhost/<token>/<file>). The token (pluginlib.rs) stands for one plugin and is told only to the
+/// page that starts it (plugin_token below): the file is plugins/<id>/<file> of the program folder. Nothing outside plugins/<id>/ is ever given (no "..", no drive or stream
+/// names, no link that leads out), and every answer carries a policy (CSP) that lets the page load only its own files and nothing from the network.
 fn serve_plugin(path: &str) -> tauri::http::Response<Vec<u8>> {
     // The policy names the plugin address itself (not 'self'): the pages are shown in a sandboxed frame, and WebKit (macOS) does not match 'self' there.
     let me = if cfg!(windows) { "http://cmrplug.localhost" } else { "cmrplug://localhost" };
@@ -171,27 +172,50 @@ fn serve_plugin(path: &str) -> tauri::http::Response<Vec<u8>> {
         .header("Access-Control-Allow-Origin", "*")
         .header("Cross-Origin-Resource-Policy", "cross-origin")
         .header("X-Content-Type-Options", "nosniff");
-    let forbidden = |b: tauri::http::response::Builder| b.status(403).body(b"forbidden".to_vec()).unwrap();
-    let (id, rest) = decoded.split_once('/').unwrap_or((decoded.as_str(), ""));
+    let refuse = |b: tauri::http::response::Builder, code: u16| b.status(code).header("Content-Type", "text/plain; charset=utf-8").body(b"no".to_vec()).unwrap();
+    let (token, rest) = decoded.split_once('/').unwrap_or((decoded.as_str(), ""));
     let rest = if rest.is_empty() { "index.html" } else { rest };
-    let id_ok = !id.is_empty() && id.len() <= 100 && id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'_');
-    if !id_ok || rest.contains("..") || rest.contains(':') || rest.contains('\\') || rest.starts_with('/') {
-        return forbidden(builder);
+    let Some(id) = plugin_tokens().id_of(token) else { return refuse(builder, 403) };
+    if !pluginlib::valid_rel(rest) {
+        return refuse(builder, 403);
     }
-    let root = base_dir().join("plugins").join(id);
+    let root = base_dir().join("plugins").join(&id);
     let file = root.join(rest);
-    // a link or junction inside the plugin folder must not lead out of it
-    let inside = match (std::fs::canonicalize(&root), std::fs::canonicalize(&file)) {
-        (Ok(r), Ok(f)) => f.starts_with(&r),
-        _ => false,
-    };
-    if !inside {
-        return builder.status(404).header("Content-Type", "text/plain; charset=utf-8").body(b"not found".to_vec()).unwrap();
+    if !pluginlib::inside(&root, &file) {
+        return refuse(builder, 404);
     }
     match std::fs::read(&file) {
         Ok(bytes) => builder.status(200).header("Content-Type", mime(rest)).body(bytes).unwrap(),
-        Err(_) => builder.status(404).header("Content-Type", "text/plain; charset=utf-8").body(b"not found".to_vec()).unwrap(),
+        Err(_) => refuse(builder, 404),
     }
+}
+
+fn plugin_tokens() -> &'static pluginlib::Tokens {
+    static T: std::sync::OnceLock<pluginlib::Tokens> = std::sync::OnceLock::new();
+    T.get_or_init(pluginlib::Tokens::new)
+}
+
+/// The secret part of the address of a plugin (made at the first call; `renew`: a new one, the old address stops working). Only the pages of the program can ask.
+#[tauri::command]
+fn plugin_token(id: String, renew: Option<bool>) -> Result<String, String> {
+    plugin_tokens().token_for(&id, renew.unwrap_or(false))
+}
+
+/// The plugin is stopped: its address stops working.
+#[tauri::command]
+fn plugin_forget(id: String) {
+    plugin_tokens().forget(&id);
+}
+
+/// The fingerprint of the folder of a plugin: { hash, files: [{ path, size, sha256 }] } (links are not allowed in a plugin; the sizes are limited).
+#[tauri::command(async)]
+fn plugin_hash(id: String) -> Result<Value, String> {
+    if !pluginlib::valid_id(&id) {
+        return Err("bad plugin id".into());
+    }
+    let root = base_dir().join("plugins").join(&id);
+    let (hash, files) = pluginlib::tree_hash(&root)?;
+    Ok(json!({ "hash": hash, "files": files.iter().map(|f| json!({ "path": f.path, "size": f.size, "sha256": f.sha256 })).collect::<Vec<_>>() }))
 }
 
 /// Is this the folder of a version 1.x (the Python program: app.py in the main folder, or app/app.py since 1.6)? Then only the page that
@@ -1004,6 +1028,9 @@ fn main() {
             serve_plugin(request.uri().path().trim_start_matches('/'))
         })
         .invoke_handler(tauri::generate_handler![
+            plugin_token,
+            plugin_forget,
+            plugin_hash,
             capture_start,
             capture_stop,
             os_kind,
