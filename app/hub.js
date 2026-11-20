@@ -22,6 +22,7 @@ import { startSend } from './send_host.js';
 import { startTray } from './tray_host.js';
 import { startVoice } from './voice_host.js';
 import { startWidgets } from './widgets/hub.js';
+import { startPlugins } from './plugin_host.js';
 import { makeInstaller, makeBackend, makeBencher } from './voice_install.js';
 import { ExitWatch } from './core/exitwatch.js';
 import { every } from './core/timings.js';
@@ -194,4 +195,6 @@ every('HUB_TICK_MS', () => {
 });
 report('hub', emit);
 
-window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice };
+const plugins = startPlugins({ settings, files, publish, pipeline, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen });        // (the plugins folder: docs/PLUGINS.md)
+
+window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice, plugins };

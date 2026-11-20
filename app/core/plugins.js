@@ -7,9 +7,8 @@
 //   effective(manifest, granted)                   -> what the plugin may really do now (the asked for AND allowed)
 
 export const API_VERSION = 1;                         // the version of the plugin interface this program speaks
-export const MIN_TIMER_SEC = 5;                       // a timer of a plugin never runs more often than this
 export const MAX_OPTIONS = 50;
-export const PERMISSIONS = ['net', 'chat.inject', 'storage', 'timer'];
+export const PERMISSIONS = ['net', 'chat.inject', 'storage'];      // (a timer is not a permission: a plugin has its own setInterval; what costs is limited where it is called)
 export const OPTION_TYPES = ['text', 'number', 'check', 'select'];
 export const RECOMMENDED_ID_LENGTH = 16;              // an id this long is not easy to guess or to clash with (a warning below this)
 
@@ -83,7 +82,7 @@ export function parseManifest(text, folder) {
   }
 
   // permissions: only the known ones, in the exact shape
-  const perms = { net: [], 'chat.inject': false, storage: false, timer: null };
+  const perms = { net: [], 'chat.inject': false, storage: false };
   const p = m.permissions === undefined ? {} : m.permissions;
   if (!isObj(p)) errors.push('permissions: must be an object');
   else {
@@ -96,11 +95,6 @@ export function parseManifest(text, folder) {
       }
     }
     for (const k of ['chat.inject', 'storage']) if (p[k] !== undefined) { if (typeof p[k] !== 'boolean') errors.push(`permissions.${k}: true or false`); else perms[k] = p[k]; }
-    if (p.timer !== undefined) {
-      if (p.timer === true) perms.timer = { minIntervalSec: MIN_TIMER_SEC };
-      else if (isObj(p.timer) && Number.isFinite(Number(p.timer.minIntervalSec))) perms.timer = { minIntervalSec: Math.max(MIN_TIMER_SEC, Math.round(Number(p.timer.minIntervalSec))) };
-      else if (p.timer !== false) errors.push('permissions.timer: true or { "minIntervalSec": number }');
-    }
   }
   const reasons = {};
   if (m.reasons !== undefined) {
@@ -115,10 +109,10 @@ export function parseManifest(text, folder) {
 }
 
 // the permissions a manifest asks for, by name (net counts when it names a host)
-export const asked = perms => PERMISSIONS.filter(k => (k === 'net' ? perms.net.length > 0 : k === 'timer' ? !!perms.timer : !!perms[k]));
+export const asked = perms => PERMISSIONS.filter(k => (k === 'net' ? perms.net.length > 0 : !!perms[k]));
 
-// granted: what the user allowed, kept in the settings: { net: [host...], 'chat.inject': bool, storage: bool, timer: bool }
-const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net : [], 'chat.inject': !!(g && g['chat.inject']), storage: !!(g && g.storage), timer: !!(g && g.timer) });
+// granted: what the user allowed, kept in the settings: { net: [host...], 'chat.inject': bool, storage: bool }
+const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net : [], 'chat.inject': !!(g && g['chat.inject']), storage: !!(g && g.storage) });
 
 // what is asked for and not yet allowed: [{ perm, host? }]
 export function missing(manifest, granted) {
@@ -126,14 +120,13 @@ export function missing(manifest, granted) {
   for (const h of p.net) if (!g.net.includes(h)) out.push({ perm: 'net', host: h });
   if (p['chat.inject'] && !g['chat.inject']) out.push({ perm: 'chat.inject' });
   if (p.storage && !g.storage) out.push({ perm: 'storage' });
-  if (p.timer && !g.timer) out.push({ perm: 'timer' });
   return out;
 }
 
 // what the plugin may do now: only what the manifest asks for AND the user allowed (a permission that was removed from the manifest is not used any more)
 export function effective(manifest, granted) {
   const g = grantedOf(granted), p = manifest.permissions;
-  return { net: p.net.filter(h => g.net.includes(h)), 'chat.inject': p['chat.inject'] && g['chat.inject'], storage: p.storage && g.storage, timer: p.timer && g.timer ? p.timer : null };
+  return { net: p.net.filter(h => g.net.includes(h)), 'chat.inject': p['chat.inject'] && g['chat.inject'], storage: p.storage && g.storage };
 }
 
 // is this address one the plugin may fetch? (https only; the host must be one of the allowed ones, exactly)

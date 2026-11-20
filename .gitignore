@@ -56,3 +56,5 @@ Thumbs.db
 .idea/
 .vs/
 node_modules/
+plugins/
+plugin-data/

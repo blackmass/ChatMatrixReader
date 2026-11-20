@@ -52,6 +52,7 @@ function grabBytes(x, y, w, h) {
 }
 const BY_OWNER = true;                                              // (the default way of "just above the game")
 const topCalls = [], raised = [];
+const pluginFetches = [];
 const opened = [], owners = [], placed = [], watched = [], trayTexts = [];
 let gameGone = false;
 const zoneCalls = [];                                 // what the page asked of the wheel hook (wheel_zone)
@@ -64,7 +65,11 @@ async function invoke(cmd, a = {}) {
     case 'fs_append': files.set(a.path, (files.get(a.path) || '') + a.text); return null;
     case 'fs_kind': return files.has(a.path) ? 'file' : '';
     case 'fs_mkdir': return null;
-    case 'fs_list': { const pre = a.path.replace(/\/$/, '') + '/'; return [...files.keys()].filter(k => k.startsWith(pre) && !k.slice(pre.length).includes('/')).map(k => k.slice(pre.length)); }
+    case 'fs_list': { const pre = a.path.replace(/\/$/, '') + '/'; return [...new Set([...files.keys()].filter(k => k.startsWith(pre)).map(k => { const r = k.slice(pre.length); return r.includes('/') ? r.split('/')[0] + '/' : r; }))]; }
+    case 'plugin_token': return 'tok-' + a.id;
+    case 'plugin_forget': return null;
+    case 'plugin_hash': return { hash: 'abc', files: [] };
+    case 'plugin_fetch': pluginFetches.push(a); return { status: 200, body: '<html>list</html>', url: a.url, type: 'text/html' };
     case 'app_folder': return 'C:\\fake\\ChatMatrixReader';
     case 'open_url': opened.push(a.url); return null;
     case 'http_request': {
@@ -131,6 +136,7 @@ await ctx.clock.install();
 const STEP = 200;
 const tick = async ms => { for (let left = ms; left > 0; left -= STEP) { await ctx.clock.runFor(Math.min(left, STEP)); await new Promise(r => setTimeout(r, 6)); } };
 for (const pattern of ['http://cmr.localhost/fonts/*', `${base}/fonts/*`]) await ctx.route(pattern, r => r.fulfill({ status: 200, contentType: 'font/ttf', body: Buffer.from(sfntWith('Nano Test')) }));      // (the pages ask their own address: the program's on Windows, the test server's here)
+await ctx.route('http://cmrplug.localhost/**', r => r.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' }));
 await ctx.exposeBinding('__invoke', (_, cmd, args) => invoke(cmd, args));
 await ctx.exposeBinding('__clip', (_, t) => { clip.push(t); });
 await ctx.addInitScript(() => {
@@ -1111,6 +1117,49 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   ok(await control.evaluate(i => window.cmrHub.windows.openIds().includes(i), idt) && calls.filter(c => c === 'open_overlay').length > callsBefore, 'tabs: not merged any more: it has a window of its own again');
   await control.evaluate(() => import('./settings.js').then(m => m.set({ win1_off: [] })));
   await control.evaluate(i => window.cmrHub.windows.remove(i), idt); await control.waitForTimeout(400);
+}
+
+// ---- plugins: the folder is read, a good one is run in a sandboxed frame, what its frame asks is answered by the bridge (permissions, limits)
+{
+  const PID = 'e2e-plugin-0123456789abcdef';
+  files.set(`plugins/${PID}/plugin.json`, JSON.stringify({ id: PID, name: '시험 플러그인', version: '1.0.0', api: 1,
+    permissions: { net: ['example.com'], 'chat.inject': true, storage: true }, reasons: { net: 'a', 'chat.inject': 'b', storage: 'c' }, options: [{ key: 'n', type: 'number', default: 3 }] }));
+  files.set('plugins/broken-one/plugin.json', '{ not json');
+  files.set('plugins/not-a-plugin/readme.txt', 'x');
+  await control.evaluate(() => window.cmrHub.plugins.scan());
+  const list = () => control.evaluate(() => window.cmrHub.plugins.list().map(p => ({ id: p.id, ok: p.ok, running: p.running, enabled: p.enabled, missing: p.missing.length, errors: p.errors.length })));
+  const l0 = await list();
+  ok(l0.find(p => p.id === PID).ok && l0.find(p => p.id === PID).missing === 3 && !l0.find(p => p.id === PID).running, 'plugins: a good plugin is found; nothing is allowed yet (3 to approve), it is not running: ' + JSON.stringify(l0));
+  ok(l0.find(p => p.id === 'broken-one').ok === false && l0.find(p => p.id === 'not-a-plugin').errors === 1, 'plugins: a broken plugin.json and a folder without one are found, with errors');
+  await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { [id]: { enabled: true, granted: { net: ['example.com'], 'chat.inject': true, storage: true }, options: { n: 7 } } } })), PID);
+  await control.waitForTimeout(600);
+  const fr = await control.evaluate(id => { const f = document.querySelector(`#plugin-frames iframe[data-plugin="${id}"]`); return f ? { sandbox: f.getAttribute('sandbox'), src: f.src } : null; }, PID);
+  ok(fr && fr.sandbox === 'allow-scripts' && fr.src === `http://cmrplug.localhost/tok-${PID}/background.html`, 'plugins: enabled: it runs in a sandboxed frame at its own address: ' + JSON.stringify(fr));
+  // what its frame says: the page is sent messages as if from the frame
+  const asked = async (method, args) => control.evaluate(([id, m, a]) => new Promise(res => {
+    const run = window.cmrHub.plugins.running.get(id); const old = window.cmrHub.plugins.post.send;
+    window.cmrHub.plugins.post.send = (f, msg) => { if (msg.id === 99) { window.cmrHub.plugins.post.send = old; res(msg); } };
+    window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, id: 99, method: m, args: a }, source: run.frame.contentWindow }));
+  }), [PID, method, args]);
+  const r1 = await asked('chat.inject', { text: 'hello from the plugin', sender: '게시판' }); await control.waitForTimeout(500);
+  ok(r1.ok && (await main.locator('#lines').textContent()).includes('hello from the plugin') && (await main.locator('#lines').textContent()).includes('게시판'), 'plugins: chat.inject puts a line in the chat window: ' + JSON.stringify(r1));
+  const r2 = await asked('storage.set', { key: 'last', value: { id: 5 } }); const r3 = await asked('storage.get', { key: 'last' });
+  ok(r2.ok && r3.ok && r3.value.id === 5, 'plugins: storage set / get');
+  const r4 = await asked('net.fetch', { url: 'https://example.com/list' }); const r5 = await asked('net.fetch', { url: 'https://evil.org/list' });
+  ok(r4.ok && r4.value.status === 200 && pluginFetches.at(-1).hosts.join() === 'example.com' && r5.ok === false && r5.error.code === 'denied', 'plugins: net.fetch to an allowed host goes through the exe command with the hosts; another host is denied: ' + JSON.stringify(r5));
+  const r6 = await asked('options.get'); ok(r6.ok && r6.value.n === 7, 'plugins: the options of the user reach the plugin');
+  // a message from anything that is not the frame of a plugin is ignored
+  const stray = await control.evaluate(() => new Promise(res => { const t = setTimeout(() => res('ignored'), 300); const old = window.cmrHub.plugins.post.send; window.cmrHub.plugins.post.send = () => { clearTimeout(t); window.cmrHub.plugins.post.send = old; res('answered'); };
+    window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, id: 1, method: 'chat.inject', args: { text: 'x' } }, source: window })); }));
+  ok(stray === 'ignored', 'plugins: a message not from a plugin frame is ignored');
+  // taking a permission away restarts it and the permission is gone
+  await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { [id]: { enabled: true, granted: { net: ['example.com'], storage: true }, options: { n: 7 } } } })), PID);
+  await control.waitForTimeout(600);
+  const r7 = await asked('chat.inject', { text: 'not allowed now' });
+  ok(r7.ok === false && r7.error.code === 'denied', 'plugins: a permission taken away is gone (the plugin was restarted)');
+  await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { [id]: { enabled: false, granted: {}, options: {} } } })), PID);
+  await control.waitForTimeout(500);
+  ok(!(await list()).find(p => p.id === PID).running && await control.evaluate(() => document.querySelectorAll('#plugin-frames iframe').length) === 0, 'plugins: disabled: the frame is gone');
 }
 
 // ---- window titles: "ChatMatrix - <name>", the default name when it is empty, and the language

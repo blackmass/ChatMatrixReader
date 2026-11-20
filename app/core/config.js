@@ -139,7 +139,7 @@ export const DEFAULTS = {
     last_pos: null,   // [x, y] where the matrix was found last time (looked at first, every second)
     full_scan_sec: 30,   // whole-screen search while the matrix is missing: at most this often (seconds)
     // plugins (docs/PLUGINS.md)
-    plugins: {},                           // plugin id -> { enabled: bool, granted: [permission names] }
+    plugins: {},                           // plugin id -> { enabled: bool, granted: { net: [host], 'chat.inject': bool, storage: bool }, options: { key: value } } (app/plugin_host.js)
     widgets: {},                           // the widgets of the main window: { 'owner:name': { place, anchor, dx, dy, style, show, scale, opacity, opts } } (docs/WIDGETS.md)
     wheel_through: false,                  // click-through windows: the wheel over them may scroll (reading the earlier chat); off = nothing but the tooltip gets through
     through_tips: true,                    // click-through windows: the tip of a link (item, quest ...) under the mouse is shown (the page cannot see the mouse: the window loop does)

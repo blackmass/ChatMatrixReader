@@ -179,6 +179,14 @@ fn serve_plugin(path: &str) -> tauri::http::Response<Vec<u8>> {
     if !pluginlib::valid_rel(rest) {
         return refuse(builder, 403);
     }
+    // what the program gives to every plugin page: the way to talk to the program (plugin_sdk.js) and the look of its options window (plugin_theme.css)
+    if let Some(name) = rest.strip_prefix("__sdk/") {
+        let file = match name { "plugin.js" => "plugin_sdk.js", "theme.css" => "plugin_theme.css", _ => return refuse(builder, 404) };
+        return match std::fs::read(app_dir().join(file)) {
+            Ok(bytes) => builder.status(200).header("Content-Type", mime(file)).body(bytes).unwrap(),
+            Err(_) => refuse(builder, 404),
+        };
+    }
     let root = base_dir().join("plugins").join(&id);
     let file = root.join(rest);
     if !pluginlib::inside(&root, &file) {
@@ -199,6 +207,60 @@ fn plugin_tokens() -> &'static pluginlib::Tokens {
 #[tauri::command]
 fn plugin_token(id: String, renew: Option<bool>) -> Result<String, String> {
     plugin_tokens().token_for(&id, renew.unwrap_or(false))
+}
+
+/// A request for a plugin (cmr.net.fetch): https only, to a host the user allowed (`hosts`: exact names), the same for every redirect; the size of what is sent and of the
+/// answer is limited. -> { status, body, url, type }
+#[tauri::command]
+async fn plugin_fetch(url: String, method: Option<String>, headers: Option<Vec<(String, String)>>, body: Option<String>, hosts: Vec<String>, max_bytes: Option<usize>) -> Result<Value, String> {
+    use tauri_plugin_http::reqwest;
+    let hosts: Vec<String> = hosts.into_iter().map(|h| h.to_lowercase()).collect();
+    let ok_url = |u: &reqwest::Url| u.scheme() == "https" && u.username().is_empty() && u.password().is_none() && u.port().is_none() && u.host_str().map_or(false, |h| hosts.iter().any(|x| x == &h.to_lowercase()));
+    let parsed = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
+    if !ok_url(&parsed) {
+        return Err("this address is not allowed for the plugin".into());
+    }
+    let method = match method.unwrap_or_else(|| "GET".into()).to_uppercase().as_str() {
+        "GET" => reqwest::Method::GET,
+        "POST" => reqwest::Method::POST,
+        "HEAD" => reqwest::Method::HEAD,
+        _ => return Err("only GET, POST and HEAD".into()),
+    };
+    if body.as_ref().map_or(0, |b| b.len()) > 1_000_000 {
+        return Err("the request is too big (1 MB at most)".into());
+    }
+    let hosts_for_redirect = hosts.clone();
+    let policy = reqwest::redirect::Policy::custom(move |attempt| {
+        let u = attempt.url();
+        let ok = u.scheme() == "https" && u.username().is_empty() && u.password().is_none() && u.port().is_none() && u.host_str().map_or(false, |h| hosts_for_redirect.iter().any(|x| x == &h.to_lowercase()));
+        if attempt.previous().len() >= 5 || !ok { attempt.stop() } else { attempt.follow() }
+    });
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).http1_only().redirect(policy).build().map_err(|e| e.to_string())?;
+    let mut req = client.request(method, parsed);
+    for (name, value) in headers.unwrap_or_default().into_iter().take(30) {
+        let n = name.to_lowercase();
+        if ["host", "content-length", "connection", "transfer-encoding", "upgrade", "te", "expect", "proxy-authorization", "proxy-connection"].contains(&n.as_str()) || n.starts_with("sec-") {
+            continue;
+        }
+        req = req.header(name.as_str(), value.as_str());
+    }
+    if let Some(body) = body {
+        req = req.body(body);
+    }
+    let describe = |e: reqwest::Error| if e.is_timeout() { "timed out".to_string() } else { format!("{e}") };
+    let mut res = req.send().await.map_err(describe)?;
+    let status = res.status().as_u16();
+    let final_url = res.url().to_string();
+    let ctype = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let limit = max_bytes.unwrap_or(2_000_000).min(5_000_000);
+    let mut data: Vec<u8> = Vec::new();
+    while let Some(chunk) = res.chunk().await.map_err(describe)? {
+        if data.len() + chunk.len() > limit {
+            return Err(format!("the answer is bigger than {limit} bytes"));
+        }
+        data.extend_from_slice(&chunk);
+    }
+    Ok(json!({ "status": status, "body": String::from_utf8_lossy(&data), "url": final_url, "type": ctype }))
 }
 
 /// The plugin is stopped: its address stops working.
@@ -1031,6 +1093,7 @@ fn main() {
             plugin_token,
             plugin_forget,
             plugin_hash,
+            plugin_fetch,
             capture_start,
             capture_stop,
             os_kind,
