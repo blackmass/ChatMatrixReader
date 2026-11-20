@@ -1087,8 +1087,9 @@ fn plugin_open_url(url: String, hosts: Vec<String>) -> Result<(), String> {
 static LAB_EVENTS: std::sync::LazyLock<std::sync::Mutex<Vec<String>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
 fn lab_note(text: String) { let mut v = LAB_EVENTS.lock().unwrap(); v.push(text); if v.len() > 60 { v.remove(0); } }
 
+/// (async on purpose: a web view made from a synchronous command, which runs on the main thread, never comes back on Windows - the WebView2 issue wry#583)
 #[tauri::command]
-fn lab_child_open(app: AppHandle, label: String, url: String, x: f64, y: f64, w: f64, h: f64, ua: Option<String>) -> Result<String, String> {
+async fn lab_child_open(app: AppHandle, label: String, url: String, x: f64, y: f64, w: f64, h: f64, ua: Option<String>) -> Result<String, String> {
     use tauri::{webview::WebviewBuilder, LogicalPosition, LogicalSize, WebviewUrl};
     let main = app.get_webview_window(&label).ok_or("no such window")?;
     if let Some(old) = app.get_webview("labchild") { let _ = old.close(); }
@@ -1103,7 +1104,7 @@ fn lab_child_open(app: AppHandle, label: String, url: String, x: f64, y: f64, w:
 }
 
 #[tauri::command]
-fn lab_child_set(app: AppHandle, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+async fn lab_child_set(app: AppHandle, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
     use tauri::{LogicalPosition, LogicalSize};
     let c = app.get_webview("labchild").ok_or("no child")?;
     c.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
@@ -1111,12 +1112,12 @@ fn lab_child_set(app: AppHandle, x: f64, y: f64, w: f64, h: f64) -> Result<(), S
 }
 
 #[tauri::command]
-fn lab_child_close(app: AppHandle) -> Result<(), String> {
+async fn lab_child_close(app: AppHandle) -> Result<(), String> {
     match app.get_webview("labchild") { Some(c) => c.close().map_err(|e| e.to_string()), None => Ok(()) }
 }
 
 #[tauri::command]
-fn lab_child_info(app: AppHandle) -> Value {
+async fn lab_child_info(app: AppHandle) -> Value {
     let events = LAB_EVENTS.lock().unwrap().clone();
     match app.get_webview("labchild") {
         Some(c) => json!({ "exists": true, "url": c.url().map(|u| u.to_string()).unwrap_or_default(), "position": c.position().map(|p| [p.x, p.y]).ok(), "size": c.size().map(|s| [s.width, s.height]).ok(), "events": events }),
