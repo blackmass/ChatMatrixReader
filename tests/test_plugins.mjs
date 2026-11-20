@@ -63,3 +63,13 @@ const parse = (o, folder = ID) => p.parseManifest(JSON.stringify(o), folder);
   check(p.netAllowed(eff, 'https://example.com/a?b=1') && !p.netAllowed(eff, 'http://example.com/') && !p.netAllowed(eff, 'https://api.example.com/') && !p.netAllowed(eff, 'https://example.com.evil.org/')
     && !p.netAllowed(eff, 'https://user:pw@example.com/') && !p.netAllowed(eff, 'not a url') && !p.netAllowed(eff, 'https://EXAMPLE.com@evil.org/'), 'plugins: an address is allowed only for an exact host over https');
 }
+{ // what the user is asked again about, and the values of the options
+  const a = parse(good()).manifest;
+  const b = parse({ ...good(), permissions: { ...good().permissions, net: ['example.com', 'api.example.com', 'new.example.com'] } }).manifest;
+  const c = parse({ ...good(), name: 'another name', version: '2.0.0' }).manifest;
+  check(p.permsKey(a) !== p.permsKey(b) && p.permsKey(a) === p.permsKey(c), 'plugins: the user is asked again when a permission or a host is new, not when only the name or the version changed');
+  const def = k => a.options.find(o => o.key === k);
+  eq([p.cleanOptionValue(def('interval'), '5'), p.cleanOptionValue(def('interval'), 1), p.cleanOptionValue(def('interval'), 'x'), p.cleanOptionValue(def('on'), 1), p.cleanOptionValue(def('mode'), 'zz'), p.cleanOptionValue(def('mode'), 'a'), p.cleanOptionValue(def('url'), 5), p.cleanOptionValue(def('url'), 'abc')],
+    [30, 30, 60, false, 'b', 'a', '', 'abc'], 'plugins: option values are made right for their declaration');
+  eq(p.optionValues(a, { interval: 100, stranger: 1, url: 'u' }), { url: 'u', interval: 100, on: false, mode: 'b' }, 'plugins: option values = the user\'s over the defaults, an undeclared one dropped');
+}

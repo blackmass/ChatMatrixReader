@@ -186,6 +186,7 @@ settings.onChange(() => refresh());
 const showTitle = () => { try { window.__TAURI__.window.getCurrentWindow().setTitle(tr('ChatMatrix 옵션')).catch(() => {}); } catch { /* no such window function */ } };
 showTitle(); addEventListener('cmr-language', showTitle);
 try { window.__TAURI__.window.getCurrentWindow().setAlwaysOnTop(false).catch(() => {}); } catch { /* no window api */ }   // (an ordinary window: never above the others)
+document.addEventListener('cmr-show-tab', e => { if (TABS.some(t => t.id === e.detail) && !(view.mode === 'tab' && view.tab === e.detail)) go({ mode: 'tab', tab: e.detail }); });       // (a window of a tab asks for its tab: the plugin that wants to be approved)
 addEventListener('cmr-language', () => show());      // the texts that are put together while running
 // ---------------------------------------------------------------- the place and size of this window: restored when it opens, saved when it stood still
 {

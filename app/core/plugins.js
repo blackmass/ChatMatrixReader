@@ -135,3 +135,22 @@ export function netAllowed(eff, url) {
   try { u = new URL(url); } catch { return false; }
   return u.protocol === 'https:' && !u.username && !u.password && eff.net.includes(u.hostname.toLowerCase());
 }
+
+// what a plugin asks for, as one text: when it changes (a new permission, a new host), the user is asked again
+export const permsKey = manifest => JSON.stringify([manifest.id, [...manifest.permissions.net].sort(), !!manifest.permissions['chat.inject'], !!manifest.permissions.storage]);
+
+// a value of an option, made right for its declaration (a wrong one becomes the default)
+export function cleanOptionValue(def, v) {
+  if (def.type === 'check') return typeof v === 'boolean' ? v : !!def.default;
+  if (def.type === 'number') {
+    let n = Number(v);
+    if (!Number.isFinite(n)) return def.default;
+    if (def.min !== undefined) n = Math.max(def.min, n);
+    if (def.max !== undefined) n = Math.min(def.max, n);
+    return n;
+  }
+  if (def.type === 'select') return def.choices.some(c => c.value === v) ? v : def.default;
+  return typeof v === 'string' ? v.slice(0, 500) : def.default;
+}
+// the values of all the options: what the user set (cleaned) over the defaults; options the manifest does not declare are dropped
+export const optionValues = (manifest, saved) => Object.fromEntries(manifest.options.map(d => [d.key, saved && d.key in saved ? cleanOptionValue(d, saved[d.key]) : d.default]));

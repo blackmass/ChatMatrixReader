@@ -4,7 +4,7 @@
 // the permission and the limits of every call. The look of the plugin tab is the options window's job; this file gives it the state and takes its commands:
 //   event 'plugin-state' { plugins: [ { id, ok, errors, warnings, manifest, enabled, running, missing, granted, options, lastError } ] }   (also on 'plugin-hello')
 //   event 'plugin-command' { cmd: 'rescan' | 'enable' | 'disable' | 'grant' | 'option' | 'hash' | 'logs', id, ... }  ->  answers: 'plugin-result' { cmd, id, ... }
-import { parseManifest, missing as missingOf } from './core/plugins.js';
+import { parseManifest, missing as missingOf, permsKey, cleanOptionValue, optionValues } from './core/plugins.js';
 import { PluginBridge, PluginError } from './core/pluginbridge.js';
 import { log } from './core/log.js';
 import { isMac } from './platform.js';
@@ -33,7 +33,8 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   function summary(id) {
     const r = registry.get(id), e = entry(id);
     return { id, ok: !!(r && r.ok), errors: r ? r.errors : [], warnings: r ? r.warnings : [], manifest: r ? r.manifest : null, enabled: !!e.enabled, running: running.has(id),
-      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, options: e.options || {}, lastError: lastError.get(id) || '' };
+      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
+      review: !!(r && r.ok && e.asked !== permsKey(r.manifest)) };       // review: nobody has decided about what it asks for yet (the options window asks the user, one plugin after the other)
   }
   const allIds = () => [...new Set([...registry.keys(), ...Object.keys(entries())])].sort();
   const publishState = () => emit('plugin-state', { plugins: allIds().map(summary) });
@@ -54,6 +55,9 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     for (const id of [...registry.keys()]) if (!found.has(id)) registry.delete(id);
     await reconcile();
     publishState();
+    // a plugin nobody has decided about yet: the options window is opened once, it asks the user (api.askedOpen: only once in a run of the program)
+    const pending = [...registry.values()].filter(r => r.ok && entry(r.id).asked !== permsKey(r.manifest) && !api.prompted.has(r.id));
+    if (pending.length) { for (const r of pending) api.prompted.add(r.id); invoke('open_options').catch(() => {}); }
   }
 
   // ---- running
@@ -80,7 +84,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     let token;
     try { token = await invoke('plugin_token', { id, renew: true }); } catch (err) { fail(id, 'could not start: ' + err); return; }
     const hooks = hooksFor(id, r.manifest);
-    const bridge = new PluginBridge({ manifest: r.manifest, granted: e.granted, hooks, options: e.options });
+    const bridge = new PluginBridge({ manifest: r.manifest, granted: e.granted, hooks, options: optionValues(r.manifest, e.options) });
     const frame = doc.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-scripts');                       // (no same-origin: the page has no origin of its own, the program cannot be reached from it)
     frame.dataset.plugin = id;
@@ -110,7 +114,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       if (JSON.stringify(e.granted || {}) !== run.granted) { await stopOne(id, 'restarted: the allowed permissions changed'); continue; }
       if (JSON.stringify(e.options || {}) !== run.options) {                // (the options changed: the plugin is told; it keeps running)
         run.options = JSON.stringify(e.options || {});
-        run.bridge.options = { ...Object.fromEntries(r.manifest.options.map(o => [o.key, o.default])), ...(e.options || {}) };
+        run.bridge.options = optionValues(r.manifest, e.options);
         sendTo(run.frame, { cmr: 1, event: 'options', value: run.bridge.options });
       }
     }
@@ -141,16 +145,28 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     const reply = extra => emit('plugin-result', { cmd, id, ...extra });
     try {
       if (cmd === 'rescan') { await scan(); return reply({}); }
-      if (cmd === 'enable' || cmd === 'disable') { patchEntry(id, { enabled: cmd === 'enable' }); return reply({}); }
-      if (cmd === 'grant') { patchEntry(id, { granted: ev.payload.granted || {} }); return reply({}); }
-      if (cmd === 'option') { patchEntry(id, { options: { ...entry(id).options, [ev.payload.key]: ev.payload.value } }); return reply({}); }
+      const seen = () => { const r = registry.get(id); return r && r.ok ? { asked: permsKey(r.manifest) } : {}; };       // (the user has dealt with it by hand: it need not be asked again)
+      if (cmd === 'enable' || cmd === 'disable') { patchEntry(id, { enabled: cmd === 'enable', ...seen() }); return reply({}); }
+      if (cmd === 'grant') { patchEntry(id, { granted: ev.payload.granted || {}, ...seen() }); return reply({}); }
+      if (cmd === 'option') {
+        const def = (registry.get(id) && registry.get(id).manifest ? registry.get(id).manifest.options : []).find(o => o.key === ev.payload.key);
+        if (!def) return reply({ error: 'no such option' });
+        patchEntry(id, { options: { ...entry(id).options, [def.key]: cleanOptionValue(def, ev.payload.value) } });
+        return reply({});
+      }
+      if (cmd === 'review') {                                              // the answer of the user to "this plugin asks for ..." (granted: what was allowed, enable: turn it on)
+        const r = registry.get(id);
+        if (!r || !r.ok) return reply({ error: 'no such plugin' });
+        patchEntry(id, { asked: permsKey(r.manifest), granted: ev.payload.granted || {}, enabled: !!ev.payload.enable });
+        return reply({});
+      }
       if (cmd === 'hash') return reply(await invoke('plugin_hash', { id }));
       if (cmd === 'logs') return reply({ lines: logs.get(id) || [] });
     } catch (err) { reply({ error: String((err && err.message) || err) }); }
   });
   settings.onChange(() => { reconcile().then(publishState); });
 
-  const api = { scan, list: () => allIds().map(summary), registry, running, logs, stop: stopOne, post };
+  const api = { prompted: new Set(), scan, list: () => allIds().map(summary), registry, running, logs, stop: stopOne, post };
   scan();
   return api;
 }

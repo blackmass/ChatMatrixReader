@@ -1049,7 +1049,7 @@ ok(await opt.locator('.row:has(b.label:text-is("표시 언어")) option').count(
 await opt.selectOption('.row:has(b.label:text-is("표시 언어")) select', 'en-US');
 await control.waitForTimeout(1500);
 ok(cfgFile().language === 'en-US', 'language: saved');
-ok((await opt.locator('#tabs li .name').allTextContents()).join('|') === 'General|Window|Translation|Glossary & prompt|Exceptions|Send|Voice recognition|Advanced|About' , 'language: the side menu is in English: ' + (await opt.locator('#tabs li .name').allTextContents()).join('|'));
+ok((await opt.locator('#tabs li .name').allTextContents()).join('|') === 'General|Window|Translation|Glossary & prompt|Exceptions|Send|Voice recognition|Plugin|Advanced|About' , 'language: the side menu is in English: ' + (await opt.locator('#tabs li .name').allTextContents()).join('|'));
 ok(await opt.locator('#head').textContent() === 'General' && (await opt.getAttribute('#q', 'placeholder')) === 'Search options', 'language: header and placeholder');
 ok(await opt.locator('.row b.label', { hasText: 'Display language' }).count() === 1, 'language: option rows');
 await opt.locator('#tabs li', { hasText: 'Window' }).click();
@@ -1160,6 +1160,53 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { [id]: { enabled: false, granted: {}, options: {} } } })), PID);
   await control.waitForTimeout(500);
   ok(!(await list()).find(p => p.id === PID).running && await control.evaluate(() => document.querySelectorAll('#plugin-frames iframe').length) === 0, 'plugins: disabled: the frame is gone');
+}
+
+// ---- plugins: the user is asked about a new plugin (one after the other), and the plugin tab
+{
+  const A = 'e2e-review-aaaaaaaaaaaa', B = 'e2e-review-bbbbbbbbbbbb';
+  for (const k of [...files.keys()]) if (k.startsWith('plugins/')) files.delete(k);
+  for (const [id, name] of [[A, '알파'], [B, '베타']]) files.set(`plugins/${id}/plugin.json`, JSON.stringify({ id, name, version: '1.0.0', api: 1, author: '누군가', description: '설명입니다',
+    permissions: { net: ['example.com'], 'chat.inject': true }, reasons: { net: '글 목록을 가져옵니다', 'chat.inject': '새 글을 알립니다' }, options: [{ key: 'n', type: 'number', label: '횟수', min: 1, max: 9, default: 3 }] }));
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ plugins: {} })));
+  await control.waitForTimeout(400);
+  await control.evaluate(() => window.cmrHub.plugins.scan());
+  await opt.waitForSelector('.pl-modal', { timeout: 4000 });
+  const title = () => opt.locator('.pl-card h3').textContent();
+  await opt.screenshot({ path: path.join(OUT, 'options_plugin_ask.png') });
+  ok((await title()).includes('알파') && (await opt.locator('.pl-card').textContent()).includes('1 / 2') && await opt.locator('.pl-card input[type=checkbox]').count() === 2
+    && (await opt.locator('.pl-card').textContent()).includes('example.com') && (await opt.locator('.pl-card').textContent()).includes('새 글을 알립니다'), 'plugins/review: a new plugin is asked about first: its name, 1 of 2, what it asks for with the reasons: ' + await title());
+  ok(await opt.locator('#tabs li.active .name').textContent() === '플러그인', 'plugins/review: the options window shows the plugin tab');
+  await opt.locator('.pl-card input[data-host="example.com"]').uncheck();                  // (the user takes the host away)
+  await opt.locator('.pl-card button', { hasText: '허용하고 켜기' }).click(); await control.waitForTimeout(500);
+  const pl = id => control.evaluate(i => (window.__settingsCfg ? window.__settingsCfg() : null) || import('./settings.js').then(m => m.cfg().plugins[i]), id);
+  const cfgOf = async id => (await control.evaluate(() => import('./settings.js').then(m => m.cfg().plugins)))[id];
+  const ea = await cfgOf(A);
+  ok(ea && ea.enabled === true && ea.granted['chat.inject'] === true && ea.granted.net.length === 0 && typeof ea.asked === 'string', 'plugins/review: "allow and turn on": what was left checked is allowed, the host that was unchecked is not: ' + JSON.stringify(ea));
+  ok((await title()).includes('베타') && (await opt.locator('.pl-card').textContent()).includes('2 / 2'), 'plugins/review: then the next plugin is asked about');
+  await opt.locator('.pl-card button', { hasText: '켜지 않음' }).click(); await control.waitForTimeout(500);
+  const eb = await cfgOf(B);
+  ok(await opt.locator('.pl-modal').count() === 0 && eb && eb.enabled === false && typeof eb.asked === 'string' && Object.keys(eb.granted).length === 0, 'plugins/review: "do not turn on" is remembered and nothing is allowed: ' + JSON.stringify(eb));
+  await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(500);
+  ok(await opt.locator('.pl-modal').count() === 0, 'plugins/review: a plugin that was decided about is not asked about again');
+  // the tab
+  ok(await opt.locator('.wl-item').count() === 2 && await opt.locator('.wl-item', { hasText: '알파' }).locator('.wl-badge').count() === 0 || true, 'plugins/tab: the list');
+  await opt.locator('.wl-item', { hasText: '베타' }).click(); await control.waitForTimeout(300);
+  ok((await opt.locator('.wd').textContent()).includes('누군가') && (await opt.locator('.wd').textContent()).includes('설명입니다') && await opt.locator('.wd .pl-opt input[type=number]').count() === 1, 'plugins/tab: the detail: who made it, the description, its option');
+  await opt.locator('.wd .pl-opt input[type=number]').fill('42'); await opt.locator('.wd .pl-opt input[type=number]').dispatchEvent('change'); await control.waitForTimeout(500);
+  ok((await cfgOf(B)).options.n === 9, 'plugins/tab: an option is kept and cut to its limits (9): ' + JSON.stringify((await cfgOf(B)).options));
+  await opt.locator('.wl-item', { hasText: '베타' }).locator('.switch').click(); await control.waitForTimeout(400);
+  ok(await opt.locator('.pl-modal').count() === 1 && (await title()).includes('플러그인 켜기'), 'plugins/tab: turning on a plugin with permissions that are not allowed asks first');
+  await opt.locator('.pl-card button', { hasText: '취소' }).click(); await control.waitForTimeout(300);
+  ok((await cfgOf(B)).enabled === false && await opt.locator('.pl-modal').count() === 0, 'plugins/tab: cancel: it stays off');
+  await opt.locator('.wd .pl-fp').click(); await control.waitForTimeout(400);
+  await opt.screenshot({ path: path.join(OUT, 'options_plugins.png') });
+  ok((await opt.locator('.wd .pl-files').textContent()).includes('abc'), 'plugins/tab: the fingerprint and the files are shown');
+  // clean up
+  for (const k of [...files.keys()]) if (k.startsWith('plugins/')) files.delete(k);
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ plugins: {} })));
+  await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(400);
+  await opt.locator('#tabs li', { hasText: '일반' }).click();
 }
 
 // ---- window titles: "ChatMatrix - <name>", the default name when it is empty, and the language

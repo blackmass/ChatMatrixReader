@@ -7,6 +7,7 @@ import glossary from './tab_glossary.js';
 import send from './tab_send.js';
 import voice from './tab_voice.js';
 import advanced from './tab_advanced.js';
+import plugins from './tab_plugins.js';
 import about from './tab_about.js';
 
 export const TABS = [
@@ -17,6 +18,7 @@ export const TABS = [
   exceptions,
   send,
   voice,
+  plugins,
   advanced,
   about,
 ];

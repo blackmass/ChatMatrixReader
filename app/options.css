@@ -284,3 +284,31 @@ input.colortext.follow-input { width: 150px; }
 .sg-sub { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .sg-head { padding: 6px 10px 3px; color: var(--dim); font-size: 11px; border-top: 1px solid #2f3137; margin-top: 3px; }
 .sg-head:first-child { border-top: 0; margin-top: 0; }
+
+/* ---- the plugin tab and the window that asks for the permissions of a plugin */
+.pl-listbar { display: flex; padding: 2px 2px 6px; }
+.pl-empty { padding: 6px; }
+.pl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.pl-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pl-fp { background: none; border: 1px solid #4a4d55; border-radius: 8px; color: var(--dim); font: 11px Consolas, "Cascadia Mono", Menlo, monospace; padding: 1px 8px; cursor: pointer; white-space: nowrap; }
+.pl-fp:hover, .pl-fp.known { color: var(--accent); border-color: var(--accent); }
+.pl-files { border: 1px solid #3a3d45; border-radius: 6px; background: #1b1d21; padding: 6px 8px; margin: 6px 0; max-height: 160px; overflow: auto; font: 11px Consolas, "Cascadia Mono", Menlo, monospace; user-select: text; }
+.pl-hash { display: block; color: var(--accent); margin-bottom: 4px; word-break: break-all; }
+.pl-desc { margin: 8px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.pl-run { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.pl-h { margin: 12px 0 4px; font-size: 13px; color: var(--accent); }
+.pl-line { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.pl-perm { margin: 6px 0 10px; }
+.pl-perm-head label, .pl-host { display: block; cursor: pointer; }
+.pl-host { margin: 3px 0 0 20px; }
+.pl-missing, .pl-warning { display: block; color: #ffb36b; margin-top: 4px; }
+.pl-opt { margin: 8px 0; display: flex; flex-direction: column; gap: 3px; }
+.pl-opt input[type=text], .pl-opt input[type=number], .pl-opt select { max-width: 360px; }
+.pl-loghead { display: flex; align-items: center; justify-content: space-between; }
+.pl-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.pl-card { background: var(--card); border: 1px solid var(--accent); border-radius: 10px; padding: 8px 20px 18px; max-width: 560px; width: 100%; max-height: 90vh; overflow: auto; }
+.pl-card h3 { color: var(--accent); }
+.pl-ask { margin: 12px 0 4px; font-weight: bold; }
+.pl-warn { display: block; margin: 10px 0; }
+.pl-buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
+.pl-card small, .pl-detail small.note { display: block; }
