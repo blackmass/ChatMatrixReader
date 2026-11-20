@@ -1,4 +1,6 @@
 import { hello } from './util.mjs';
+window.__diag && window.__diag.push('main.mjs started');
+parent.postMessage({ diag: (window.__diag || []).slice() }, '*');
 const r = [];
 const t = (name, fn) => Promise.race([Promise.resolve().then(fn), new Promise((_, no) => setTimeout(() => no({ name: 'HANG', message: 'no answer in 4 s' }), 4000))])
   .then(v => r.push(name + ' -> ' + v), e => r.push(name + ' -> blocked (' + (e && (e.name || e)) + ': ' + String(e && e.message || '').slice(0, 60) + ')'));

@@ -5,14 +5,14 @@
   if (k !== 'file') { if (globalThis.__TAURI__ && k !== '') await globalThis.__TAURI__.core.invoke('fs_append', { path: 'logs/lab_isolation.txt', text: '(lab module loaded, app/lab/RUN is: "' + k + '")\n' }).catch(() => {}); throw new Error('lab off'); }
 }
 const out = [];
-const ROUND = 41;
+const ROUND = 42;
 const say = t => out.push(t);
 const T = globalThis.__TAURI__;
 const kind = (await (T && T.core ? T.core.invoke('os_kind').catch(() => '?') : '?'));
 say(`== lab isolation round ${ROUND} ${new Date().toISOString()}  os=${kind}  page=${location.href}`);
 say(`page: typeof __TAURI__=${typeof T}, __TAURI_INTERNALS__=${typeof globalThis.__TAURI_INTERNALS__}`);
 
-try { await T.core.invoke('fs_append', { path: 'logs/lab_isolation.txt', text: '(lab round 4b started ' + new Date().toISOString() + ')\n' }); } catch (e) { /* the end tells */ }
+try { await T.core.invoke('fs_append', { path: 'logs/lab_isolation.txt', text: '(lab round 4c started ' + new Date().toISOString() + ')\n' }); } catch (e) { /* the end tells */ }
 const wait = (ms, v) => new Promise(r => setTimeout(() => r(v), ms));
 
 // 1. a worker from the app's folder
@@ -41,10 +41,15 @@ const pluginFrame = () => new Promise(r => {
   f.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;border:0';
   f.setAttribute('sandbox', 'allow-scripts');
   f.src = pluginUrl;
-  const on = e => { if (e.source === f.contentWindow) { removeEventListener('message', on); f.remove(); r(e.data); } };
+  let last = [];
+  const on = e => {
+    if (e.source !== f.contentWindow) return;
+    if (Array.isArray(e.data)) { removeEventListener('message', on); f.remove(); r(e.data); }
+    else if (e.data && e.data.diag) last = e.data.diag;
+  };
   addEventListener('message', on);
   document.body.append(f);
-  setTimeout(() => { removeEventListener('message', on); f.remove(); r(['plugin frame: no answer in 60 s (the page did not load or did not finish) url=' + pluginUrl]); }, 60000);
+  setTimeout(() => { removeEventListener('message', on); f.remove(); r(['plugin frame: no answer in 30 s; what the page said while loading:', ...last.map(x => '  ' + x), last.length ? '' : '  (nothing: not even the inline script ran)']); }, 30000);
 });
 // does the address exist at all (asked by the page itself, not from a frame)? and does the frame report that it loaded?
 try { const x = await Promise.race([fetch(pluginUrl.replace('index.html', 'data.json')), wait(8000, null)]); say('page fetch of ' + pluginUrl.replace('index.html', 'data.json') + ' -> ' + (x ? x.status + ' ' + (await x.text()).slice(0, 50) : 'no answer in 8 s')); } catch (e) { say('page fetch of the plugin address -> failed (' + (e && e.name) + ': ' + (e && e.message) + ')'); }
