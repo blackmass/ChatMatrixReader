@@ -16,7 +16,7 @@ export const LIMITS = {
   fetchGapMs: 1000, fetchQueue: 20, fetchBody: 1_000_000, fetchAnswer: 2_000_000, fetchHeaders: 30,       // requests to one host are spaced; they wait their turn in a queue
   storageBytes: 1_000_000, storageKeys: 1000, storageKey: 100,
   logPerMin: 120, logText: 500,
-  windowCallsPerMin: 20, hostRequestsPerMin: 10,                               // opening / closing the plugin's windows; asking the user for a host                                                       // opening / closing the plugin's windows
+  windowCallsPerMin: 20, hostRequestsPerMin: 10, openUrlPerMin: 6,                               // opening / closing the plugin's windows; asking the user for a host                                                       // opening / closing the plugin's windows
   widgets: 8, widgetGapMs: 100,                                                // widgets a plugin may have; its state is passed on at most every 100 ms (the newest wins)
 };
 
@@ -49,6 +49,7 @@ export class PluginBridge {
     this.logs = new Limiter(LIMITS.logPerMin, 60_000, now);
     this.windowCalls = new Limiter(LIMITS.windowCallsPerMin, 60_000, now);
     this.hostRequests = new Limiter(LIMITS.hostRequestsPerMin, 60_000, now);
+    this.opens = new Limiter(LIMITS.openUrlPerMin, 60_000, now);
     this.data = null;                                   // the storage, read at the first use
     this.widgetIds = new Set();                         // the full ids of the widgets this plugin registered
     this.widgetLast = {}; this.widgetPending = {};     // full id -> when its state went out last / a state that waits for its time
@@ -144,6 +145,14 @@ export class PluginBridge {
         this.need('widgets');
         const full = isObj(args) && typeof args.id === 'string' ? this.manifest.id + ':' + args.id : '';
         if (this.widgetIds.delete(full)) { delete this.widgetPending[full]; this.hooks.widgetUnregister(full); }
+        return null;
+      }
+      case 'openUrl': {                                                  // an address in the user's own browser: https, a host the user allowed, a few a minute
+        this.need('openUrl');
+        if (!isObj(args) || typeof args.url !== 'string') throw new PluginError('args', 'url is needed');
+        if (!netAllowed(this.eff, args.url)) throw new PluginError('denied', 'this address is not allowed (https and a host the user allowed)');
+        if (!this.opens.take()) throw new PluginError('limit', `at most ${LIMITS.openUrlPerMin} addresses a minute`);
+        try { await this.hooks.openUrl(args.url, this.eff.net); } catch (e) { throw new PluginError('failed', String((e && e.message) || e).slice(0, 200)); }
         return null;
       }
       case 'net.hosts': return [...this.eff.net];

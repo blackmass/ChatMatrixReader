@@ -90,6 +90,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
         note(id, `asked for the host: ${host}`);
         return 'pending';
       },
+      openUrl: async (url, hosts) => { await invoke('plugin_open_url', { url, hosts }); note(id, 'opened in the browser: ' + url); },
       windowOpen: async name => { await ensureWindows(id); const c = windowEntry(id, name); if (c && windows) windows.openWindow(c.id); },
       windowClose: async name => { const c = windowEntry(id, name); if (c && windows) windows.closeWindow(c.id); },
       widgetRegister: def => { if (!widgets) throw new Error('the widgets of the program are not there'); widgets.registerDef(def); note(id, `widget registered: ${def.id}`); },

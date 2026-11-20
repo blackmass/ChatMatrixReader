@@ -45,6 +45,7 @@ const PERMS = {
   widgets: () => tr('창에 위젯 올리기'),
   windows: () => tr('플러그인 전용 창 열기'),
   netAny: () => tr('원하는 사이트에 접속 (사이트는 하나씩 허용)'),
+  openUrl: () => tr('기본 브라우저로 주소 열기'),
 };
 const pendingList = () => state.filter(x => x.review && x.ok && !decided.has(x.id)).sort((a, b) => a.id.localeCompare(b.id));
 const nameOf = p => (p.manifest && p.manifest.name) || p.id;
@@ -60,6 +61,7 @@ const asks = p => {
   if (m.permissions.storage) out.push({ key: 'storage', label: PERMS.storage(), reason: m.reasons.storage });
   if (m.permissions.widgets) out.push({ key: 'widgets', label: PERMS.widgets(), reason: m.reasons.widgets });
   if (m.permissions.windows) out.push({ key: 'windows', label: PERMS.windows(), reason: m.reasons.windows });
+  if (m.permissions.openUrl) out.push({ key: 'openUrl', label: PERMS.openUrl(), reason: m.reasons.openUrl });
   return out;
 };
 
@@ -85,7 +87,7 @@ function permBoxes(p, start, onChange) {
     root.append(block);
   }
   if (!asks(p).length) root.append(el('small', 'note', tr('이 플러그인은 특별한 권한을 요구하지 않습니다.')));
-  return { root, granted: () => ({ net: boxes.filter(b => b.dataset.host && b.checked).map(b => b.dataset.host), 'chat.inject': !!boxes.find(b => b.dataset.key === 'chat.inject' && b.checked), storage: !!boxes.find(b => b.dataset.key === 'storage' && b.checked), netAny: !!boxes.find(b => b.dataset.key === 'netAny' && b.checked), widgets: !!boxes.find(b => b.dataset.key === 'widgets' && b.checked), windows: !!boxes.find(b => b.dataset.key === 'windows' && b.checked) }) };
+  return { root, granted: () => ({ net: boxes.filter(b => b.dataset.host && b.checked).map(b => b.dataset.host), 'chat.inject': !!boxes.find(b => b.dataset.key === 'chat.inject' && b.checked), storage: !!boxes.find(b => b.dataset.key === 'storage' && b.checked), netAny: !!boxes.find(b => b.dataset.key === 'netAny' && b.checked), openUrl: !!boxes.find(b => b.dataset.key === 'openUrl' && b.checked), widgets: !!boxes.find(b => b.dataset.key === 'widgets' && b.checked), windows: !!boxes.find(b => b.dataset.key === 'windows' && b.checked) }) };
 }
 
 // ---------------------------------------------------------------- the window that asks (a plugin nobody decided about yet)
@@ -104,7 +106,7 @@ function showApproval(p, opts = {}) {
   card.append(el('small', 'note', [m.author ? tr('만든 이: {a}', { a: m.author }) : '', tr('버전 {v}', { v: m.version })].filter(Boolean).join(' · ')));
   if (m.description) card.append(el('p', 'pl-desc', m.description));
   card.append(el('p', 'pl-ask', tr('이 플러그인이 요구하는 권한입니다. 허용할 것을 고르세요:')));
-  const start = { net: m.permissions.net, 'chat.inject': m.permissions['chat.inject'], storage: m.permissions.storage, widgets: m.permissions.widgets, windows: m.permissions.windows, netAny: m.permissions.netAny };      // (everything it asks is checked at first, the user may take some away)
+  const start = { net: m.permissions.net, 'chat.inject': m.permissions['chat.inject'], storage: m.permissions.storage, widgets: m.permissions.widgets, windows: m.permissions.windows, netAny: m.permissions.netAny, openUrl: m.permissions.openUrl };      // (everything it asks is checked at first, the user may take some away)
   const boxes = permBoxes(p, start);
   card.append(boxes.root);
   card.append(el('small', 'note pl-warn', tr('플러그인은 격리된 곳에서 실행되고 허용한 권한만 쓸 수 있습니다. 믿을 수 있는 곳에서 받은 플러그인인지 확인하세요. 권한은 나중에 이 탭에서 바꿀 수 있습니다.')));
@@ -262,7 +264,7 @@ function panel() {
 
     // permissions
     detail.append(el('h4', 'pl-h', tr('권한')));
-    const start = { net: p.granted.net || [], 'chat.inject': !!p.granted['chat.inject'], storage: !!p.granted.storage, widgets: !!p.granted.widgets, windows: !!p.granted.windows, netAny: !!p.granted.netAny };
+    const start = { net: p.granted.net || [], 'chat.inject': !!p.granted['chat.inject'], storage: !!p.granted.storage, widgets: !!p.granted.widgets, windows: !!p.granted.windows, netAny: !!p.granted.netAny, openUrl: !!p.granted.openUrl };
     const boxes = permBoxes(p, start, () => ask('grant', p.id, { granted: boxes.granted() }));
     detail.append(boxes.root);
     // netAny: the hosts the user allows one by one, and the ones the plugin has asked for and wait for an answer

@@ -12,6 +12,7 @@
 //   await cmr.windows.open(id) / close(id)                a window the plugin declared in plugin.json ("windows"); its page is shown in it (permission windows)
 //   await cmr.net.requestHost(host)                       (permission netAny) asks the user to allow a host: 'allowed' | 'pending'; the user answers in the plugin tab
 //   await cmr.net.hosts()  /  cmr.net.onHosts(fn)         the hosts the plugin may fetch now / fn(hosts) when the user allows or takes away one
+//   await cmr.openUrl(url)                                the address in the user's own browser (permission openUrl: https, a host the user allowed)
 //   await cmr.options.get()                               the values of the options of the plugin (what the user set; the defaults of plugin.json)
 //   await cmr.options.set({ key: value, ... })            keeps values (the declared options are made right; any other key is the plugin's own setting: letters, digits, '_'; JSON values)
 //   cmr.options.onChange(fn)                              fn(values) when the options change (by the user, or by the plugin's own options page)
@@ -46,6 +47,7 @@
   });
   window.cmr = {
     meta: () => call('meta'),
+    openUrl: url => call('openUrl', { url }),
     log: text => call('log', { text: String(text) }),
     chat: { inject: a => call('chat.inject', a) },
     storage: { get: key => call('storage.get', { key }), set: (key, value) => call('storage.set', { key, value }), remove: key => call('storage.remove', { key }), keys: () => call('storage.keys') },

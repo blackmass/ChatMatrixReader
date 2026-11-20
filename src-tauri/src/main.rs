@@ -1048,16 +1048,80 @@ fn open_url(url: String) -> Result<(), String> {
     if !listed || url.chars().any(|c| c.is_control() || c == ' ' || c == '"' || c == '&' || c == '^') {
         return Err("address not allowed".into());
     }
+    launch_url(&url)
+}
+
+/// Opens an address in the default browser of the system (nothing is checked here: the callers check).
+fn launch_url(url: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).creation_flags(0x0800_0000).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).creation_flags(0x0800_0000).spawn().map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "macos")]
-    { std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?; }
+    { std::process::Command::new("open").arg(url).spawn().map_err(|e| e.to_string())?; }
     #[cfg(all(unix, not(target_os = "macos")))]
-    { std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?; }
+    { std::process::Command::new("xdg-open").arg(url).spawn().map_err(|e| e.to_string())?; }
     Ok(())
+}
+
+/// A plugin opens an address in the default browser (cmr.openUrl): https only, to a host the user allowed (`hosts`: exact names), no user name, no port.
+#[tauri::command]
+fn plugin_open_url(url: String, hosts: Vec<String>) -> Result<(), String> {
+    use tauri_plugin_http::reqwest;
+    let u = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
+    let host_ok = u.host_str().map_or(false, |h| hosts.iter().any(|x| x.eq_ignore_ascii_case(h)));
+    if u.scheme() != "https" || !u.username().is_empty() || u.password().is_some() || u.port().is_some() || !host_ok || url.len() > 2000 {
+        return Err("this address is not allowed for the plugin".into());
+    }
+    let text = u.as_str();
+    if text.chars().any(|c| c.is_control() || c == ' ' || c == '"' || c == '^') {
+        return Err("address not allowed".into());
+    }
+    launch_url(text)
+}
+
+// ------------------------------------------------------------------------------------- LAB: a web view inside one of our windows (an experiment, to be removed)
+// Can a page of the web (a phone's page of a community) be shown INSIDE a window of the program, with the window's tab bar, always-on-top, click-through ... around it?
+// A child web view (Tauri's `unstable` multiwebview) is put in a window at a place and size; the page is loaded from its address, with a phone's User-Agent when given.
+static LAB_EVENTS: std::sync::LazyLock<std::sync::Mutex<Vec<String>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+fn lab_note(text: String) { let mut v = LAB_EVENTS.lock().unwrap(); v.push(text); if v.len() > 60 { v.remove(0); } }
+
+#[tauri::command]
+fn lab_child_open(app: AppHandle, label: String, url: String, x: f64, y: f64, w: f64, h: f64, ua: Option<String>) -> Result<String, String> {
+    use tauri::{webview::WebviewBuilder, LogicalPosition, LogicalSize, WebviewUrl};
+    let main = app.get_webview_window(&label).ok_or("no such window")?;
+    if let Some(old) = app.get_webview("labchild") { let _ = old.close(); }
+    let parsed: tauri::Url = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
+    let mut b = WebviewBuilder::new("labchild", WebviewUrl::External(parsed))
+        .on_navigation(|u| { lab_note(format!("navigate {}", u)); u.scheme() == "https" })
+        .on_page_load(|wv, p| { lab_note(format!("page {:?} {}", p.event(), p.url())); let _ = wv; });
+    if let Some(ua) = ua.as_deref() { b = b.user_agent(ua); }
+    let win = main.as_ref().window();
+    let child = win.add_child(b, LogicalPosition::new(x, y), LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
+    Ok(child.label().to_string())
+}
+
+#[tauri::command]
+fn lab_child_set(app: AppHandle, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+    use tauri::{LogicalPosition, LogicalSize};
+    let c = app.get_webview("labchild").ok_or("no child")?;
+    c.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
+    c.set_size(LogicalSize::new(w, h)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn lab_child_close(app: AppHandle) -> Result<(), String> {
+    match app.get_webview("labchild") { Some(c) => c.close().map_err(|e| e.to_string()), None => Ok(()) }
+}
+
+#[tauri::command]
+fn lab_child_info(app: AppHandle) -> Value {
+    let events = LAB_EVENTS.lock().unwrap().clone();
+    match app.get_webview("labchild") {
+        Some(c) => json!({ "exists": true, "url": c.url().map(|u| u.to_string()).unwrap_or_default(), "position": c.position().map(|p| [p.x, p.y]).ok(), "size": c.size().map(|s| [s.width, s.height]).ok(), "events": events }),
+        None => json!({ "exists": false, "events": events }),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------- start
@@ -1096,6 +1160,11 @@ fn main() {
             plugin_forget,
             plugin_hash,
             plugin_fetch,
+            plugin_open_url,
+            lab_child_open,
+            lab_child_set,
+            lab_child_close,
+            lab_child_info,
             capture_start,
             capture_stop,
             os_kind,
