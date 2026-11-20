@@ -199,6 +199,4 @@ const plugins = startPlugins({ settings, files, publish, pipeline, invoke: tauri
 
 windows.setPluginCheck((owner, name) => plugins.windowAllowed(owner, name));       // (a window of a plugin opens only while its plugin runs and may have it)
 
-import('./lab/child.js').catch(e => { if (!String(e).includes('lab off')) files.append('logs/lab_child.txt', 'lab failed: ' + e + '\n').catch(() => {}); });       // (a test: only when the folder app/lab/ is there)
-
 window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice, plugins };

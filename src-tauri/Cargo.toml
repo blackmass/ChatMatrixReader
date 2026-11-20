@@ -8,7 +8,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # "custom-protocol" = production mode. With it, plain `cargo build --release` works and the Tauri CLI / Node.js are not needed.
-tauri = { version = "2", features = ["custom-protocol", "tray-icon", "image-ico", "image-png", "macos-private-api", "unstable"] }   # no "devtools": no F12 / Inspect in the program (changes go through the source)
+tauri = { version = "2", features = ["custom-protocol", "tray-icon", "image-ico", "image-png", "macos-private-api"] }   # no "devtools": no F12 / Inspect in the program (changes go through the source)
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-http = "2"
