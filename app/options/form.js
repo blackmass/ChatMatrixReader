@@ -13,6 +13,7 @@
 //   entry; see options.js. A setting an extra window does not have of its own follows window 1: following(row) tells.)
 import { tr, macKeys } from '../core/i18n.js';
 import { isMac } from '../platform.js';
+import { HOST_KEYS } from '../core/winconf.js';
 const keyName = k => (isMac ? macKeys(k) : k);                 // (the key boxes: the setting keeps 'Ctrl' / 'Alt', a Mac shows Control / Option)
 export const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -34,7 +35,8 @@ export function buildRow(row, ctx) {
   const mark = el('button', 'rev', '↶');
   const text = el('div', 'text');
   const followTag = el('small', 'followtag', '창 1을 따름'); followTag.hidden = true;
-  const labelLine = el('div', 'labelline'); labelLine.append(el('b', 'label', row.label || ''), followTag);
+  const dockTag = el('small', 'followtag docktag', ''); dockTag.hidden = true;           // (a window that is a tab of another: what belongs to the window is the other's)
+  const labelLine = el('div', 'labelline'); labelLine.append(el('b', 'label', row.label || ''), followTag, dockTag);
   // row.when: whether a change takes effect while the thing it belongs to runs: 'live' = at once, 'restart' = after "지금 다시 시작" (the voice recognition)
   // (not `apply`: that is the function some rows use to write their value)
   if (row.when === 'live' || row.when === 'restart') {
@@ -391,6 +393,9 @@ export function buildRow(row, ctx) {
   function refresh() {
     const cfg = ctx.cfg();
     root.hidden = !!(row.show && !row.show(cfg, ctx));
+    const dh = row.win && HOST_KEYS.has(row.key) && ctx.dockHost ? ctx.dockHost() : 0;
+    root.classList.toggle('docked', !!dh); dockTag.hidden = !dh;
+    if (dh) dockTag.textContent = tr('{name} 창을 따름', { name: ctx.nameOf(dh) });
     const value = isData(row) ? ctx.get(row, cfg) : undefined;
     if (hint) hint.textContent = row.hints[ctx.get(row, cfg)] || '';
     if (write && (!input || !input.contains(document.activeElement))) write(value);

@@ -206,7 +206,7 @@ ok(files.has('Glossary.txt'), 'Glossary.txt was made from the sample');
 }
 // the speaker of the voice recognition: in the bar of every window, a drawing, its colour says the state, a click turns it on / off
 for (const [name, page] of [['main', main], ['extra', extra]]) {
-  const order = await page.evaluate(() => [...document.querySelectorAll('#bar > button')].map(b => b.id).join());
+  const order = await page.evaluate(() => [...document.querySelectorAll('#tools > button')].map(b => b.id).join());
   ok(order === 'research,voice,options,close', `speaker (${name}): between the refresh and the options icon: ` + order);
 }
 {
@@ -318,6 +318,21 @@ ok(clip.length === 1 && clip[0] === '/w Bob Smith EN: 파티 구합니다 힐러
 for (let i = 0; i < 40 && kb.fg !== 77; i++) await control.waitForTimeout(100);
 ok(kb.fg === 77 && calls.includes('focus_window'), 'the keyboard went back to the game');
 ok(!(await input.evaluate(() => document.getElementById('text').value)), 'the input line is empty again');
+
+// Enter on empty fields closes the line (like the game's chat; the page tells 'input-cancel'), but not at once after it opened and not while the command field has something
+{
+  await control.evaluate(() => { window.__cancels = 0; return window.__TAURI__.event.listen('input-cancel', () => { window.__cancels++; }); });
+  const cancels = () => control.evaluate(() => window.__cancels);
+  await control.evaluate(() => window.__TAURI__.event.emit('input-open', { label: '→ EN' })); await control.waitForTimeout(100);
+  await input.evaluate(() => document.getElementById('text').focus());
+  await input.press('#text', 'Enter'); await control.waitForTimeout(100);
+  ok(await cancels() === 0, 'empty Enter right after opening does not close the line');
+  await control.waitForTimeout(400);
+  await input.fill('#cmd', '/p'); await input.press('#text', 'Enter'); await control.waitForTimeout(100);
+  ok(await cancels() === 0, 'empty sentence with a command in the left field: Enter does not close');
+  await input.fill('#cmd', ''); await input.press('#text', 'Enter'); await control.waitForTimeout(150);
+  ok(await cancels() === 1, 'empty fields, later: Enter closes the line like Esc: ' + await cancels());
+}
 
 // ---- the options window: rows, default button, changed marker, search, revert; every change is saved at once and reaches the other windows
 const opt = await open('options.html?label=options', { width: 940, height: 680 });
@@ -439,6 +454,16 @@ await fontBox.press('Tab'); await control.waitForTimeout(500);
 ok(cfgFile().font_family === 'Some Font', 'options/windows: a name typed by hand is kept as it is');
 await fontBox.fill(''); await fontBox.press('Tab'); await control.waitForTimeout(500);
 ok(cfgFile().font_family === '', 'options/windows: emptied: the default again');
+// the main window can be named too: the name is in its tab (the title bar), in the list of windows of the options and in the menu
+{
+  const nameBox = rowOf('이름').locator('input');
+  ok(await nameBox.count() === 1, 'options/windows: the main window has the name row too');
+  await nameBox.fill('팀 채팅'); await nameBox.press('Tab'); await control.waitForTimeout(700);
+  ok(cfgFile().main_name === '팀 채팅' && await main.locator('#title').textContent() === '팀 채팅' && await main.evaluate(() => document.title) === 'ChatMatrix - 팀 채팅', 'options/windows: the name of the main window is saved and shown in its tab: ' + cfgFile().main_name);
+  ok((await opt.locator('select option').allTextContents()).some(t => t === '1 · 팀 채팅'), 'options/windows: the list of windows says it: ' + (await opt.locator('select option').allTextContents()).slice(0, 4).join('|'));
+  await nameBox.fill(''); await nameBox.press('Tab'); await control.waitForTimeout(700);
+  ok(cfgFile().main_name === '' && await main.locator('#title').textContent() === '메인', 'options/windows: emptied: the default name again');
+}
 // the mouse over a click-through window clears it (the fake window always has the mouse over it)
 await sw('클릭 관통').click(); await control.waitForTimeout(500);
 ok(await main.evaluate(() => document.body.classList.contains('hover-clear')) === false, 'hover clear: off by default');
@@ -1051,9 +1076,54 @@ await main.evaluate(() => { document.querySelector('.cv-blk').dispatchEvent(new 
 for (let i = 0; i < 20 && !(await main.evaluate(() => document.body.classList.contains('review'))); i++) await control.waitForTimeout(100);       // (the window loop takes a round or two)
 ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift+wheel up (the page gets it itself) also starts the review of the old chat: ' + await main.evaluate(() => { const l = document.getElementById('lines'); return JSON.stringify({ top: l.scrollTop, h: l.scrollHeight, c: l.clientHeight, cls: document.body.className, hidden: document.hidden }); }));
 
+// ---- tabs: a window that is a TAB of another ("탭으로 합칠 창"): no window of its own, a tab in the bar of the other, its own lines, a mark for new lines
+{
+  const idt = await control.evaluate(() => window.cmrHub.windows.add('귓말'));
+  const setConf = patch => control.evaluate(([i, pt]) => import('./settings.js').then(m => m.set({ child_windows: m.cfg().child_windows.map(c => (c.id === i ? { ...c, ...pt } : c)) })), [idt, patch]);
+  const callsBefore = calls.filter(c => c === 'open_overlay').length;
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ win1_off: ['W'] })));                       // (the main window does not show whispers: they are the tab's)
+  await setConf({ channels: ['W'], dock_to: 1, tab_alert: true, open_mode: 'always' }); await control.waitForTimeout(700);
+  const say = (ch, t) => control.evaluate(([c, x]) => window.cmrHub.fakeLine({ channel: c, name: 'Ann', text: x }), [ch, t]);
+  ok(await main.locator('#bar .tab').count() === 2 && await main.locator(`#bar .tab[data-wid="${idt}"]`).textContent() === '귓말' && await main.locator('#title').getAttribute('class').then(c => c.includes('on')), 'tabs: the window is a tab in the bar of the main window');
+  ok(await control.evaluate(i => window.cmrHub.windows.isOpen(i), idt) && !(await control.evaluate(i => window.cmrHub.windows.openIds().includes(i), idt)), 'tabs: it counts as open but has no window of its own');
+  await say('whisper', 'psst only for the tab'); await say('party', 'party text for the main one'); await control.waitForTimeout(700);
+  const own = (sel) => main.evaluate(s2 => document.querySelector(s2).textContent, sel);
+  ok((await own('#lines')).includes('party text') && !(await own('#lines')).includes('psst') && (await own('#lines-' + idt)).includes('psst') && !(await own('#lines-' + idt)).includes('party text'), 'tabs: each tab keeps its own lines');
+  ok(await main.locator(`#bar .tab[data-wid="${idt}"]`).getAttribute('class').then(c => c.includes('alert')) && await main.evaluate(() => document.body.classList.contains('has-alert')), 'tabs: a new line in the tab that is not shown marks it (the option is on)');
+  await main.locator(`#bar .tab[data-wid="${idt}"]`).click(); await control.waitForTimeout(300);
+  ok(await main.evaluate(i => document.getElementById('lines-' + i).classList.contains('off') === false && document.getElementById('lines').classList.contains('off'), idt) && await main.locator(`#bar .tab[data-wid="${idt}"]`).getAttribute('class').then(c => c.includes('on') && !c.includes('alert')), 'tabs: a click shows the tab and takes the mark away');
+  await setConf({ tab_alert: false }); await main.locator('#title').click(); await say('whisper', 'second whisper'); await control.waitForTimeout(500);
+  ok(await main.locator(`#bar .tab[data-wid="${idt}"]`).getAttribute('class').then(c => !c.includes('alert')) , 'tabs: the mark is off by default (the option is off)');
+  await main.locator('#title').click(); await control.waitForTimeout(200);           // (the main tab is shown; the right button on the tab of the other one: the menu is of that one)
+  await main.locator(`#bar .tab[data-wid="${idt}"]`).click({ button: 'right' }); await control.waitForTimeout(500);
+  const menuTexts = await main.evaluate(() => [...document.querySelectorAll('#ctx div')].map(d => d.textContent));
+  ok(menuTexts.includes('이 탭 독립시키기') && await main.evaluate(i => document.getElementById('lines-' + i).classList.contains('off'), idt), 'tabs: the right button on a tab that is not shown gives the menu of that tab, without showing it: ' + JSON.stringify(menuTexts));
+  await main.keyboard.press('Escape');
+  // the options: the window-level rows of a tab are dim ("<name> 창을 따름"), the text rows are not
+  await opt.locator('#tabs li', { hasText: '창' }).first().click(); await opt.waitForSelector('.wintool');
+  await opt.selectOption('.wintool select', String(idt)); await control.waitForTimeout(500);
+  const rowOf = t => opt.locator('.row', { has: opt.locator('b.label', { hasText: new RegExp('^' + t + '$') }) });
+  ok(await rowOf('배경 진하기').getAttribute('class').then(c => c.includes('docked')) && !(await rowOf('글 정렬').getAttribute('class')).includes('docked') && (await rowOf('배경 진하기').textContent()).includes('창을 따름'), 'tabs/options: the rows of the window itself are dim and say whom they follow');
+  ok(await rowOf('탭으로 합칠 창').count() === 1 && await opt.locator('.winstate').textContent().then(t => t.includes('탭')), 'tabs/options: the row to choose the window, and the state says it is a tab');
+  await opt.selectOption('.wintool select', '1'); await control.waitForTimeout(300);
+  await setConf({ dock_to: 0 }); await control.waitForTimeout(700);
+  ok(await main.locator('#bar .tab').count() === 1 && await main.locator('#lines-' + idt).count() === 0 && await main.locator('#title').getAttribute('class').then(c => c.includes('on')) && !(await main.evaluate(() => document.getElementById('lines').classList.contains('off'))), 'tabs: not merged any more: the tab is gone and the main lines show');
+  ok(await control.evaluate(i => window.cmrHub.windows.openIds().includes(i), idt) && calls.filter(c => c === 'open_overlay').length > callsBefore, 'tabs: not merged any more: it has a window of its own again');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ win1_off: [] })));
+  await control.evaluate(i => window.cmrHub.windows.remove(i), idt); await control.waitForTimeout(400);
+}
+
 // ---- window titles: "ChatMatrix - <name>", the default name when it is empty, and the language
-ok(await main.evaluate(() => document.title) === 'ChatMatrix - 메인' && await main.locator('#title').textContent() === 'ChatMatrix - 메인', 'titles: the main window: ' + await main.evaluate(() => document.title));
-ok(await extra.evaluate(() => document.title) === 'ChatMatrix - 둘째', 'titles: an extra window shows the name it was given: ' + await extra.evaluate(() => document.title));
+ok(await main.evaluate(() => document.title) === 'ChatMatrix - 메인' && await main.locator('#title').textContent() === '메인', 'titles: the main window (the tab shows the name only, the page title keeps the prefix): ' + await main.evaluate(() => document.title));
+ok(await extra.evaluate(() => document.title) === 'ChatMatrix - 둘째' && await extra.locator('#title').textContent() === '둘째', 'titles: an extra window shows the name it was given: ' + await extra.evaluate(() => document.title));
+ok(await main.evaluate(() => { const s = getComputedStyle(document.getElementById('lines')); return document.body.classList.contains('interactive') && (s.clipPath || '').includes('inset'); }), 'title bar: while it shows, the lines are clipped under it (no text in the gap between the tab and the icons)');
+{ // the title bar fades while the mouse is out of the window and is back at once when it comes in (the cursor of the fake system is put outside / inside the window of 500 x 300)
+  kb.cx = 900; kb.cy = 900; await control.waitForTimeout(500);
+  ok(await main.evaluate(() => document.body.classList.contains('outside')), 'title bar: the mouse is out of the window: the bar fades (body.outside)');
+  kb.cx = 100; kb.cy = 100; await control.waitForTimeout(500);
+  ok(!(await main.evaluate(() => document.body.classList.contains('outside'))), 'title bar: the mouse is in the window again: the bar is as before');
+  kb.cx = 0; kb.cy = 0;
+}
 // ---- the window manager: the extra window is in the settings and open; its place is saved; the X closes it for good
 ok(id3 === 3 && cfgFile().child_windows.some(c => c.id === 3 && c.name === '둘째' && c.open_mode === 'always'), 'windows: a new window is in config.json: ' + JSON.stringify(cfgFile().child_windows.map(c => [c.id, c.open_mode])));
 ok(calls.includes('open_overlay') && await control.evaluate(() => window.cmrHub.windows.isOpen(3)), 'windows: the hub opened it');
@@ -1201,7 +1271,7 @@ await main.evaluate(() => { const l = document.getElementById('lines'); l.scroll
   // the tip of a link under the mouse (a window that is not click-through): in the popup, gone when the mouse leaves the link
   await main.evaluate(() => {
     const t = document.createElement('span'); t.className = 'cv-tipped'; t._tip = ['[Popup Item]', 'Binds when picked up']; t.id = 'tiptest2'; t.textContent = '[Popup Item]';
-    t.style.cssText = 'position:fixed; left:60px; top:90px; padding:2px 8px; color:#fff; z-index:1;'; document.querySelector('.cv-blk').append(t);
+    t.style.cssText = 'position:absolute; left:52px; top:86px; padding:2px 8px; color:#fff; z-index:1;'; document.querySelector('.cv-blk').append(t);
   });
   await main.hover('#tiptest2'); await control.waitForTimeout(900);
   const f0 = calls.filter(c => c === 'popup_follow').length; await control.waitForTimeout(500);

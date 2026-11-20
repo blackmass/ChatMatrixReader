@@ -1,9 +1,9 @@
 // 창: the translation windows. A toolbar picks the window (1 = the main window, the others from config.child_windows), the cards below
 // show THAT window's settings. Rows with `win: true` are per window: options.js reads/writes them in the right place (see scope there).
 // The key of a row is the name an extra window uses; the main window's differs for a few (options.js: MAIN_KEY).
-import { windowName } from '../winname.js';
+import { nameFor } from '../winname.js';
 import { ALL } from '../winmanager.js';
-import { VOICE_ID } from '../core/winconf.js';
+import { VOICE_ID, dockHost, dockedOf } from '../core/winconf.js';
 import { entries as fontItems } from '../fonts.js';
 import { registry as widgetRegistry } from '../widgets/defaults.js';
 import { widgetsRow } from './widget_row.js';
@@ -24,7 +24,29 @@ export default {
   id: 'windows', title: '창', subtitle: '번역창 목록과 모양',
   cards: [
     { title: '이 창', rows: [
-      { win: true, key: 'name', type: 'text', label: '이름', placeholder: '창 이름', keywords: '창 이름', show: (c, x) => child(x) },
+      { win: true, key: 'dock_to', type: 'select', label: '탭으로 합칠 창', keywords: '붙이기 합치기 탭 종속 다른 창 도킹 dock merge tab', show: (c, x) => child(x),
+        options: x => {
+          const l = x.cfg().child_windows;
+          if (dockedOf(l, x.sel).length) return [[0, '합치지 않음']];                      // (a window that has tabs cannot be a tab)
+          return [[0, '합치지 않음'], [1, nameFor(x.cfg(), 1)], ...l.filter(c => c.id !== x.sel && c.id !== 1 && !(Number(c.dock_to) > 0)).map(c => [c.id, nameFor(x.cfg(), c.id)])];
+        },
+        note: ['고른 창 안의 탭이 됩니다. 이 창은 따로 열리지 않고, 그 창의 위쪽 탭을 눌러 오갑니다. 글은 탭마다 따로 쌓입니다.',
+          '창의 위치, 배경, 클릭 관통 같은 창 자체의 설정은 그 창을 따르고, 글꼴과 채널 같은 글 설정은 이 창의 것을 씁니다 (따르는 옵션은 흐리게 보입니다).'] },
+      { type: 'info', label: '탭이 붙은 창', show: (c, x) => child(x) && dockedOf(x.cfg().child_windows, x.sel).length > 0,
+        text: () => '이 창에는 다른 창이 탭으로 붙어 있어서, 다른 창의 탭이 될 수 없습니다.' },
+      { win: true, key: 'tab_alert', type: 'check', label: '새 글 알림 (탭)', keywords: '알림 새 글 표시 귓말 탭 점',
+        show: (c, x) => dockHost(x.cfg().child_windows, x.sel) > 0 || dockedOf(x.cfg().child_windows, x.sel).length > 0,
+        note: ['다른 탭을 보는 동안 이 탭에 새 글이 오면 탭 이름 앞에 주황색 점을 띄웁니다. 그 탭을 누르면 사라집니다.',
+          '귓속말처럼 놓치기 싫은 글을 따로 탭에 모아 둘 때 쓰세요. 클릭 관통 중에도 탭 줄만 보입니다.'] },
+      { win: true, key: 'hide_tools', type: 'check', label: '평소에 기능 버튼 숨기기', keywords: '아이콘 버튼 숨김 가리기 인터페이스 설정 닫기',
+        note: '창 위쪽 오른쪽의 기능 버튼들(번역·음성·설정·닫기)을 마우스가 창 밖에 있을 때 숨깁니다. 마우스를 창 안으로 가져가면 나타납니다.' },
+      { win: true, key: 'hide_tabs', type: 'check', label: '평소에 이름 탭 숨기기', keywords: '탭 이름 숨김 가리기 인터페이스',
+        note: '창 위쪽 왼쪽의 이름 탭을 마우스가 창 밖에 있을 때 숨깁니다. 마우스를 창 안으로 가져가면 나타납니다.' },
+      { win: true, key: 'hide_frame', type: 'check', label: '평소에 프레임 숨기기', keywords: '테두리 스크롤 크기 조절 숨김 가리기 인터페이스',
+        note: ['바깥 사각 프레임, 스크롤 막대, 오른쪽 아래의 크기 조절 손잡이를 마우스가 창 밖에 있을 때 숨깁니다.',
+          '마우스를 창 안으로 가져가면 나타납니다.'] },
+      { win: true, key: 'name', type: 'text', label: '이름', placeholder: '창 이름', keywords: '창 이름 탭 제목 메인',
+        note: '창 위쪽의 탭에 이 이름이 보입니다. 비워 두면 기본 이름(메인, 음성인식, 창 번호)을 씁니다.' },
       { win: true, key: 'open_mode', type: 'select', label: '열리는 때', keywords: '열기 닫기 항상', show: (c, x) => child(x),
         options: x => [['always', '프로그램을 켤 때 항상'], ['voice', '음성 인식을 켤 때만'], ['never', '닫아 둠 (직접 열 때만)']],
         hints: { always: '창의 X로 닫거나 직접 연 것은 그때만 적용되고 이 설정은 바뀌지 않습니다. 프로그램을 다시 켜면 열립니다.', voice: '음성인식을 켜면 열리고 끄면 닫힙니다. 직접 열거나 X로 닫은 것은 그때만 적용되고, 다음에 음성인식을 켜고 끌 때 다시 이 설정을 따릅니다.' } },
@@ -102,6 +124,8 @@ export default {
     { title: '위젯', note: '창에 붙이는 작은 부품입니다. 창마다 따로 켜고 배치합니다 (창 1을 따르지 않습니다). 켜 두면 부품 위에 마우스를 올렸을 때 자세한 상태가 보입니다.',
       rows: [widgetsRow(widgetRegistry)] },
     { title: '위치', rows: [
+      { win: true, key: 'lock_window', type: 'check', label: '창 고정', keywords: '이동 크기 조절 잠금 드래그 고정 lock',
+        note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다. 탭을 누르다가 창이 밀리는 일을 막습니다.' },
       { win: true, key: 'topmost', type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시',
         apply: (ctx, v) => { refocus(); ctx.put({ win: true, key: 'topmost' }, v); if (v) ctx.put({ win: true, key: 'topmost_wow_only' }, false); } },
       { win: true, key: 'topmost_wow_only', type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
@@ -111,6 +135,8 @@ export default {
     { title: '배경과 조작', rows: [
       { win: true, key: 'blur', type: 'select', label: '배경 흐림', options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴' },
       { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, label: '배경 진하기', keywords: '투명도 불투명' },
+      { win: true, key: 'tab_opacity', type: 'percent', min: 0.05, label: '탭 배경 진하기', keywords: '투명도 불투명 탭 상단 바 아이콘 버튼',
+        note: '창 위쪽의 이름 탭과 기능 버튼 상자의 배경과 테두리가 얼마나 진한지 정합니다. 100%면 또렷하게 보이고, 낮추면 흐려져 게임 화면 위에서 덜 거슬립니다. 글자는 그대로입니다.' },
       { win: true, key: 'text_opacity', type: 'percent', min: 0.2, label: '글 진하기', keywords: '투명도 불투명' },
       { win: true, key: 'click_through', type: 'check', label: '클릭 관통', keywords: '마우스 관통 클릭 통과 click through',
         note: '창이 클릭을 받지 않고 뒤의 게임으로 보냅니다. 아래 조작 키를 누르고 있으면 이 창을 조작할 수 있습니다. 옵션은 Ctrl+Alt+O 또는 트레이 아이콘으로 엽니다. 와우가 없을 때는 관통되지 않고 그대로 보입니다.' },
@@ -157,13 +183,13 @@ export default {
       const kids = env.cfg().child_windows, sel = env.sel();
       for (const c of kids) if (!known.has(c.id)) { known.add(c.id); env.select(c.id); return; }       // a window was just made: show it
       pick.textContent = '';
-      for (const [id, name] of [[1, windowName(1)], ...kids.map(c => [c.id, windowName(c.id, c)])]) {
+      for (const [id, name] of [[1, nameFor(env.cfg(), 1)], ...kids.map(c => [c.id, nameFor(env.cfg(), c.id)])]) {
         const o = document.createElement('option'); o.value = id; o.textContent = `${id} · ${name}`; pick.append(o);
       }
       pick.value = String(kids.some(c => c.id === sel) || sel === 1 ? sel : 1);
-      const isOpen = sel === 1 || open.has(sel);
-      state.textContent = sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
-      toggle.hidden = sel === 1; toggle.textContent = isOpen ? '닫기' : '열기';
+      const dh = dockHost(kids, sel), isOpen = sel === 1 || open.has(sel);
+      state.textContent = dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
+      toggle.hidden = sel === 1 || !!dh; toggle.textContent = isOpen ? '닫기' : '열기';
       del.hidden = sel === 1 || sel === VOICE_ID; if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
     }
     return { el, refresh };

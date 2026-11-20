@@ -3,7 +3,7 @@
 import * as settings from './settings.js';
 import { startI18n } from './i18n_host.js';
 import { tr } from './core/i18n.js';
-import { windowTitle, windowName } from './winname.js';
+import { windowTitle, windowName, nameFor } from './winname.js';
 import { ChatView, lookFrom } from './chatview.js';
 import { WindowFeed } from './core/windowfeed.js';
 import { MAIN } from './core/pipeline.js';
@@ -24,23 +24,36 @@ await startI18n(settings);
 // the settings of this window: the main window's are at the top of the config, an extra window's in its entry of child_windows (live:
 // the options window changes them while the window is open). A setting an extra window has no value of its own for is the main window's.
 const fallback = winconf.newConf(wid, [...winconf.KNOWN, winconf.ETC]);
-// the title in our own title bar (the window itself has no native title bar and is not in the taskbar): "ChatMatrix - <name>"
+// the name in the tab of our own title bar (the window itself has no native title bar and is not in the taskbar); the title of the page keeps "ChatMatrix - <name>"
 function showTitle() {
-  const c = wid === MAIN ? null : cfg.child_windows.find(x => x.id === wid);
-  const el = document.getElementById('title'), text = windowTitle(wid, c);
-  if (el) el.textContent = text;
-  document.title = text;
+  showTabs();
+  document.title = windowTitle(wid, wid === MAIN ? { name: cfg.main_name } : cfg.child_windows.find(x => x.id === wid));
 }
 const conf = () => (wid === MAIN ? null : cfg.child_windows.find(c => c.id === wid) || fallback);
 const opt = (key, dflt) => (wid === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? dflt) : winconf.opt(conf(), cfg, key, dflt));
-const feed = new WindowFeed(wid, () => cfg, conf);
-const view = new ChatView(document.getElementById('lines'));
+// The panes: this window's own chat and the windows that are TABS of it (their option "탭으로 합칠 창", core/winconf.js dockHost). Each pane has its own lines, its own
+// ChatView and its own WindowFeed (its settings: the font, the channels ...); one of them is shown. What belongs to the WINDOW (place, background, mouse ...: winconf.HOST_KEYS)
+// is this window's, whatever the pane.
+const paneConf = id => (id === MAIN ? null : cfg.child_windows.find(c => c.id === id) || winconf.newConf(id, [...winconf.KNOWN, winconf.ETC]));
+const popt = (id, key, dflt) => (id === wid || winconf.HOST_KEYS.has(key) ? opt(key, dflt)
+  : id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? dflt) : winconf.opt(paneConf(id), cfg, key, dflt));
+const panes = [];
+function makePane(id) {
+  let el = id === wid ? document.getElementById('lines') : null;
+  if (!el) { el = document.createElement('div'); el.id = 'lines-' + id; el.dataset.notr = ''; document.getElementById('lines').after(el); }
+  el.classList.add('lines');
+  const p = { id, el, view: new ChatView(el), feed: new WindowFeed(id, () => cfg, () => paneConf(id)), tab: null, alert: false, seen: 0, firstLive: Infinity, replay: true };
+  panes.push(p);
+  return p;
+}
+const host = makePane(wid);
+let active = host, view = host.view, feed = host.feed;               // (of the pane that is shown)
 const widgetLayer = new WidgetLayer({ root: document.getElementById('widgets'), registry: defaultRegistry() });
 let widgetIds = '';
 window.__cmrWidgets = widgetLayer;                                   // (for the tests)
 // the widgets of this window (docs/WIDGETS.md): drawn from the settings; a widget that is turned on asks the hub for its state
 const apply = ops => view.apply(ops, feed.model);
-const note = text => apply(feed.model.addNote(text, 'system'));
+const note = text => host.view.apply(host.feed.model.addNote(text, 'system'), host.feed.model);       // (the notes of the window are in its own pane)
 
 let interactive = null, geometryReady = false, hovering = false;
 let gameFound = true;                                               // no game = the window stays in view: nothing to click through to
@@ -53,12 +66,12 @@ function syncBlur() {
   const blur = Number(opt('blur', 0)) || 0;                         // 0 off | 1 weak | 2 strong
   const bg = Number(opt('bg_opacity', 1));
   const shown = blur && !hovering && !resizing;                                  // while the window is cleared by the mouse, the blur behind it goes too
-  // with blur on, Windows paints the background (blur + tint) itself, so the page's own background layer is switched off
-  r.setProperty('--bg-alpha', shown ? 0 : bg);
-  const key = JSON.stringify([shown ? blur : 0, bg]);
+  // the colour of the background is always the page's own layer (#bg: it starts under the tabs); the system only blurs (a tint of almost nothing is left, some systems need one)
+  r.setProperty('--bg-alpha', bg);
+  const key = JSON.stringify([shown ? blur : 0]);
   if (key !== blurKey) {
     blurKey = key;
-    invoke('set_blur', { on: !!shown, state: blur === 2 ? 4 : 3, color: '#1e1f22', alpha: bg })
+    invoke('set_blur', { on: !!shown, state: blur === 2 ? 4 : 3, color: '#1e1f22', alpha: 0.004 })
       .then(ok => { if (shown && !ok) note(tr('블러: 윈도우가 거부함')); })
       .catch(e => note(tr('블러: {e}', { e })));
   }
@@ -74,22 +87,88 @@ function applyAll() {
   syncBlur();
   applyWidgets();
   // not click-through: the title bar is always there, so one empty line is kept above the first message (it scrolls away with the rest)
-  document.getElementById('lines').classList.toggle('cv-pad', !opt('click_through', false));
+  syncPanes();
+  for (const p of panes) p.el.classList.toggle('cv-pad', !opt('click_through', false));
   // "온전한 묶음만": a window that is not click-through always has its title bar over the top of the lines, so the groups are judged by the edge BELOW it. A click-through window
   // is judged by the top of the lines, also while the bar shows for a moment (a key held, the game gone): the groups do not jump.
   const barH = parseFloat(getComputedStyle(document.body).getPropertyValue('--bar-h')) || 22;
-  view.inset = opt('click_through', false) ? 0 : Math.max(0, barH - document.getElementById('lines').getBoundingClientRect().top);
-  const look = lookFrom(opt);
-  if (look.family && !fonts.known.some(k => k.family === look.family) && Date.now() - fontScan > 3000) {   // a font file may have been put into fonts/ meanwhile
-    fontScan = Date.now();
-    fonts.loadAll().then(fam => { if (fam.includes(look.family)) applyAll(); }).catch(() => {});
+  for (const k of ['tools', 'tabs', 'frame']) document.body.classList.toggle('hide-' + k, !!opt('hide_' + k, false));      // ("평소에 인터페이스 숨기기": they show while the mouse is in the window)
+  for (const p of panes) {
+    p.view.inset = opt('click_through', false) || barGone ? 0 : Math.max(0, barH - p.el.getBoundingClientRect().top);
+    const look = lookFrom((k, d) => popt(p.id, k, d));
+    if (look.family && !fonts.known.some(k => k.family === look.family) && Date.now() - fontScan > 3000) {   // a font file may have been put into fonts/ meanwhile
+      fontScan = Date.now();
+      fonts.loadAll().then(fam => { if (fam.includes(look.family)) applyAll(); }).catch(() => {});
+    }
+    p.view.setLook(look, p.feed.model);
+    p.view.apply(p.feed.applySettings(), p.feed.model);
   }
-  view.setLook(look, feed.model);
-  apply(feed.applySettings());
+  showTabs();
   interactive = null;                                               // click-through may have changed
   applyZ();
 }
 let fontScan = 0;
+// the bar is not seen: the mouse is out of the window and both the tabs and the icons are set to hide (and no tab has a mark): the lines are whole up to the top, like in a
+// click-through window (the room under the bar stays; only what the bar would cover is not taken away)
+let barGone = false;
+function syncBarGone() {
+  const gone = document.body.classList.contains('outside') && !!opt('hide_tools', false) && !!opt('hide_tabs', false) && !panes.some(p => p.alert && p !== active);
+  if (gone === barGone) return;
+  barGone = gone;
+  const barH = parseFloat(getComputedStyle(document.body).getPropertyValue('--bar-h')) || 22;
+  for (const p of panes) { p.view.inset = opt('click_through', false) || barGone ? 0 : Math.max(0, barH - p.el.getBoundingClientRect().top); p.view.scheduleClip(); }
+}
+
+// ---- the tabs: the windows that are tabs of this one (their option "탭으로 합칠 창") get a pane each, and a tab in the bar
+let started = false;                                                // (the first replay of the hub is asked for in start(); a pane that comes later asks for its own)
+function syncPanes() {
+  const want = winconf.dockedOf(cfg.child_windows, wid);
+  for (const id of want) {
+    if (panes.some(p => p.id === id)) continue;
+    const p = makePane(id);
+    p.view.sink = viewSink; p.replay = true; watchScroll(p);
+    if (started) emit('feed-hello', { label });
+  }
+  for (const p of [...panes]) {
+    if (p === host || want.includes(p.id)) continue;
+    p.view.stop(); p.el.remove(); p.tab?.remove(); panes.splice(panes.indexOf(p), 1);
+    if (active === p) activate(host);
+  }
+  const rank = p => (p === host ? -1 : want.indexOf(p.id));
+  panes.sort((a, b) => rank(a) - rank(b));
+}
+function showTabs() {
+  const bar = document.getElementById('bar'), space = document.getElementById('space'), multi = panes.length > 1, locked = !!opt('lock_window', false);
+  const ta = Math.min(1, Math.max(0.05, Number(opt('tab_opacity', 1)) || 1));                  // (the tabs and the icon box: how solid; the one under the mouse is a little more)
+  document.body.style.setProperty('--tab-alpha', String(ta)); document.body.style.setProperty('--tab-alpha-hover', String(Math.min(1, ta + 0.3)));
+  document.body.classList.toggle('locked', locked);                    // ("창 고정": the bar does not drag the window, the edges do not resize it)
+  for (const e of [bar, space]) { if (locked) e.removeAttribute('data-tauri-drag-region'); else e.setAttribute('data-tauri-drag-region', ''); }
+  for (const p of panes) {
+    if (p === host) p.tab = document.getElementById('title');
+    else if (!p.tab) {
+      const t = document.createElement('div'); t.className = 'tab'; t.dataset.wid = String(p.id);
+      t.onpointerdown = e => { if (e.button === 0) activate(p); };
+      p.tab = t;
+    }
+    if (p === host && !p.tab.onpointerdown) p.tab.onpointerdown = e => { if (e.button === 0) activate(p); };
+    p.tab.textContent = nameFor(cfg, p.id);
+    p.tab.classList.toggle('on', p === active);
+    p.tab.classList.toggle('alert', p.alert && p !== active);
+    if (multi || locked) p.tab.removeAttribute('data-tauri-drag-region'); else p.tab.setAttribute('data-tauri-drag-region', '');     // (a tab is clicked: the bar's empty part drags)
+    bar.insertBefore(p.tab, space);
+    p.el.classList.toggle('off', p !== active);
+  }
+  document.body.classList.toggle('has-alert', panes.some(p => p.alert && p !== active));
+  document.body.classList.toggle('tabbed', multi);
+}
+function activate(p) {
+  if (p === active || !panes.includes(p)) return;
+  view.hideTip();
+  if (!getSelection().isCollapsed) getSelection().removeAllRanges();
+  active = p; view = p.view; feed = p.feed; p.alert = false;
+  review = false; reviewIdle = 0;
+  showTabs(); view.touch();
+}
 
 // ---- above everything / just above the game / normal.
 // "Just above the game" has two ways (the setting WOW_BY_OWNER, tab 고급):
@@ -106,11 +185,12 @@ let lastOs = null;                                                  // the newes
 // (CSS) are turned into the screen's (real pixels) by this window's place and scale. When there is no popup (it could not be made) the page draws them itself.
 const toScreen = (cx, cy) => { const w = (lastOs && lastOs.win) || [0, 0, 0, 0], d = window.devicePixelRatio || 1; return [Math.round(w[0] + cx * d), Math.round(w[1] + cy * d)]; };
 const thisRect = () => (lastOs && lastOs.win ? [...lastOs.win] : null);
-view.sink = {
+const viewSink = {
   usable: () => popup.usable(),
   show: (html, x, y) => popup.tip({ html, at: toScreen(x, y), within: thisRect() }),
   hide: () => popup.hide('tip'),
 };
+host.view.sink = viewSink;
 widgetLayer.sink = {
   usable: () => popup.usable(),
   show: (text, r) => { const [l, t] = toScreen(r.left, r.top), [rr, b] = toScreen(r.right, r.bottom); popup.tip({ text, anchor: [l, t, rr, b], within: thisRect() }); },
@@ -223,26 +303,35 @@ function watchGeometry(rect) {
 
 // Runs all the time: click-through. The window ignores the mouse, except while the interact keys are held with the cursor over it.
 // (The send key is not watched here: the hub's send box does that, send_host.js.)
-// The user scrolled the lines (dir -1 up, 1 down), by the wheel the page got or the one the exe took: up = reading the earlier chat (also when there
-// is nothing to scroll); down onto the newest line = done.
+// The user scrolled the lines (dir -1 up, 1 down), by the wheel the page got or the one the exe took: up = reading the earlier chat (only when the lines went up); down onto the newest line = done.
 function userScrolled(dir) {
   if (dir < 0) { review = true; reviewIdle = 0; }
   else if (review && view.atBottom()) { review = false; reviewIdle = 0; }
 }
+// a turn of the wheel the exe took (positive = up): the lines move, and going up starts the review only when they really went up (at the very top there is nothing earlier to read)
+function wheelScrolled(delta) {
+  const el = view.scroll, before = el.scrollTop;
+  el.scrollTop -= delta * 100 / 120; view.touch();
+  if (delta > 0) { if (el.scrollTop < before - 0.5) userScrolled(-1); } else userScrolled(1);
+}
 // The review state follows the scroll position itself, whatever moved it (wheel, Shift+wheel, scrollbar, keys): going up = review, back at the
 // newest line = done. New lines only ever move it down, so they do not start a review.
-{
-  const l = document.getElementById('lines'); let lastTop = l.scrollTop;
+const input = () => { lastInput = performance.now(); };
+for (const ev of ['wheel', 'pointerdown', 'pointermove', 'keydown']) addEventListener(ev, e => { if (ev !== 'pointermove' || e.buttons) input(); }, { capture: true, passive: true });
+function watchScroll(p) {
+  const l = p.el; let lastTop = l.scrollTop;
   // Only what the user did counts as "going up": the browser also moves the position by itself when the lines get shorter (a translation line
   // hidden, a line trimmed) or the window smaller, and that must not start the review.
-  const input = () => { lastInput = performance.now(); };
-  for (const ev of ['wheel', 'pointerdown', 'pointermove', 'keydown']) addEventListener(ev, e => { if (ev !== 'pointermove' || e.buttons) input(); }, { capture: true, passive: true });
   l.addEventListener('scroll', () => {
     const t = l.scrollTop;
-    if (t < lastTop - 1) { if (performance.now() - lastInput < 600) userScrolled(-1); } else if (t > lastTop + 1) userScrolled(1);
+    if (p === active) {
+      if (t < lastTop - 1) { if (performance.now() - lastInput < 600) userScrolled(-1); } else if (t > lastTop + 1) userScrolled(1);
+    }
     lastTop = t;
   });
 }
+watchScroll(host);
+
 async function tick() {
   {
     let s;
@@ -267,6 +356,8 @@ async function tick() {
       if (picked.trim() && picked !== lastCopied) { lastCopied = picked; try { window.__TAURI__.clipboardManager.writeText(picked); } catch { /* no clipboard */ } }
     }
     insidePrev = inside;
+    document.body.classList.toggle('outside', !inside);
+    syncBarGone();                              // (the title bar fades while the mouse is out of the window, see style.css)
     const overMe = inside && !hovering;                                               // (a window cleared by the mouse shows no tips: its tip would float over nothing)
     widgetLayer.pointer(overMe ? (cx - x) / (window.devicePixelRatio || 1) : null, overMe ? (cy - y) / (window.devicePixelRatio || 1) : null);       // (the tip of a widget under the cursor: also while click-through)
     if (!inside && !getSelection().isCollapsed) getSelection().removeAllRanges();     // the cursor left: the marked text is released
@@ -282,8 +373,7 @@ async function tick() {
         if (inside && w.delta.length) {
           const sum = w.delta.reduce((a, b) => a + b, 0);
           wheelCount += w.delta.length;
-          document.getElementById('lines').scrollTop -= sum * 100 / 120; view.touch();
-          userScrolled(sum > 0 ? -1 : 1);
+          wheelScrolled(sum);
         }
       } catch { /* the next round */ }
     }
@@ -337,7 +427,6 @@ async function loop() {
 // The page is not a browser page: no context menu, no middle-click scrolling, no dragging of text/links, no zoom. Shift/Ctrl/Alt + wheel
 // would zoom or scroll sideways in a browser: it scrolls the lines instead.
 function plainPage() {
-  const lines = document.getElementById('lines');
   addEventListener('contextmenu', e => e.preventDefault());
   addEventListener('auxclick', e => e.preventDefault());
   addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
@@ -348,7 +437,7 @@ function plainPage() {
     view.touch();                                                   // (even when there is nothing to scroll)
     const d = e.deltaY || e.deltaX;
     nativeWheel++;
-    lines.scrollTop += e.deltaMode === 1 ? d * 40 : d;
+    view.scroll.scrollTop += e.deltaMode === 1 ? d * 40 : d;
   }, { passive: false });
   addEventListener('blur', () => getSelection().removeAllRanges());
 }
@@ -360,6 +449,7 @@ function edges() {
   const make = (el, side) => {
     el.onpointerdown = async e => {
       e.preventDefault();
+      if (opt('lock_window', false)) return;
       el.setPointerCapture(e.pointerId);
       resizing = true; syncBlur();                                  // the blur behind flickers while the size changes: off meanwhile
       let s0; try { s0 = await invoke('os_state', { keys: [] }); } catch { return; }
@@ -408,17 +498,35 @@ function contextMenu() {
     // what the menu has: { text, fn, cls }; cls 'sep' is a line, 'off' is grey and does nothing, 'on' has a tick
     const list = [];
     const add = (text, fn, cls = '') => list.push({ text, fn, cls });
+    // the tab that was clicked with the right button (its name, without being shown first); anywhere else: the tab that is shown
+    const tabEl = ev.target.closest && ev.target.closest('#bar .tab');
+    const target = tabEl ? panes.find(p => p.tab === tabEl) || active : active;
     add(tr('이 창의 옵션…'), async () => {
-      try { localStorage.setItem('cmr-options-win', String(wid)); } catch { /* the options open on the first window */ }
+      try { localStorage.setItem('cmr-options-win', String(target.id)); } catch { /* the options open on the first window */ }
       invoke('open_options').catch(e => note(tr('옵션 창: {e}', { e })));
     });
     const picked = getSelection().toString();
     add(tr('선택한 글 복사'), () => { try { window.__TAURI__.clipboardManager.writeText(picked); } catch { document.execCommand('copy'); } }, picked ? '' : 'off');
-    add(tr('창 비우기'), () => apply(feed.clear()));
+    add(tr('창 비우기'), () => target.view.apply(target.feed.clear(), target.feed.model));
+    // merging: a tab leaves its window; a window (that has no tabs of its own and is not the main one) becomes a tab of another
+    {
+      const kids = cfg.child_windows, setDock = (id, to) => emit('cfg-patch', { patch: { child_windows: kids.map(c => (c.id === id ? { ...c, dock_to: to } : c)) } });
+      const hostOf = winconf.dockHost(kids, target.id);
+      if (hostOf) add(tr('이 탭 독립시키기'), () => setDock(target.id, 0));
+      if (target.id !== MAIN && !winconf.dockedOf(kids, target.id).length) {
+        for (const h of [MAIN, ...kids.map(c => c.id)]) {
+          if (h === target.id || h === hostOf || (h !== MAIN && winconf.dockHost(kids, h)) || (h !== MAIN && Number(kids.find(c => c.id === h).dock_to) > 0)) continue;
+          add(tr('{name} 창의 탭으로 붙이기', { name: nameFor(cfg, h) }), () => setDock(target.id, h));
+        }
+      }
+    }
     list.push({ cls: 'sep' });
     for (const id of [MAIN, ...cfg.child_windows.map(c => c.id)]) {
+      const tab = panes.find(p => p.id === id && p !== host);                // (a tab of this window: a click shows it)
+      if (tab) { add(nameFor(cfg, id), () => activate(tab), tab === active ? 'on' : ''); continue; }
+      if (winconf.dockHost(cfg.child_windows, id)) { add(nameFor(cfg, id), null, 'off'); continue; }       // (a tab of another window)
       const isOpen = id === MAIN || open.has(id);
-      add(windowName(id, cfg.child_windows.find(c => c.id === id) || null), () => emit('win-command', { cmd: isOpen ? 'close' : 'open', id }), (isOpen ? 'on' : '') + (id === MAIN ? ' off' : ''));
+      add(nameFor(cfg, id), () => emit('win-command', { cmd: isOpen ? 'close' : 'open', id }), (isOpen ? 'on' : '') + (id === MAIN ? ' off' : ''));
     }
     // in a window of its own: not cut off by a small window, and it is closed by a click anywhere else (popup.js)
     if (popup.usable()) {
@@ -451,7 +559,6 @@ async function start() {
   for (const line of fonts.report) emit('hub-log', { level: 'info', msg: 'font registered: ' + line });
   for (const f of fonts.failed) { note(tr('글꼴 파일을 쓸 수 없습니다: {f}', { f: f.file })); emit('hub-log', { level: 'warn', msg: `font file not usable: ${f.file} | ${f.error}` }); }
   applyAll();
-  document.getElementById('title').textContent = 'ChatMatrix - ' + label;
   const bar = document.getElementById('bar');                         // (a clicked button must not keep the keyboard: Enter would press it again)
   bar.addEventListener('mousedown', e => { if (e.target.tagName === 'BUTTON') e.preventDefault(); });
   bar.addEventListener('click', () => document.activeElement?.blur?.());
@@ -473,8 +580,7 @@ async function start() {
     const u = Number(e.payload);
     if (!Number.isFinite(u) || !u) return;
     wheelCount++;
-    document.getElementById('lines').scrollTop -= u * 100 / 120; view.touch();
-    userScrolled(u > 0 ? -1 : 1);
+    wheelScrolled(u);
   });
   emit('voice-lamp-hello', {});
   // the main window: the exe ends the program; the others: only that window (the hub keeps it closed: open mode "직접 열 때만")
@@ -486,7 +592,7 @@ async function start() {
     if (e.button !== 0) return;
     if (lmbAt) { noteLag(performance.now() - lmbAt); lmbAt = 0; } else lastDown = performance.now();
   }, true);
-  document.getElementById('toBottom').onclick = () => { const l = document.getElementById('lines'); l.scrollTop = l.scrollHeight; review = false; reviewIdle = 0; view.touch(); };
+  document.getElementById('toBottom').onclick = () => { const l = view.scroll; l.scrollTop = l.scrollHeight; review = false; reviewIdle = 0; view.touch(); };
   edges();
   await restoreGeometry();
   geometryReady = true;
@@ -507,17 +613,28 @@ async function start() {
   });
   showTitle();
   addEventListener('cmr-language', showTitle);
-  let seen = 0;                                              // the events of the hub come in order; a replay (history) starts again from the beginning
-  let firstLive = Infinity;                                  // the first event that came by itself before the replay did: what happened since this window was opened
-  const take = (n, ev) => { if (n <= seen) return; seen = n; if (n < firstLive) firstLive = n; apply(feed.handle(ev)); };
-  await listen('feed', e => take(e.payload.seq, e.payload.event));
+  // the events of the hub come in order (per pane: `seen`); a replay (history) starts a pane again from the beginning. `firstLive`: the first event that came by itself
+  // before the replay did: what happened since the pane was opened
+  const take = (p, n, ev, quiet) => {
+    if (n <= p.seen) return;
+    p.seen = n; if (n < p.firstLive) p.firstLive = n;
+    const ops = p.feed.handle(ev);
+    p.view.apply(ops, p.feed.model);
+    if (!quiet && p !== active && ops.length && ev.type === 'LineAdded' && popt(p.id, 'tab_alert', false)) { p.alert = true; showTabs(); }       // the mark on its tab ("새 글 알림")
+  };
+  await listen('feed', e => { for (const p of [...panes]) take(p, e.payload.seq, e.payload.event, false); });
   await listen('feed-replay', e => {
     if (e.payload.label !== label) return;
-    // "열 때 비우기" (an extra window): it starts empty, the lines the hub kept from before are not given to it (what came since it was opened is)
-    const fresh = wid !== MAIN && !!opt('clear_on_open', false), from = firstLive;
-    apply(feed.clear()); seen = 0;
-    for (const x of e.payload.events) if (!fresh || x.seq >= from) take(x.seq, x.event);
+    for (const p of [...panes]) {
+      if (!p.replay) continue;
+      p.replay = false;
+      // "열 때 비우기" (an extra window): it starts empty, the lines the hub kept from before are not given to it (what came since it was opened is)
+      const fresh = p.id !== MAIN && !!popt(p.id, 'clear_on_open', false), from = p.firstLive;
+      p.view.apply(p.feed.clear(), p.feed.model); p.seen = 0;
+      for (const x of e.payload.events) if (!fresh || x.seq >= from) take(p, x.seq, x.event, true);
+    }
   });
+  started = true;
   await emit('feed-hello', { label });
   try { await thisWin.show(); } catch { /* shown by the exe after a while anyway */ }       // (it was made hidden: no black square while the page loads)
   try { await invoke('set_noactivate', { on: true }); } catch { /* done above as well */ }     // (again now that it is seen: the window framework may have written the styles anew)

@@ -6,11 +6,13 @@ const cmd = document.getElementById('cmd');
 const box = document.getElementById('text');
 const lang = document.getElementById('lang');
 let busy = false;
+let openedAt = -1e9;                                          // when the box was opened (the Enter that opened it must not close it again)
+const EMPTY_ENTER_AFTER_MS = 250;                           // an Enter on empty fields closes the box (like the game's chat) only this long after it opened
 
 const langOf = label => String(label || '').replace(/^\s*→\s*/, '');
 
 listen('input-open', ev => {
-  cmd.value = ''; box.value = ''; busy = false;
+  cmd.value = ''; box.value = ''; busy = false; openedAt = performance.now();
   lang.textContent = langOf(ev.payload.label);
   setTimeout(() => box.focus(), 30);                          // the keyboard starts in the sentence field
 });
@@ -26,5 +28,6 @@ for (const field of [cmd, box]) field.addEventListener('keydown', e => {
   if (e.key !== 'Enter' || busy) return;
   const text = box.value.trim();
   if (text) emit('input-submit', { text, prefix: cmd.value.trim() });
+  else if (!cmd.value.trim() && performance.now() - openedAt > EMPTY_ENTER_AFTER_MS) emit('input-cancel', {});       // both fields empty: the same as Esc (the game's own chat box is left alone)
 });
 addEventListener('contextmenu', e => { if (e.target !== box && e.target !== cmd) e.preventDefault(); });

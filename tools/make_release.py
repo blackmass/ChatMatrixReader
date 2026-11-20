@@ -1,6 +1,7 @@
 r"""Makes the Windows release zip: only what release/files-windows.txt lists, with BUILD-INFO.txt (what it was built from, SHA-256 of every file).
 
     py tools\make_release.py v3.0.0
+    py tools\make_release.py v3.0.1 --reuse-exe     a release whose Rust sources did not change: the program file of the earlier build is used again (no build.bat)
 
 Before it, in this order:
     build.bat                         the program (ChatMatrixReader.exe) from the sources
@@ -59,11 +60,12 @@ def expand(entry, rules):
     return [entry]
 
 
-def stale_exe():
-    """The sources that are newer than the program: a build that was not redone."""
+def stale_exe(reuse=False):
+    """The sources that are newer than the program: a build that was not redone. With reuse (--reuse-exe) the two files that only hold the version number are
+    not looked at (set_version.py changes them): a real change of the Rust sources still counts."""
     exe = os.path.join(HERE, EXE)
     newest, newest_name = 0.0, ""
-    for base in ("src-tauri/src", "src-tauri/Cargo.toml", "src-tauri/tauri.conf.json", "src-tauri/capabilities", "src-tauri/build.rs"):
+    for base in ("src-tauri/src", "src-tauri/capabilities", "src-tauri/build.rs") + (() if reuse else ("src-tauri/Cargo.toml", "src-tauri/tauri.conf.json")):
         p = os.path.join(HERE, base)
         for root, _, files in (os.walk(p) if os.path.isdir(p) else [(os.path.dirname(p), [], [os.path.basename(p)])]):
             for f in files:
@@ -92,6 +94,15 @@ def commit():
 def notes(tag, out_dir, info):
     """What to look at before the files are uploaded."""
     print(f"\nupload everything in  {out_dir}  to the GitHub release {tag}.")
+    # what is in the folder now: the program's zip and, when release_engines.bat was run for this version, the engines (so the whole upload can be seen here)
+    try:
+        for name in sorted(os.listdir(out_dir)):
+            path = os.path.join(out_dir, name)
+            if os.path.isfile(path):
+                kind = "engine" if name.startswith(("cmr-stt-", "BUILD-INFO-engine", "SHA256SUMS-engine", "LICENSE")) else "program"
+                print(f"  {os.path.getsize(path) / 1048576:8.2f} MB  {name}   [{kind}]")
+    except OSError:
+        pass
     engine = os.path.isfile(os.path.join(out_dir, "SHA256SUMS-engine.txt"))
     urls = set(re.findall(r"/releases/download/(v[^/]+)/", open(CATALOG, encoding="utf-8").read()))
     if not engine:
@@ -111,8 +122,10 @@ def sha256_bytes(data):
 
 
 def main(argv):
+    reuse = "--reuse-exe" in argv
+    argv = [a for a in argv if a != "--reuse-exe"]
     if len(argv) != 1 or not re.fullmatch(r"v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?", argv[0]):
-        sys.exit("usage: py tools\\make_release.py v3.0.0")
+        sys.exit("usage: py tools\\make_release.py v3.0.0 [--reuse-exe]")
     tag, ver, shown = argv[0], version(), display_version()
     if tag != "v" + shown:
         sys.exit(f"the tag {tag} does not match the version in app/core/version.js ({shown}): change the version there first (py tools\\set_version.py 3.0.1) or give the matching tag")
@@ -131,9 +144,9 @@ def main(argv):
     for must in ("LICENSE", "THIRD-PARTY-NOTICES.txt", EXE):
         if must not in names:
             sys.exit(f"{must} is not in release/files-windows.txt: a release without it is not allowed")
-    old = stale_exe()
+    old = stale_exe(reuse)
     if old:
-        sys.exit(f"{EXE} is older than {old}: the sources changed after the last build. Run build.bat again.")
+        sys.exit(f"{EXE} is older than {old}: the Rust sources changed after the last build, so the program must be built again (build.bat); --reuse-exe is only for a release whose Rust sources did not change.")
     data = {}
     for n in names:
         data[n] = open(os.path.join(HERE, n), "rb").read()
@@ -143,7 +156,8 @@ def main(argv):
         f"release        : {tag}",
         f"made           : {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         f"source         : https://github.com/blackmass/ChatMatrixReader , commit {commit()}",
-        f"built with     : build.bat ({tool_version(['rustc', '--version'])}; {tool_version(['cargo', '--version'])})",
+        ("built with     : the program file is the one of an earlier build (the Rust sources did not change); the rest is from this release" if reuse
+         else f"built with     : build.bat ({tool_version(['rustc', '--version'])}; {tool_version(['cargo', '--version'])})"),
         "license        : MIT (LICENSE); the libraries inside and what the program downloads: THIRD-PARTY-NOTICES.txt",
         "not in this zip: the voice recognition engine and the models (downloaded by the program from this GitHub release / huggingface.co; every file is checked by SHA-256)",
         "",

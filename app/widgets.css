@@ -1,5 +1,5 @@
 /* ---- the widgets of a window (app/widgets/render.js): 8 places inside the window; the colours come from the tone of the state */
-body.overlay #widgets { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+body.overlay #widgets { position: fixed; inset: var(--bar-h, 22px) 0 0 0; pointer-events: none; z-index: 5; }
 .wlayer { pointer-events: none; }
 body .wlayer .wa { position: absolute; display: flex; gap: 4px; align-items: center; pointer-events: none; }
 body .wlayer .wa-top-left { top: 4px; left: 6px; } body .wlayer .wa-top { top: 4px; left: 50%; transform: translateX(-50%); } body .wlayer .wa-top-right { top: 4px; right: 6px; }

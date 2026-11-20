@@ -16,7 +16,7 @@ export function startWindows({ settings }) {
   let voiceOn = false;                         // the voice recognition is on (or starting)
   const children = () => settings.cfg().child_windows;
   const conf = id => children().find(c => c.id === id);
-  const publishState = () => emit('win-state', { open: [...open] });
+  const publishState = () => emit('win-state', { open: [...open] });      // (only the windows that have a window of their own)
 
   const setChildren = list => settings.set({ child_windows: list });
   const patchConf = (id, patch) => setChildren(children().map(c => (c.id === id ? { ...c, ...patch } : c)));
@@ -30,7 +30,7 @@ export function startWindows({ settings }) {
       do {
         again = false;
         for (const c of children()) {
-          const want = layout.wantedOpen(c, manual, voiceOn, closedBy.get(c.id) === c.open_mode ? new Set([c.id]) : new Set());
+          const want = !winconf.dockHost(children(), c.id) && layout.wantedOpen(c, manual, voiceOn, closedBy.get(c.id) === c.open_mode ? new Set([c.id]) : new Set());
           if (want && !open.has(c.id)) {
             try { await invoke('open_overlay', { label: layout.labelOf(c.id) }); open.add(c.id); } catch (e) { log.error('번역창을 열지 못했습니다: ' + e); }
           } else if (!want && open.has(c.id)) { open.delete(c.id); await invoke('close_overlay', { label: layout.labelOf(c.id) }).catch(() => {}); }
@@ -71,7 +71,8 @@ export function startWindows({ settings }) {
       for (const c of children()) if (c.open_mode === 'voice') { manual.delete(c.id); if (closedBy.get(c.id) === 'voice') closedBy.delete(c.id); }
       sync();
     },
-    isOpen: id => id === 1 || open.has(id),
+    // (a window that is a tab of another one has no window of its own: it is open while its window is)
+    isOpen: id => id === 1 || open.has(id) || (id > 1 && (h => h > 0 && (h === 1 || open.has(h)))(winconf.dockHost(children(), id))),
     openIds: () => [...open],
     sync,
   };
