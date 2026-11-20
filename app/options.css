@@ -85,6 +85,7 @@ button.on { border-color: var(--accent); color: var(--accent); }
 .apply { font-size: 11px; border-radius: 8px; padding: 0 6px; border: 1px solid; white-space: nowrap; }
 .apply.live { color: #8fe0a2; border-color: #3f7a4f; }
 .apply.restart { color: #ffb36b; border-color: #8a6030; }
+.row.docked .ctl, .row.docked .text .note, .row.docked .text .label { opacity: .4; }      /* (follows the window it is a tab of: the value stays, it is only not used) */
 .followtag { color: var(--dim); font-size: 11px; border: 1px solid #4a4d55; border-radius: 8px; padding: 0 6px; }
 input[type=range] { width: 160px; accent-color: var(--accent); }
 .unit.pct { width: 40px; text-align: right; }

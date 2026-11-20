@@ -5,10 +5,10 @@ import * as settings from './settings.js';
 import { startI18n } from './i18n_host.js';
 import { listForOptions as fontsScan } from './fonts.js';
 import { tr } from './core/i18n.js';
-import { windowName } from './winname.js';
+import { nameFor } from './winname.js';
 import * as layout from './core/winlayout.js';
 import { DEFAULTS } from './core/config.js';
-import { FOLLOW, KEYS, MAIN_KEY, followsMain, followValue } from './core/winconf.js';
+import { FOLLOW, KEYS, MAIN_KEY, HOST_KEYS, followsMain, followValue, dockHost } from './core/winconf.js';
 import { buildCards, isData } from './options/form.js';
 import { TABS } from './options/tabs.js';
 import { noteChannelColor } from './options/channels.js';
@@ -54,6 +54,7 @@ const sameVal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 let selected = 1;                                    // the window the 창 tab shows
 const ctxFor = wid => ({
   sel: wid, cfg: () => settings.cfg(), snapshot,
+  dockHost: () => (wid > 1 ? dockHost(settings.cfg().child_windows, wid) : 0), nameOf: id => nameFor(settings.cfg(), id),
   get: (row, cfg = settings.cfg()) => value(row, cfg, wid),
   set: patch => settings.request(patch),
   put: (row, v) => settings.request(patchFor(row, v, wid, settings.cfg())),
@@ -87,7 +88,7 @@ function changedList() {
   }
   return out;
 }
-const winName = wid => windowName(wid, conf(settings.cfg(), wid));
+const winName = wid => nameFor(settings.cfg(), wid);
 
 let built = [];                       // the rows on screen
 let view = { mode: 'tab', tab: TABS[0].id };

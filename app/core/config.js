@@ -46,6 +46,7 @@ export const DEFAULTS = {
     skip_same_lang: true,
     channel_route: {},   // channel code -> 'google_free' | 'google' | 'openai' | 'custom' | 'off' (missing = the translation tab's method)
     win1_off: [],   // channels NOT shown in the main window (empty = all; see winconf.py)
+    main_name: '',   // the name of the main window (shown in its tab); '' = the default name
     child_windows: [],   // extra windows (winconf.py): id, name, enabled, channels, geometry, font_family, font_size, opacity
     blur: 0,   // blur behind the chat window: 0 off | 1 weak | 2 strong (per window; this is window 1). 2.0's 3 (Windows 11 acrylic) is gone: read as 2
     hover_clear: false,   // click-through only: the window turns fully transparent while the mouse is over it
@@ -103,6 +104,11 @@ export const DEFAULTS = {
     check_updates: true,   // look for a newer GitHub release at start (a notice only, nothing is installed)
     font_family: '',   // '' = default (Malgun Gothic); else a font loaded from the fonts/ folder
     line_spacing: 0,   // pixels between an original line and its translation (inside a group)
+    lock_window: false,  // the window cannot be moved or resized by the mouse
+    tab_alert: false,    // this window's tab shows a mark when a new line comes while another tab of the window is shown
+    hide_tools: false,   // the icon box of the title bar is hidden while the mouse is not in the window
+    hide_tabs: false,    // the tab (the name) of the title bar is hidden while the mouse is not in the window
+    hide_frame: false,   // the frame, the scroll bar and the resize grip are hidden while the mouse is not in the window
     whole_groups: false,   // only whole groups are shown at the newest line: the one cut at the top edge of the window is hidden (reading above shows all)
     max_groups: 0,   // only this many of the newest groups are shown (0 = no limit; reading above shows all)
     line_height: 0,   // extra pixels between the rows of ONE text that is long enough to wrap onto several rows (1.x / 3.0.x: line_spacing did this too)

@@ -15,20 +15,25 @@ export const MODES = ['always', 'voice', 'never'];
 export const KEYS = {
   id: 0, name: '', open_mode: 'never', channels: [], geometry: '', font_family: '', font_size: 0, bg_opacity: 1.0, text_opacity: 1.0,
   topmost: true, topmost_wow_only: false, click_through: false, hover_clear: false, blur: 0, shadow: false, head_mode: 'basic', align: 'left', bottom: false,
+  dock_to: 0,                          // an extra window: the id of the window it is a TAB of (0 = a window of its own); see dockHost
   clear_on_open: false,                // an extra window: starts empty when it is opened (the hub's earlier lines are not given to it)
 };
 export const OPT_NUM = {
   max_lines: [50, 5000], font_weight: [100, 900], trans_font_size: [0, 32], line_spacing: [-20, 40], line_height: [-10, 40], group_spacing: [-20, 60], max_groups: [0, 50], indent: [0, 16],
   shadow_dx: [-8, 8], shadow_dy: [-8, 8], fade_sec: [0, 86400], outline: [0, 30], bold_fix: [-10, 10], letter_spacing: [-10, 20],
 };
-export const OPT_BOOL = ['show_time', 'class_colors', 'swap_trans', 'plain_text', 'whole_groups'];
+export const OPT_BOOL = ['show_time', 'class_colors', 'swap_trans', 'plain_text', 'whole_groups', 'hide_tools', 'hide_tabs', 'hide_frame', 'tab_alert', 'lock_window'];
 export const OPT_STR = ['trans_color', 'shadow_color', 'outline_color'];
 // What an extra window can leave EMPTY to follow window 1 (shown as "창 1을 따름"): numbers and text that can be typed, and the choices (a list has
 // "창 1을 따름" on top). Not on / off switches and sliders: those are the window's own value with a "기본값" button.
 //   empty = no key, null, '' (text), 0 (font_size).  The main window has no "follow": its empty text / 0 is the default.
 export const FOLLOW = new Set([...Object.keys(OPT_NUM), ...OPT_STR, 'font_family', 'font_size', 'align', 'head_mode', 'blur']);
 const EMPTY_TEXT = new Set([...OPT_STR, 'font_family']);       // '' is "empty" for these (an extra window follows window 1, the main window uses the default)
-export const MAIN_KEY = { align: 'text_align', bottom: 'bottom_stick', shadow: 'shadow_on' };       // (names that differ in the main window's top level)
+// The settings that belong to the WINDOW (its place, its background, how it takes the mouse, its bar): a window that is a tab of another one has the other's
+// (the window is one). The rest (font, lines, channels ...) is the tab's own.
+export const HOST_KEYS = new Set(['geometry', 'topmost', 'topmost_wow_only', 'click_through', 'hover_clear', 'blur', 'bg_opacity', 'text_opacity', 'hide_tools', 'hide_tabs',
+  'hide_frame', 'lock_window', 'widgets', 'open_mode', 'wheel_through', 'through_tips', 'interact_keys', 'auto_copy']);
+export const MAIN_KEY = { align: 'text_align', bottom: 'bottom_stick', shadow: 'shadow_on', name: 'main_name' };       // (names that differ in the main window's top level)
 
 export const chanKey = code => (SPEECH_CODES.includes(code) ? '!NPC' : KNOWN.includes(code) ? code : ETC);
 
@@ -92,12 +97,21 @@ export function normalize(items) {
     if ('widgets' in it) d.widgets = normalizeWidgets(it.widgets);               // (3.0: the widgets of this window, only when it has some)
     if (d.topmost_wow_only) d.topmost = false;
     if (typeof d.name !== 'string') d.name = '';
+    try { d.dock_to = Math.max(0, pyInt(d.dock_to)); } catch { d.dock_to = 0; }
+    if (d.dock_to === d.id) d.dock_to = 0;
     out.push(d);
   }
   if (!seen.has(VOICE_ID)) out.push(newConf(VOICE_ID, ['!VC']));
   out.sort((a, b) => a.id - b.id);
   return out;
 }
+
+// The window that window `id` is a tab of: its `dock_to`, when that window exists (1 = the main window) and is not a tab itself (one level only: a window with tabs
+// of its own cannot be a tab, and a tab cannot be the window of tabs). 0 = a window of its own.
+const rawDock = (items, id) => { const c = items.find(x => x.id === id), h = c ? Number(c.dock_to) || 0 : 0; return h >= 1 && h !== id && (h === 1 || items.some(x => x.id === h)) ? h : 0; };
+export const dockHost = (items, id) => { items = items || []; const h = rawDock(items, id); return h && (h === 1 || !rawDock(items, h)) ? h : 0; };
+// the ids of the windows that are tabs of window `host`, in the order of the list
+export const dockedOf = (items, host) => (items || []).filter(c => dockHost(items, c.id) === host).map(c => c.id);
 
 export const nextId = items => Math.max(VOICE_ID, ...items.map(d => d.id)) + 1;
 
