@@ -19,7 +19,7 @@ APP_JS = os.path.join(HERE, "app", "core", "version.js")          # the project 
 FOLDER = "ChatMatrixReader"                                                 # the folder name inside the zip
 
 # what the "mac" package takes (folders / files, relative to the project folder); everything else is left out
-MAC_PARTS = ["app/", "locale/", "fonts/", "src-tauri/", "tools/mac_make_app.command", "Glossary.sample.txt", "README.md", "LICENSE"]
+MAC_PARTS = ["app/", "locale/", "fonts/", "plugins/README.txt", "src-tauri/", "tools/mac_make_app.command", "Glossary.sample.txt", "README.md", "LICENSE"]
 
 
 def display_version():

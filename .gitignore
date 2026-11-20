@@ -35,6 +35,11 @@ mac_no_panel
 fonts/*
 !fonts/README.txt
 
+#plugin
+plugin-data/
+plugins/*
+!plugins/README.txt
+
 # the voice recognition installed by the program: engine, models, sounds of the speed test, temporary files
 extensions/
 
@@ -56,5 +61,3 @@ Thumbs.db
 .idea/
 .vs/
 node_modules/
-plugins/
-plugin-data/
