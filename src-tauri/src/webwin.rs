@@ -7,7 +7,7 @@
 //!   * macOS: the CLASS of a window that holds a web view is never changed (the web view watches the window with key-value observing, a changed class makes the program abort
 //!     when the web view leaves it); and nothing touches a window that is closing.
 //!   * "above the game only" is two states (the game, or a window of ours, in front: the high level; another program in front: the normal level right above the game).
-//!   * Windows: every web window is made in a folder of its own (webview-web/<plugin>/ when cookies are kept, webview-web/_private/ in private mode), not in the folder of the
+//!   * Windows: every web window is made in a folder of its own (webview-data/web/<plugin>/ when cookies are kept, webview-data/web/_private/ in private mode), not in the folder of the
 //!     program's own windows (they must all be made with the same arguments).
 //!   * every command is async: a web view made from a synchronous command (the main thread) never comes back on Windows (the WebView2 issue wry#583).
 use std::collections::HashMap;
@@ -148,8 +148,8 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     let b = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url));
     #[cfg(windows)]
     let b = {
-        // a folder of their own: cookies are kept in webview-web/<plugin>/ only when the user chose it; else a private session in webview-web/_private/
-        let dir = crate::exe_dir().join("webview-web").join(if persist { key.as_str() } else { "_private" });
+        // a folder of their own: cookies are kept in webview-data/web/<plugin>/ only when the user chose it; else a private session in webview-data/web/_private/
+        let dir = crate::data_dir().join("web").join(if persist { key.as_str() } else { "_private" });
         let b = b.data_directory(dir);
         if persist { b } else { b.incognito(true) }
     };
