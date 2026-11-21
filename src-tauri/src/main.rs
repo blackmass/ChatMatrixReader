@@ -473,6 +473,7 @@ fn set_blur(window: WebviewWindow, on: bool, state: i32, color: String, alpha: f
 
 #[tauri::command]
 async fn open_overlay(app: AppHandle, label: String) -> Result<(), String> {
+    if center::wanted() { return Ok(()); }                  // (3.2: a translation window is a pane of a center, not a window)
     if let Some(w) = app.get_webview_window(&label) {
         return w.show().map_err(|e| e.to_string());
     }
@@ -673,17 +674,29 @@ static INPUT_ANCHOR: std::sync::Mutex<Option<(String, String)>> = std::sync::Mut
 /// its place by placement::send_box inside the monitor the window is on.
 fn place_input(app: &AppHandle, label: &str, place: &str) -> Result<(), String> {
     let w = app.get_webview_window("input").ok_or("no input window")?;
-    let anchor = app.get_webview_window(label).ok_or("no such window")?;
     let e = |e: tauri::Error| e.to_string();
-    let pos = anchor.outer_position().map_err(e)?;
-    let size = anchor.outer_size().map_err(e)?;
-    let (area, scale) = monitor_at(&anchor, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
+    // the place of the window: a pane of a control center (its text area), else the window of that name
+    let ((px, py), (sw, sh)) = match center::pane_rect(label) {
+        Some((x, y, w, h)) => ((x, y), (w, h)),
+        None => { let a = app.get_webview_window(label).ok_or("no such window")?; let p = a.outer_position().map_err(e)?; let s = a.outer_size().map_err(e)?; ((p.x, p.y), (s.width, s.height)) }
+    };
+    let pos = tauri::PhysicalPosition::new(px, py);
+    let size = tauri::PhysicalSize::new(sw, sh);
+    let (area, scale) = monitor_at(&w, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
     let box_w = size.width.max(200);
     let box_h = ((46.0 * scale).round() as u32).max(46);
     let (bx, by) = placement::send_box(area, place, pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2);
     w.set_position(tauri::PhysicalPosition::new(bx, by)).map_err(e)?;
     w.set_size(tauri::PhysicalSize::new(box_w, box_h)).map_err(e)?;
     Ok(())
+}
+
+/// The send box follows its window when that window (a pane of a control center) was moved or resized.
+pub(crate) fn refollow_input(app: &AppHandle) {
+    let anchor = INPUT_ANCHOR.lock().ok().and_then(|a| a.clone());
+    if let Some((label, place)) = anchor {
+        if app.get_webview_window("input").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false) { let _ = place_input(app, &label, &place); }
+    }
 }
 
 /// Presses Ctrl+V in the window that has the keyboard.
@@ -1248,7 +1261,7 @@ fn main() {
                 return Ok(());
             }
             make_window(&handle, "control", "control.html", "control")?;
-            make_window(&handle, "main", "overlay.html", "overlay")?;
+            if !center::wanted() { make_window(&handle, "main", "overlay.html", "overlay")?; }
             make_window(&handle, "input", "input.html", "input")?;
             center::start(handle.clone());                              // (3.2: the control centers, with the file center_mode)
             make_tray(app)?;

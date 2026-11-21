@@ -1,3 +1,11 @@
+/* the tools in the bar of a pane (the same look as the buttons of a window of 3.1.1) */
+.pane .pspace { flex: 1; }
+.pane .ptools { display: flex; align-items: center; gap: 2px; height: 20px; padding: 0 3px; background: linear-gradient(rgb(54, 72, 71), rgb(42, 56, 54)); border: 1px solid rgb(138, 106, 48); border-bottom: 0; border-radius: 4px 4px 0 0; }
+.pane .ptools button { border: 0; background: none; color: #e6c66e; width: 22px; height: 18px; padding: 0; font-size: 13px; cursor: pointer; display: grid; place-items: center; }
+.pane .ptools button:hover { color: #ffe08a; background: rgba(255, 255, 255, .08); }
+.pane .pvoice[data-state="on"] { color: #5fd07a; } .pane .pvoice[data-state="starting"] { color: #e6c14a; } .pane .pvoice[data-state="error"] { color: #f0705a; }
+.pane .pvoice .waves { display: none; } .pane .pvoice[data-state="on"] .waves, .pane .pvoice[data-state="starting"] .waves { display: inline; }
+
 /* A control center (3.2): a transparent page over all the screens; the translation windows are panes in it (pane.js). */
 html, body.center { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; -webkit-user-select: none; user-select: none;
   font: 13px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; color: #fff; }

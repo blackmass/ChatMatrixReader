@@ -768,6 +768,7 @@ ok(cfgFile().child_windows.find(c => c.id === 3).align === null, 'options/window
 await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
 // a control center (3.2): the page of a kind of order draws the windows of that kind as panes with the chat of the hub, and tells their places
 {
+  const geoBefore = [cfgFile().geometry, (cfgFile().child_windows.find(c => c.id === 3) || {}).geometry];       // (the pane saves its place in the settings: put back afterwards)
   const cp = await open('center.html?mode=1&ox=0&oy=0', { width: 1200, height: 800 }); await control.waitForTimeout(1500);
   ok(await cp.locator('.pane').count() >= 1 && (await cp.locator('.pane .cv-list').first().textContent()).length > 0, 'center: the pane of the main window shows the chat of the hub: ' + (await cp.locator('.pane .cv-list').first().textContent()).slice(0, 60));
   ok(centerRects.length > 0 && centerRects.at(-1).label === 'center1' && centerRects.at(-1).panes.some(p => p.id === '1' && p.w > 100 && p.h > 50), 'center: the place of the pane is told to the program: ' + JSON.stringify(centerRects.at(-1)));
@@ -777,6 +778,9 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   await cp.mouse.move(bar.x + 20, bar.y + 10); await cp.mouse.down(); await cp.mouse.move(bar.x + 120, bar.y + 70, { steps: 4 }); await cp.mouse.up(); await control.waitForTimeout(300);
   const after = await cp.locator('.pane').last().boundingBox();
   ok(Math.abs(after.x - before.x - 100) < 3 && Math.abs(after.y - before.y - 60) < 3, 'center: the bar drags the pane: ' + JSON.stringify([before, after]));
+  // the place of the pane is in the settings now (the place of the TEXT: what a window of 3.1.1 kept)
+  ok(/^\d+x\d+\+\d+\+\d+$/.test(cfgFile().child_windows.find(c => c.id === 3).geometry), 'center: the place of the pane is kept in the settings: ' + cfgFile().child_windows.find(c => c.id === 3).geometry);
+  await control.evaluate(([g, g3]) => import('./settings.js').then(m => m.set({ geometry: g, child_windows: m.cfg().child_windows.map(c => (c.id === 3 ? { ...c, geometry: g3 || '' } : c)) })), geoBefore); await control.waitForTimeout(400);
   await cp.close();
 }
 // the tab "기록": the log moved here from "정보", and the table of the processes

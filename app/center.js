@@ -5,6 +5,7 @@ import { startI18n } from './i18n_host.js';
 import { MAIN } from './core/pipeline.js';
 import * as winconf from './core/winconf.js';
 import * as fonts from './fonts.js';
+import { tr } from './core/i18n.js';
 import { Pane } from './pane.js';
 
 const q = new URLSearchParams(location.search), mode = Number(q.get('mode')) || 0, ox = Number(q.get('ox')) || 0, oy = Number(q.get('oy')) || 0;
@@ -15,6 +16,7 @@ await fonts.loadAll().catch(() => []);
 document.title = 'CMR Center ' + mode;
 
 const panes = new Map();                       // window id -> Pane
+let lampState = null;                          // the last state of the voice lamp (a pane made later gets it)
 let open = new Set([MAIN]);
 const center = {
   cfg: () => cfg,
@@ -28,7 +30,7 @@ const modeOf = id => (optOf(id, 'topmost_wow_only', false) ? 2 : optOf(id, 'topm
 
 function sync() {
   const want = new Set([...open].filter(id => (id === MAIN || cfg.child_windows.some(c => c.id === id && c.kind !== 'web')) && !winconf.dockHost(cfg.child_windows, id) && modeOf(id) === mode));
-  for (const id of want) if (!panes.has(id)) { const p = new Pane(id, center); panes.set(id, p); emit('feed-hello', { label: p.label }); }
+  for (const id of want) if (!panes.has(id)) { const p = new Pane(id, center); panes.set(id, p); if (lampState) p.lamp(lampState.st, lampState.title); emit('feed-hello', { label: p.label }); }
   for (const [id, p] of [...panes]) if (!want.has(id)) { p.destroy(); panes.delete(id); }
   report();
 }
@@ -46,6 +48,13 @@ settings.onChange(c => { cfg = c; for (const p of panes.values()) p.update(); sy
 await listen('win-state', e => { open = new Set([MAIN, ...(e.payload.open || [])]); sync(); });
 await listen('feed', e => { for (const p of panes.values()) p.take(e.payload.seq, e.payload.event, false); });
 await listen('feed-replay', e => { for (const p of panes.values()) if (p.label === e.payload.label) p.takeReplay(e.payload.events); });
+await listen('voice-lamp', e => {
+  const l = e.payload, st = (l && l.state) || 'off';
+  const title = st === 'on' ? tr('음성인식 끄기 (켜져 있음)') : st === 'starting' ? tr('음성인식을 켜는 중입니다. 누르면 끕니다') : st === 'error' ? tr('음성인식을 켜지 못했습니다') + (l.text ? ': ' + l.text : '') + ' · ' + tr('누르면 다시 켭니다') : tr('음성인식 켜기');
+  lampState = { st, title };
+  for (const p of panes.values()) p.lamp(st, title);
+});
+emit('voice-lamp-hello', {});
 emit('win-state-hello', {});
 sync();
 setInterval(report, 1000);

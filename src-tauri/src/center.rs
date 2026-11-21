@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 use crate::{base_dir, hwnd_of, make_window, win};
 
 #[derive(Clone, Debug)]
-pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64 }             // (the place of a pane in screen pixels, the bar above its text included)
+pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64 }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar)
 
 static RECTS: LazyLock<Mutex<HashMap<String, Vec<Pane>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static LOCK: Mutex<Option<String>> = Mutex::new(None);                    // the center that holds the mouse while a button is down
@@ -56,10 +56,21 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value) -> Result
     let f = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
     let list: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane {
         id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(),
-        x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"),
+        x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"), bar: f(v, "bar"),
     }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
     if let Ok(mut r) = RECTS.lock() { r.insert(label, list); }
+    crate::refollow_input(&app);                                            // (the send box follows its window)
     Ok(())
+}
+
+/// The text area (the bar left out) of the translation window `label` ("main", "win3") in screen pixels: (x, y, w, h). None: the window is not a pane of a center.
+pub fn pane_rect(label: &str) -> Option<(i32, i32, u32, u32)> {
+    let id = if label == "main" { "1".to_string() } else { label.strip_prefix("win")?.to_string() };
+    let rects = RECTS.lock().ok()?;
+    for (_, panes) in rects.iter() {
+        if let Some(p) = panes.iter().find(|p| p.id == id) { return Some((p.x.round() as i32, (p.y + p.bar).round() as i32, p.w.round().max(1.0) as u32, (p.h - p.bar).round().max(1.0) as u32)); }
+    }
+    None
 }
 
 fn inside(panes: &[Pane], x: i32, y: i32, margin: f64) -> bool {

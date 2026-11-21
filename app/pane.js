@@ -7,6 +7,7 @@ import * as winconf from './core/winconf.js';
 import * as layout from './core/winlayout.js';
 import { nameFor } from './winname.js';
 
+
 export const BAR_H = 22;
 const MIN_W = 160, MIN_H = 60;
 
@@ -16,7 +17,7 @@ export class Pane {
     this.id = id; this.center = center; this.label = `c${id}`;
     this.seen = 0; this.firstLive = Infinity; this.replay = true;
     this.el = document.createElement('div'); this.el.className = 'pane';
-    this.el.innerHTML = '<div class="pbar"><span class="ptitle"></span></div><div class="pbody"><div class="pbg"></div><div class="plines" data-notr></div></div><div class="pgrip"></div>';
+    this.el.innerHTML = '<div class="pbar"><span class="ptitle"></span><span class="pspace"></span><span class="ptools"><button class="presearch" tabindex="-1" title="매트릭스 다시 찾기">⟳</button><button class="pvoice" tabindex="-1" title="음성인식 켜기" data-state="off"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor"/><path class="waves" d="M11.2 5.4a3.6 3.6 0 0 1 0 5.2M13 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button><button class="poptions" tabindex="-1" title="옵션">⚙</button><button class="pclose" tabindex="-1">✕</button></span></div><div class="pbody"><div class="pbg"></div><div class="plines" data-notr></div></div><div class="pgrip"></div>';
     this.title = this.el.querySelector('.ptitle');
     this.lines = this.el.querySelector('.plines');
     this.lines.classList.add('lines');
@@ -24,20 +25,39 @@ export class Pane {
     this.feed = new WindowFeed(id, () => this.center.cfg(), () => this.conf());
     document.body.append(this.el);
     this.place();
-    this.drag(this.el.querySelector('.pbar'), (s, dx, dy) => { this.rect.x = s.x + dx; this.rect.y = s.y + dy; });
+    this.drag(this.el.querySelector('.pbar'), (s, dx, dy) => { this.rect.x = s.x + dx; this.rect.y = Math.max(BAR_H, s.y + dy); }, e => !e.target.closest('button'));
+    this.tools();
     this.drag(this.el.querySelector('.pgrip'), (s, dx, dy) => { this.rect.w = Math.max(MIN_W, s.w + dx); this.rect.h = Math.max(MIN_H, s.h + dy); });
     this.update();
   }
   conf() { const cfg = this.center.cfg(); return this.id === MAIN ? null : cfg.child_windows.find(c => c.id === this.id) || winconf.newConf(this.id, [...winconf.KNOWN, winconf.ETC]); }
   opt(key, dflt) { const cfg = this.center.cfg(); return this.id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? dflt) : winconf.opt(this.conf(), cfg, key, dflt); }
 
-  // the first place: the text starts where the window of 3.1.1 starts, a little aside (this is a viewer for now: nothing is saved)
+  // the buttons of the bar (the same jobs as in a window of 3.1.1)
+  tools() {
+    const q = c => this.el.querySelector(c);
+    q('.presearch').onclick = () => emit('research', {});
+    q('.pvoice').onclick = () => emit('voice-toggle', {});
+    q('.poptions').onclick = () => {
+      try { localStorage.setItem('cmr-options-win', String(this.id)); } catch { /* the options open on the first window */ }
+      invoke('open_options').catch(() => {});
+    };
+    // the main window ends the program, the others only close themselves (the hub keeps them closed: "직접 열 때만")
+    q('.pclose').onclick = async () => { this.save(); if (this.id === MAIN) invoke('quit_request').catch(() => {}); else emit('win-closed', { id: this.id }); };
+    q('.pbar').addEventListener('mousedown', e => { if (e.target.tagName === 'BUTTON') e.preventDefault(); });
+  }
+  lamp(st, title) { const b = this.el.querySelector('.pvoice'); b.dataset.state = st; b.title = title; }
+
+  // the place: the text area is where the window of 3.1.1 was (its saved geometry is the place and the size of the text area); the bar stands above it
   place() {
-    const cfg = this.center.cfg(), g = layout.parseGeometry(this.id === MAIN ? cfg.geometry : (this.conf() || {}).geometry) || { w: 420, h: 300, x: 100, y: 100 };
+    const cfg = this.center.cfg(), g = layout.parseGeometry(this.id === MAIN ? cfg.geometry : (this.conf() || {}).geometry) || { w: layout.DEFAULT_SIZE[0], h: layout.DEFAULT_SIZE[1], x: null, y: null };
     const d = this.center.dpr(), [ox, oy] = this.center.origin();
-    let saved = null;
-    try { saved = JSON.parse(localStorage.getItem('cmr-center-' + this.id) || 'null'); } catch { /* none */ }
-    this.rect = saved || { x: ((g.x ?? 100) - ox) / d + 60, y: ((g.y ?? 100) - oy) / d + 60 + BAR_H, w: g.w / d, h: g.h / d };
+    let { x, y } = g;
+    if (x === null || y === null) {                                  // no place saved: next to the main window, a little lower each time (like a window of 3.1.1)
+      const m = layout.parseGeometry(cfg.geometry), n = Math.max(1, cfg.child_windows.findIndex(c => c.id === this.id) + 1);
+      [x, y] = layout.cascade(m && m.x !== null ? [m.x, m.y] : null, this.id === MAIN ? 0 : n);
+    }
+    this.rect = { x: (x - ox) / d, y: Math.max(BAR_H, (y - oy) / d), w: g.w / d, h: g.h / d };
     this.layout();
   }
   layout() {
@@ -45,15 +65,20 @@ export class Pane {
     this.el.style.left = r.x + 'px'; this.el.style.top = (r.y - BAR_H) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + BAR_H) + 'px';
   }
   // the box (the bar included) in pixels of the page, for the center
-  box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: (r.y - BAR_H) * d, w: r.w * d, h: (r.h + BAR_H) * d }; }
+  box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: (r.y - BAR_H) * d, w: r.w * d, h: (r.h + BAR_H) * d, bar: BAR_H * d }; }
+  // where the text area is on the screen now: told to the hub, which keeps it in the settings (a window of 3.1.1 did the same)
+  save() {
+    const r = this.rect, d = this.center.dpr(), [ox, oy] = this.center.origin();
+    emit('win-geometry', { id: this.id, geometry: layout.formatGeometry(r.w * d, r.h * d, ox + r.x * d, oy + r.y * d) });
+  }
 
-  drag(target, fn) {
+  drag(target, fn, accept = () => true) {
     target.addEventListener('pointerdown', e => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || !accept(e)) return;
       target.setPointerCapture(e.pointerId);
       const s = { ...this.rect, px: e.clientX, py: e.clientY };
       const move = m => { fn(s, m.clientX - s.px, m.clientY - s.py); this.layout(); this.center.changed(this); };
-      const up = () => { target.removeEventListener('pointermove', move); target.removeEventListener('pointerup', up); try { localStorage.setItem('cmr-center-' + this.id, JSON.stringify(this.rect)); } catch { /* not kept */ } };
+      const up = () => { target.removeEventListener('pointermove', move); target.removeEventListener('pointerup', up); this.save(); };
       target.addEventListener('pointermove', move); target.addEventListener('pointerup', up);
     });
   }
