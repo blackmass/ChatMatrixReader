@@ -1175,6 +1175,16 @@ async fn lab_web_noactivate(app: AppHandle, label: String, on: bool) -> Result<(
     Ok(())
 }
 
+/// What the translation windows do every poll: the style is put back (a window library call may have wiped it), and in "above the game only" the window is put right above the game
+#[tauri::command]
+async fn lab_web_tick(app: AppHandle, label: String, game: Option<i64>) -> Result<(), String> {
+    let w = app.get_webview_window(&label).ok_or("no such window")?;
+    let h = hwnd_of(&w)?;
+    win::keep_style(h);
+    if let Some(g) = game { if g > 0 { win::place_above(h, g as isize); } }
+    Ok(())
+}
+
 #[tauri::command]
 async fn lab_web_info(app: AppHandle, label: String) -> Value {
     let events = LAB_EVENTS.lock().unwrap().clone();
@@ -1226,6 +1236,7 @@ fn main() {
             lab_web_z,
             lab_web_ignore,
             lab_web_noactivate,
+            lab_web_tick,
             lab_web_info,
             capture_start,
             capture_stop,
