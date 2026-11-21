@@ -634,6 +634,11 @@ pub fn place_above(hwnd: isize, game: isize) {
     }
 }
 
+/// The window `hwnd` goes directly BEHIND `above` (in its band: both must be topmost, or both not).
+pub fn place_below(hwnd: isize, above: isize) {
+    unsafe { if IsWindow(hwnd) != 0 && IsWindow(above) != 0 { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); } }
+}
+
 /// Topmost on / off for a window, directly (the window library remembers its own idea of it and may skip a call that looks like no change).
 /// Off with `game`: the window is put directly above the game (not at the top of the ordinary windows: that would drag the game up with it).
 pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
