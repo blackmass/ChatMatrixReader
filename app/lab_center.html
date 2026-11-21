@@ -3,7 +3,7 @@
      ?mode=0|1|2: 0 an ordinary window, 1 always on top, 2 above the game only; ox, oy: the place of this window on the screen in pixels (the panes tell their places in screen pixels). -->
 <meta charset="utf-8"><title>CMR Lab Center</title>
 <style>
-  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; font: 13px 'Malgun Gothic', 'Segoe UI', sans-serif; color: #fff; user-select: none; }
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; -webkit-user-select: none; font: 13px 'Malgun Gothic', 'Segoe UI', sans-serif; color: #fff; user-select: none; }
   .pane { position: absolute; min-width: 160px; min-height: 90px; border: 1px solid rgba(255,255,255,.55); background: var(--bg); box-shadow: 0 0 0 1px #0006; }
   .pane .bar { height: 22px; line-height: 22px; padding: 0 8px; background: var(--bar); cursor: move; white-space: nowrap; overflow: hidden; }
   .pane .body { padding: 6px 8px; font-size: 12px; }
@@ -16,6 +16,7 @@
   const NAMES = ['ordinary', 'always on top', 'above the game only'], COLORS = [['rgba(40,70,140,.35)', '#2f4f9a'], ['rgba(30,120,60,.35)', '#25813f'], ['rgba(170,90,20,.35)', '#b5651d']];
   document.title = 'CMR Lab Center ' + NAMES[mode];
   const dpr = () => window.devicePixelRatio || 1;
+  const MAC = /Mac/i.test(navigator.platform);                  // (macOS: the places are told in pixels like on Windows, but from where the window really is on the screen: screenX / screenY, in points, times the scale)
   const panes = [];
   // a pane: starts near the top left of the main screen (screen pixel 0,0 is at (-ox, -oy) of this window)
   function make(id, i) {
@@ -47,7 +48,8 @@
       do {
         again = false;
         const d = dpr();
-        const list = panes.map(p => { const r = p.el.getBoundingClientRect(); p.el.querySelector('.info').textContent = `${Math.round(r.width * d)}x${Math.round(r.height * d)} dpr ${d}`; return { id: p.id, x: ox + r.left * d, y: oy + r.top * d, w: r.width * d, h: r.height * d }; });
+        const list = panes.map(p => { const r = p.el.getBoundingClientRect(); p.el.querySelector('.info').textContent = `${Math.round(r.width * d)}x${Math.round(r.height * d)} dpr ${d}${MAC ? ` at ${Math.round(screenX + r.left)},${Math.round(screenY + r.top)}` : ''}`;
+          return MAC ? { id: p.id, x: (screenX + r.left) * d, y: (screenY + r.top) * d, w: r.width * d, h: r.height * d, pt: true, k: d } : { id: p.id, x: ox + r.left * d, y: oy + r.top * d, w: r.width * d, h: r.height * d }; });
         const key = JSON.stringify(list);
         if (key !== lastKey) { lastKey = key; await window.__TAURI__.core.invoke('lab_rects', { label: 'lab_c' + mode, panes: list }); }
       } while (again);

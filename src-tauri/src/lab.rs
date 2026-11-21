@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 use crate::{base_dir, hwnd_of, make_window, win};
 
 #[derive(Clone, Debug)]
-pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64 }             // (physical screen pixels)
+pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, pt: bool, k: f64 }             // (pixels; macOS (pt): the window library wants points: divide by k)
 
 static RECTS: LazyLock<Mutex<HashMap<String, Vec<Pane>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static LOCK: Mutex<Option<String>> = Mutex::new(None);                    // the center that holds the mouse while a button is down
@@ -49,7 +49,7 @@ pub fn start(app: AppHandle) {
 #[tauri::command]
 pub async fn lab_rects(app: AppHandle, label: String, panes: Value) -> Result<(), String> {
     let f = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
-    let panes: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane { id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(), x: f(v, "x"), y: f(v, "y"), w: f(v, "w"), h: f(v, "h") }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
+    let panes: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane { id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(), x: f(v, "x"), y: f(v, "y"), w: f(v, "w"), h: f(v, "h"), pt: v.get("pt").and_then(|x| x.as_bool()).unwrap_or(false), k: f(v, "k").max(1.0) }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
     if let Ok(mut r) = RECTS.lock() { r.insert(label.clone(), panes.clone()); }
     let prefix = format!("labb_{label}_");
     for p in &panes {
@@ -68,8 +68,13 @@ pub async fn lab_rects(app: AppHandle, label: String, panes: Value) -> Result<()
                 x
             }
         };
-        let _ = win_.set_size(tauri::PhysicalSize::new(w, h));
-        let _ = win_.set_position(tauri::PhysicalPosition::new(p.x.round() as i32, p.y.round() as i32));
+        if p.pt {
+            let _ = win_.set_size(tauri::LogicalSize::new((p.w / p.k).max(10.0), (p.h / p.k).max(10.0)));
+            let _ = win_.set_position(tauri::LogicalPosition::new(p.x / p.k, p.y / p.k));
+        } else {
+            let _ = win_.set_size(tauri::PhysicalSize::new(w, h));
+            let _ = win_.set_position(tauri::PhysicalPosition::new(p.x.round() as i32, p.y.round() as i32));
+        }
     }
     for w in app.webview_windows().values() {                                // (a pane that is gone: its blur goes)
         let n = w.label();
@@ -109,13 +114,7 @@ fn run(app: AppHandle) {
     let mut game_at = Instant::now() - Duration::from_secs(5);
     loop {
         std::thread::sleep(Duration::from_millis(16));
-        #[allow(unused_mut)]
-        let (mut cx, mut cy) = win::cursor_pos();
-        #[cfg(target_os = "macos")]
-        {                                                                      // (the cursor is in points there, the panes are in pixels)
-            let k = app.get_webview_window("lab_c0").and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
-            cx = (cx as f64 * k).round() as i32; cy = (cy as f64 * k).round() as i32;
-        }
+        let (cx, cy) = win::cursor_pos();                                      // (pixels: macOS multiplies its points by the scale of the main screen itself)
         let down = win::key_down(0x01);
         let rects = RECTS.lock().map(|r| r.clone()).unwrap_or_default();
         // which center may take the mouse: the one with a pane under the pointer (the topmost kind first), and the one that holds it while a button is down
