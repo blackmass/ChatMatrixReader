@@ -270,6 +270,12 @@ function panel() {
     if (p.manifest && p.manifest.description) detail.append(el('p', 'pl-desc', p.manifest.description));
     for (const e of p.errors) detail.append(el('small', 'err', '✖ ' + e));
     for (const w of p.warnings) detail.append(el('small', 'note pl-warning', '⚠ ' + w));
+    if (p.gone) {                                        // (its folder is not there: what is left of it can be cleared)
+      detail.append(el('small', 'note', tr('플러그인 폴더가 없습니다. 남은 설정과 저장 데이터를 지울 수 있습니다.')));
+      const fg = el('button', 'btn', tr('남은 설정 지우기'));
+      fg.onclick = async () => { await ask('forget', p.id, {}); };
+      detail.append(fg);
+    }
     if (!p.ok) return;
     if (p.lastError) detail.append(el('small', 'err', '✖ ' + p.lastError));
 

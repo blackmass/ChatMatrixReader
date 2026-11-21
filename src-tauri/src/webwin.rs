@@ -32,6 +32,8 @@ const BAR: &str = r#"(() => {
   if (window.__cmrBar) return; window.__cmrBar = 1;
   const go = c => { try { location.href = 'cmr-cmd://' + c; } catch (e) {} };
   const TITLE = __TITLE__;
+  const MAC = __MAC__;
+  window.__cmrLocked = __LOCK__;
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
   // what a window of a browser does with these is not wanted here: the wheel with ctrl (zoom) or shift (sideways) is a plain turn of the wheel; no zoom keys; no menu of the right button
@@ -68,14 +70,59 @@ const BAR: &str = r#"(() => {
     const t = sh.querySelector('.t'), bar = sh.querySelector('.b');
     bar.addEventListener('mousedown', e => { if (e.button === 0 && !e.target.closest('button')) go('drag'); });
     for (const b of sh.querySelectorAll('button')) b.addEventListener('click', () => go(b.dataset.c));
-    const title = () => { t.textContent = TITLE || document.title || location.host; };
+    // (the title of the page, as it changes; what the plugin gave only until the page has one)
+    const title = () => { t.textContent = document.title || TITLE || location.host; };
     title(); setInterval(title, 1000);
     // a text box of the page asks for the keyboard (the window does not take it otherwise: the game keeps it); when the box is left the game gets it back
     const editable = x => !!x && (x.isContentEditable || (/^(INPUT|TEXTAREA|SELECT)$/.test(x.tagName) && !/^(button|checkbox|radio|submit|reset|image|range|color|file)$/i.test(x.type || '')));
     document.addEventListener('focusin', e => { if (editable(e.target)) go('focus'); }, true);
     document.addEventListener('focusout', e => { if (editable(e.target)) go('blur'); }, true);
     document.documentElement.append(host);
-    try { const st = new CSSStyleSheet(); st.replaceSync('html{margin-top:22px !important}'); document.adoptedStyleSheets = [...document.adoptedStyleSheets, st]; } catch (e) {}
+    // A scroll bar of ours, like a phone's: a thin line that shows while the page scrolls and goes away a moment later (the page's own scroll bars are hidden, see the style below)
+    const bar2 = document.createElement('div');
+    bar2.style.cssText = 'position:fixed;right:2px;top:26px;width:4px;height:40px;border-radius:2px;background:rgba(230,198,110,.75);box-shadow:0 0 2px #000;z-index:2147483646;opacity:0;transition:opacity .25s;pointer-events:none;';
+    let hideT = 0;
+    document.addEventListener('scroll', e => {
+      const d = e.target === document ? (document.scrollingElement || document.documentElement) : e.target;
+      if (!d || d.nodeType !== 1 || d.scrollHeight <= d.clientHeight + 1) return;
+      const full = d === (document.scrollingElement || document.documentElement) || d === document.body, track = window.innerHeight - 30;
+      const h = Math.max(24, track * d.clientHeight / d.scrollHeight), room = track - h, max = d.scrollHeight - d.clientHeight;
+      bar2.style.height = h + 'px'; bar2.style.top = (26 + room * (d.scrollTop / max)) + 'px';
+      if (!full) { bar2.style.opacity = '0'; return; }          // (only the scroll of the page itself: a list inside the page has its own look)
+      bar2.style.opacity = '1'; clearTimeout(hideT); hideT = setTimeout(() => { bar2.style.opacity = '0'; }, 900);
+    }, true);
+    document.documentElement.append(bar2);
+    // macOS: the edge of a window with no frame gets no resize cursor there; strips along the edges (inside the page) give it, and a drag on them resizes by our own measure
+    if (MAC) {
+      const dirs = { n: ['ns-resize', 'left:8px;right:8px;top:0;height:5px'], s: ['ns-resize', 'left:8px;right:8px;bottom:0;height:5px'], w: ['ew-resize', 'top:8px;bottom:8px;left:0;width:5px'], e: ['ew-resize', 'top:8px;bottom:8px;right:0;width:5px'],
+        nw: ['nwse-resize', 'left:0;top:0;width:10px;height:10px'], se: ['nwse-resize', 'right:0;bottom:0;width:10px;height:10px'], ne: ['nesw-resize', 'right:0;top:0;width:10px;height:10px'], sw: ['nesw-resize', 'left:0;bottom:0;width:10px;height:10px'] };
+      const zones = [];
+      for (const [d, [cur, pos]] of Object.entries(dirs)) {
+        const z = document.createElement('div');
+        z.style.cssText = `position:fixed;${pos};cursor:${cur};z-index:2147483647;`;
+        z.addEventListener('pointerdown', e => {
+          if (e.button !== 0 || window.__cmrLocked) return;
+          e.preventDefault(); z.setPointerCapture(e.pointerId);
+          const x0 = e.screenX, y0 = e.screenY, L = window.screenX, T = window.screenY, W = window.outerWidth, H = window.outerHeight;
+          let last = 0;
+          const move = m => {
+            const now = Date.now(); if (now - last < 16) return; last = now;
+            const dx = m.screenX - x0, dy = m.screenY - y0;
+            let l = L, t = T, w = W, h = H;
+            if (d.includes('e')) w = Math.max(120, W + dx);
+            if (d.includes('s')) h = Math.max(80, H + dy);
+            if (d.includes('w')) { w = Math.max(120, W - dx); l = L + (W - w); }
+            if (d.includes('n')) { h = Math.max(80, H - dy); t = T + (H - h); }
+            go(`rect?x=${l}&y=${t}&w=${w}&h=${h}`);
+          };
+          const up = () => { z.removeEventListener('pointermove', move); z.removeEventListener('pointerup', up); z.removeEventListener('pointercancel', up); };
+          z.addEventListener('pointermove', move); z.addEventListener('pointerup', up); z.addEventListener('pointercancel', up);
+        });
+        zones.push(z); document.documentElement.append(z);
+      }
+      setInterval(() => { for (const z of zones) z.style.display = window.__cmrLocked ? 'none' : ''; }, 500);
+    }
+    try { const st = new CSSStyleSheet(); st.replaceSync('html{margin-top:22px !important}html,body,*{scrollbar-width:none !important}*::-webkit-scrollbar{display:none !important}'); document.adoptedStyleSheets = [...document.adoptedStyleSheets, st]; } catch (e) {}
     setInterval(() => { if (!host.isConnected) document.documentElement.append(host); }, 1000);      // (a page that draws itself again may take it away)
   };
   if (document.documentElement) mount(); else document.addEventListener('DOMContentLoaded', mount);
@@ -110,6 +157,17 @@ pub fn on_close_requested(label: &str) {
 fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
     let Some(win) = app.get_webview_window(label) else { return };
     match cmd {
+        "rect" => {                                     // (macOS: the strips along the edges resize the window by their own measure; the numbers are points, the window's outer rectangle)
+            if LOCKED.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) { return; }
+            let q = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok());
+            let n = |k: &str| q.as_ref().and_then(|u| u.query_pairs().find(|(a, _)| a == k).and_then(|(_, v)| v.parse::<f64>().ok()));
+            if let (Some(x), Some(y), Some(w), Some(h)) = (n("x"), n("y"), n("w"), n("h")) {
+                if w.is_finite() && h.is_finite() && w < 10000.0 && h < 10000.0 {
+                    let _ = win.set_size(tauri::LogicalSize::new(w.max(120.0), h.max(80.0)));
+                    let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+                }
+            }
+        }
         "open" => {                                     // a link the user opened in a new place: the user's browser, only where the window itself may go (the same rule)
             let url = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "u").map(|(_, v)| v.into_owned()));
             let allow = OPEN_ALLOW.lock().ok().and_then(|m| m.get(label).cloned()).unwrap_or_default();
@@ -179,7 +237,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").chars().take(80).collect::<String>();
     let key = weblib::data_key(args.get("key").and_then(|v| v.as_str()).unwrap_or(""));
     let persist = args.get("persist").and_then(|v| v.as_bool()).unwrap_or(false);
-    let script = BAR.replace("__TITLE__", &serde_json::to_string(&title).unwrap_or_else(|_| "\"\"".into()));
+    let script = BAR.replace("__TITLE__", &serde_json::to_string(&title).unwrap_or_else(|_| "\"\"".into())).replace("__MAC__", if cfg!(target_os = "macos") { "true" } else { "false" }).replace("__LOCK__", if lock { "true" } else { "false" });
     let (app2, lbl) = (app.clone(), label.clone());
     let b = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url));
     #[cfg(windows)]
@@ -285,6 +343,7 @@ pub async fn web_ignore(app: AppHandle, label: String, on: bool) -> Result<i64, 
 pub async fn web_lock(app: AppHandle, label: String, on: bool) -> Result<(), String> {
     let w = get(&app, &label)?;
     if let Ok(mut l) = LOCKED.lock() { l.retain(|x| x != &label); if on { l.push(label.clone()); } }
+    let _ = w.eval(&format!("window.__cmrLocked={}", on));
     w.set_resizable(!on).map_err(|e| e.to_string())
 }
 

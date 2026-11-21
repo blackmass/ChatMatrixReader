@@ -44,7 +44,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   function summary(id) {
     const r = registry.get(id), e = entry(id);
     return { id, ok: !!(r && r.ok), errors: r ? r.errors : [], warnings: r ? r.warnings : [], manifest: r ? r.manifest : null, enabled: !!e.enabled, running: running.has(id),
-      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, requested: Array.isArray(e.requested) ? e.requested : [], web: { cookies: !!(e.web && e.web.cookies) }, webOpen: web.isOpen(id), options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
+      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, gone: !registry.has(id), requested: Array.isArray(e.requested) ? e.requested : [], web: { cookies: !!(e.web && e.web.cookies) }, webOpen: web.isOpen(id), options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
       review: !!(r && r.ok && e.asked !== permsKey(r.manifest)) };       // review: nobody has decided about what it asks for yet (the options window asks the user, one plugin after the other)
   }
   const allIds = () => [...new Set([...registry.keys(), ...Object.keys(entries())])].sort();
@@ -64,6 +64,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       registry.set(id, text === null ? { id, ok: false, errors: ['plugin.json is not there'], warnings: [], manifest: null } : { id, ...parseManifest(text, id) });
     }
     for (const id of [...registry.keys()]) if (!found.has(id)) registry.delete(id);
+    pruneWindows();
     await reconcile();
     publishState();
     // a plugin nobody has decided about yet: the options window is opened once, it asks the user (api.askedOpen: only once in a run of the program)
@@ -143,6 +144,19 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       changed = true;
     }
     if (changed) settings.set({ child_windows: list });
+  }
+
+  // The windows of a plugin that the plugin does not have any more (it was changed: a window it declared is gone, it does not ask for the web window now) leave the list of windows.
+  // A plugin that is not found at all keeps its entries: its folder may only be away for a moment (the user can clear it by hand, "forget")
+  function pruneWindows() {
+    const list = settings.cfg().child_windows || [];
+    const stale = c => {
+      if (!c.owner) return false;
+      const r = registry.get(c.owner);
+      if (!r || !r.ok) return false;
+      return c.kind === 'page' ? !(r.manifest.windows || []).some(w => w.id === c.owner_win) : c.kind === 'web' ? !r.manifest.permissions.web : false;
+    };
+    if (list.some(stale)) settings.set({ child_windows: list.filter(c => !stale(c)) });
   }
 
   async function startOne(id) {
@@ -277,6 +291,15 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
         return reply({});
       }
       if (cmd === 'webClear') { if (!web.isOpen(id)) return reply({ error: 'open' }); await web.clearData(id); note(id, 'cookies and stored data of the web window cleared'); return reply({}); }
+      if (cmd === 'forget') {                                              // the settings, windows and stored data of a plugin whose folder is not there (the user asked)
+        if (registry.has(id)) return reply({ error: 'the plugin is there' });
+        const rest = { ...entries() }; delete rest[id];
+        bridges.delete(id);
+        settings.set({ plugins: rest, child_windows: (settings.cfg().child_windows || []).filter(c => c.owner !== id) });
+        await files.remove(storePath(id)).catch(() => {});
+        publishState();
+        return reply({});
+      }
       if (cmd === 'hash') return reply(await invoke('plugin_hash', { id }));
       if (cmd === 'logs') return reply({ lines: logs.get(id) || [] });
     } catch (err) { reply({ error: String((err && err.message) || err) }); }

@@ -63,6 +63,7 @@ async function invoke(cmd, a = {}) {
     case 'fs_read': return files.has(a.path) ? files.get(a.path) : null;
     case 'fs_write': files.set(a.path, a.text); return null;
     case 'fs_append': files.set(a.path, (files.get(a.path) || '') + a.text); return null;
+    case 'fs_remove': files.delete(a.path); return null;
     case 'fs_kind': return files.has(a.path) ? 'file' : '';
     case 'fs_mkdir': return null;
     case 'fs_list': { const pre = a.path.replace(/\/$/, '') + '/'; return [...new Set([...files.keys()].filter(k => k.startsWith(pre)).map(k => { const r = k.slice(pre.length); return r.includes('/') ? r.split('/')[0] + '/' : r; }))]; }
@@ -1153,6 +1154,14 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   }), [PID, method, args]);
   const r1 = await asked('chat.inject', { text: 'hello from the plugin', sender: '게시판' }); await control.waitForTimeout(500);
   ok(r1.ok && (await main.locator('#lines').textContent()).includes('hello from the plugin') && (await main.locator('#lines').textContent()).includes('게시판'), 'plugins: chat.inject puts a line in the chat window: ' + JSON.stringify(r1));
+  // a window the plugin does not declare any more leaves the list of windows when the plugins are read again; the entries of a plugin that is not there stay until the user clears them
+  await control.evaluate(([id]) => import('./settings.js').then(m => m.set({ child_windows: [...m.cfg().child_windows, { id: 90, name: 'old', owner: id, owner_win: 'oldwin', kind: 'page', page: 'old.html', open_mode: 'never', geometry: '300x200' }, { id: 91, name: 'ghost', owner: 'ghost-plugin', owner_win: 'x', kind: 'page', page: 'g.html', open_mode: 'never', geometry: '300x200' }], plugins: { ...m.cfg().plugins, 'ghost-plugin': { enabled: true, granted: {}, options: {} } } })), [PID]);
+  await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(400);
+  const wl = await control.evaluate(() => import('./settings.js').then(m => m.cfg().child_windows.map(c => c.id)));
+  ok(!wl.includes(90) && wl.includes(91), 'plugins/windows: a window the plugin does not declare any more is dropped, a window of a missing plugin is kept: ' + JSON.stringify(wl));
+  await opt.evaluate(() => window.__TAURI__.event.emit('plugin-command', { cmd: 'forget', id: 'ghost-plugin' })); await control.waitForTimeout(500);
+  const after = await control.evaluate(() => import('./settings.js').then(m => ({ w: m.cfg().child_windows.map(c => c.id), p: Object.keys(m.cfg().plugins) })));
+  ok(!after.w.includes(91) && !after.p.includes('ghost-plugin'), 'plugins: "forget" clears the settings and windows of a plugin that is not there: ' + JSON.stringify(after));
   const r2 = await asked('storage.set', { key: 'last', value: { id: 5 } }); const r3 = await asked('storage.get', { key: 'last' });
   ok(r2.ok && r3.ok && r3.value.id === 5, 'plugins: storage set / get');
   const r4 = await asked('net.fetch', { url: 'https://example.com/list' }); const r5 = await asked('net.fetch', { url: 'https://evil.org/list' });
