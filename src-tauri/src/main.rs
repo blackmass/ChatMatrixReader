@@ -1145,6 +1145,7 @@ fn main() {
             plugin_open_url,
             process_stats,
             center::center_rects,
+            center::center_raise,
             webwin::web_open,
             webwin::web_close,
             webwin::web_allow,

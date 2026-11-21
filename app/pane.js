@@ -24,6 +24,8 @@ export class Pane {
     this.view = new ChatView(this.lines);
     this.feed = new WindowFeed(id, () => this.center.cfg(), () => this.conf());
     document.body.append(this.el);
+    this.el.style.zIndex = String(id);                                // (the first order: a window of a higher number is above)
+    this.el.addEventListener('pointerdown', () => this.center.raise(this), true);         // (touched: this pane comes to the front of the center)
     this.place();
     this.drag(this.el.querySelector('.pbar'), (s, dx, dy) => { this.rect.x = s.x + dx; this.rect.y = Math.max(BAR_H, s.y + dy); }, e => !e.target.closest('button'));
     this.tools();

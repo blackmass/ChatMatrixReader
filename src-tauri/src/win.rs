@@ -634,6 +634,22 @@ pub fn place_above(hwnd: isize, game: isize) {
     }
 }
 
+/// The windows of `hwnds` that exist, from the front to the back of the screen (the order the system has them in now).
+pub fn z_order(hwnds: &[isize]) -> Vec<isize> {
+    let mut out = Vec::new();
+    if hwnds.is_empty() { return out; }
+    unsafe {
+        let mut x = GetWindow(hwnds[0], 0);                                 // GW_HWNDFIRST: the top of the stack this window is in
+        let mut n = 0;
+        while x != 0 && n < 5000 && out.len() < hwnds.len() {
+            if hwnds.contains(&x) { out.push(x); }
+            x = GetWindow(x, 2);                                            // GW_HWNDNEXT
+            n += 1;
+        }
+    }
+    out
+}
+
 /// Topmost on / off for a window, directly (the window library remembers its own idea of it and may skip a call that looks like no change).
 /// Off with `game`: the window is put directly above the game (not at the top of the ordinary windows: that would drag the game up with it).
 pub fn set_topmost(hwnd: isize, on: bool, game: isize) {

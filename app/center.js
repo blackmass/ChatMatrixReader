@@ -23,7 +23,13 @@ const center = {
   dpr: () => window.devicePixelRatio || 1,
   origin: () => [ox, oy],
   changed: () => report(),
+  // a pane was touched: it goes to the front of the panes of this center (like an ordinary window); the ordinary center also goes up over the other programs' windows
+  raise: p => {
+    if (Number(p.el.style.zIndex) !== top) p.el.style.zIndex = String(++top);
+    if (mode === 0) invoke('center_raise', { label }).catch(() => {});
+  },
 };
+let top = 1000;
 // the kind of order a window has now (settings: "항상 위", "와우 위에서만")
 const optOf = (id, key, d) => (id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? d) : winconf.opt(cfg.child_windows.find(c => c.id === id) || null, cfg, key, d));
 const modeOf = id => (optOf(id, 'topmost_wow_only', false) ? 2 : optOf(id, 'topmost', true) ? 1 : 0);

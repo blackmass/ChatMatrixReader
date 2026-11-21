@@ -778,6 +778,11 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   await cp.mouse.move(bar.x + 20, bar.y + 10); await cp.mouse.down(); await cp.mouse.move(bar.x + 120, bar.y + 70, { steps: 4 }); await cp.mouse.up(); await control.waitForTimeout(300);
   const after = await cp.locator('.pane').last().boundingBox();
   ok(Math.abs(after.x - before.x - 100) < 3 && Math.abs(after.y - before.y - 60) < 3, 'center: the bar drags the pane: ' + JSON.stringify([before, after]));
+  // touching a pane brings it to the front of the center (the pane under the pointer takes the clicks)
+  const z = async i => Number(await cp.locator('.pane').nth(i).evaluate(e => e.style.zIndex));
+  ok(await cp.locator('.pane').count() >= 2 && await z(0) < await z(1), 'center: the first order of the panes follows the numbers of the windows: ' + [await z(0), await z(1)]);
+  await cp.locator('.pane').nth(0).evaluate(e => e.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })));
+  ok(await z(0) > await z(1), 'center: a pane that is touched comes to the front: ' + [await z(0), await z(1)]);
   // the place of the pane is in the settings now (the place of the TEXT: what a window of 3.1.1 kept)
   ok(/^\d+x\d+\+\d+\+\d+$/.test(cfgFile().child_windows.find(c => c.id === 3).geometry), 'center: the place of the pane is kept in the settings: ' + cfgFile().child_windows.find(c => c.id === 3).geometry);
   await control.evaluate(([g, g3]) => import('./settings.js').then(m => m.set({ geometry: g, child_windows: m.cfg().child_windows.map(c => (c.id === 3 ? { ...c, geometry: g3 || '' } : c)) })), geoBefore); await control.waitForTimeout(400);

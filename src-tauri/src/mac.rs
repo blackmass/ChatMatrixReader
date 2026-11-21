@@ -586,6 +586,19 @@ pub fn raise_top(hwnd: isize) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), orderFrontRegardless]; });
 }
 
+/// The windows of `hwnds` that are on the screen, from the front to the back (the order the system has them in now).
+pub fn z_order(hwnds: &[isize]) -> Vec<isize> {
+    on_main(|| unsafe {
+        let list = windows();
+        let mut ranked: Vec<(usize, isize)> = hwnds.iter().filter_map(|&h| {
+            let n: isize = msg_send![obj(h), windowNumber];
+            list.iter().position(|x| x.number as isize == n).map(|p| (p, h))
+        }).collect();
+        ranked.sort();
+        ranked.into_iter().map(|(_, h)| h).collect()
+    })
+}
+
 /// Topmost on / off for a window. On: the level of floating windows (above the game, also while another program is in front). Off: an ordinary
 /// window; with `game` it is put directly above the game window.
 pub fn set_topmost(hwnd: isize, on: bool, game: isize) {

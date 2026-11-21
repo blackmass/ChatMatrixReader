@@ -63,6 +63,13 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value) -> Result
     Ok(())
 }
 
+/// A pane of the ordinary center was touched: the center goes to the top of the ordinary windows (what a window of 3.1.1 did when it was touched; ours do not take the focus).
+#[tauri::command]
+pub async fn center_raise(app: AppHandle, label: String) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(&label) { if let Ok(h) = hwnd_of(&w) { win::raise_top(h); } }
+    Ok(())
+}
+
 /// The text area (the bar left out) of the translation window `label` ("main", "win3") in screen pixels: (x, y, w, h). None: the window is not a pane of a center.
 pub fn pane_rect(label: &str) -> Option<(i32, i32, u32, u32)> {
     let id = if label == "main" { "1".to_string() } else { label.strip_prefix("win")?.to_string() };
@@ -113,9 +120,17 @@ fn run(app: AppHandle) {
             if !down { *lock = None; }
             if let Some(l) = lock.as_ref() { owner = Some(l.clone()); }
             else {
-                for (label, _) in MODES.iter().rev() {
-                    if rects.get(*label).map_or(false, |p| inside(p, cx, cy, 4.0)) { owner = Some(label.to_string()); break; }
-                }
+                // the centers that have a pane under the pointer; when more than one has, the one that is in front on the screen (the order of the windows of the system) takes it
+                let hit: Vec<&str> = MODES.iter().filter(|(l, _)| rects.get(*l).map_or(false, |p| inside(p, cx, cy, 4.0))).map(|(l, _)| *l).collect();
+                owner = match hit.len() {
+                    0 => None,
+                    1 => Some(hit[0].to_string()),
+                    _ => {
+                        let hs: Vec<(isize, &str)> = hit.iter().filter_map(|l| app.get_webview_window(l).and_then(|w| hwnd_of(&w).ok()).map(|h| (h, *l))).collect();
+                        let order = win::z_order(&hs.iter().map(|(h, _)| *h).collect::<Vec<_>>());
+                        order.first().and_then(|f| hs.iter().find(|(h, _)| h == f)).map(|(_, l)| l.to_string()).or_else(|| hit.last().map(|l| l.to_string()))
+                    }
+                };
                 if down { *lock = owner.clone(); }
             }
         }
