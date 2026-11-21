@@ -25,7 +25,7 @@ use core_graphics::window::{
     copy_window_info, kCGNullWindowID, kCGWindowBounds, kCGWindowLayer, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly, kCGWindowName,
     kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID,
 };
-use objc2::runtime::{AnyObject, Bool, ClassBuilder, Sel};
+use objc2::runtime::{AnyObject, Bool, Sel};
 use objc2::{class, msg_send, sel};
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -425,23 +425,56 @@ pub fn keep_awake() {
     });
 }
 
-// ---- a window that is never the key window (and so never takes the keyboard from the game) unless it is told that a text box of its page needs it
+// ---- a window that is never the key window (and so never takes the keyboard from the game) unless it is told that a text box of its page needs it.
+// NOT done by changing the class of the window (object_setClass): the web view of the window watches the window with key-value observing, which is tied to the class, and a
+// window whose class was changed makes the program abort when the web view leaves it ("Cannot remove an observer ... because it is not registered"). Instead the method
+// canBecomeKeyWindow of the window's class is replaced by one that asks a list first and calls the old method for every window that is not in the list.
 static KEY_ALLOWED: Mutex<Vec<isize>> = Mutex::new(Vec::new());
-extern "C" fn can_become_key(this: *mut AnyObject, _cmd: Sel) -> Bool {
+static NO_KEY: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+static ORIGINALS: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());          // (class, the method it had)
+extern "C" {
+    fn object_getClass(obj: *const AnyObject) -> *const c_void;
+    fn class_getSuperclass(cls: *const c_void) -> *const c_void;
+    fn class_getName(cls: *const c_void) -> *const c_char;
+    fn class_getInstanceMethod(cls: *const c_void, name: Sel) -> *const c_void;
+    fn method_getImplementation(m: *const c_void) -> *const c_void;
+    fn method_getTypeEncoding(m: *const c_void) -> *const c_char;
+    fn class_replaceMethod(cls: *const c_void, name: Sel, imp: *const c_void, types: *const c_char) -> *const c_void;
+}
+extern "C" fn can_become_key(this: *mut AnyObject, cmd: Sel) -> Bool {
     let me = this as isize;
-    Bool::new(KEY_ALLOWED.lock().map(|l| l.contains(&me)).unwrap_or(false))
+    if NO_KEY.lock().map(|l| l.contains(&me)).unwrap_or(false) {
+        return Bool::new(KEY_ALLOWED.lock().map(|l| l.contains(&me)).unwrap_or(false));
+    }
+    // a window that is not one of these: what its class did before
+    let mut cls = unsafe { object_getClass(this) };
+    while !cls.is_null() {
+        let orig = ORIGINALS.lock().ok().and_then(|l| l.iter().find(|e| e.0 == cls as usize).map(|e| e.1));
+        if let Some(f) = orig {
+            let f: extern "C" fn(*mut AnyObject, Sel) -> Bool = unsafe { std::mem::transmute(f) };
+            return f(this, cmd);
+        }
+        cls = unsafe { class_getSuperclass(cls) };
+    }
+    Bool::YES
 }
-fn no_key_class() -> *const c_void {
-    static CLASS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *CLASS.get_or_init(|| unsafe {
-        let mut b = ClassBuilder::new(c"CMRNoKeyPanel", class!(NSPanel)).expect("class CMRNoKeyPanel");
-        b.add_method(sel!(canBecomeKeyWindow), can_become_key as extern "C" fn(*mut AnyObject, Sel) -> Bool);
-        b.register() as *const _ as usize
-    }) as *const c_void
-}
-/// The window becomes a panel of a kind that does not become the key window (a click on its page does not give it the keyboard). Before set_noactivate.
+/// The window becomes one that does not become the key window (a click on its page does not give it the keyboard). Before set_noactivate_light.
 pub fn make_no_key(hwnd: isize) {
-    on_main(|| unsafe { object_setClass(hwnd as *mut AnyObject, no_key_class()); });
+    on_main(|| unsafe {
+        let mut cls = object_getClass(hwnd as *const AnyObject);
+        // (a window that is watched by key-value observing has a class made by the system on top of its own: the method goes to the window's own class)
+        if CStr::from_ptr(class_getName(cls)).to_string_lossy().starts_with("NSKVONotifying_") { cls = class_getSuperclass(cls); }
+        let have = ORIGINALS.lock().map(|l| l.iter().any(|e| e.0 == cls as usize)).unwrap_or(true);
+        if !have {
+            let m = class_getInstanceMethod(cls, sel!(canBecomeKeyWindow));
+            if !m.is_null() {
+                let orig = method_getImplementation(m) as usize;
+                if let Ok(mut l) = ORIGINALS.lock() { l.push((cls as usize, orig)); }
+                class_replaceMethod(cls, sel!(canBecomeKeyWindow), can_become_key as extern "C" fn(*mut AnyObject, Sel) -> Bool as *const c_void, method_getTypeEncoding(m));
+            }
+        }
+        if let Ok(mut l) = NO_KEY.lock() { if !l.contains(&hwnd) { l.push(hwnd); } }
+    });
 }
 /// The page of the window has a text box that needs the keyboard (true), or it does not any more (false).
 pub fn allow_key(hwnd: isize, on: bool) {
@@ -452,6 +485,7 @@ pub fn forget(hwnd: isize) {
     if let Ok(mut l) = KEEP.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = PANELS.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = KEY_ALLOWED.lock() { l.retain(|&h| h != hwnd); }
+    if let Ok(mut l) = NO_KEY.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = TAGGED.lock() { l.retain(|e| e.0 != hwnd); }
 }
 
@@ -462,6 +496,16 @@ pub fn set_noactivate(hwnd: isize, on: bool) {
         if on { l.push(hwnd); }
     }
     if on { on_main(|| { make_panel(hwnd); prevent_activation(hwnd); prepare(hwnd); }); }
+}
+
+/// Like set_noactivate but WITHOUT turning the window into a panel (no change of its class: see make_no_key). For the window of the web: the window server's tag, "not hidden
+/// when another program is active" and the kept style are enough together with make_no_key.
+pub fn set_noactivate_light(hwnd: isize, on: bool) {
+    if let Ok(mut l) = KEEP.lock() {
+        l.retain(|&h| h != hwnd);
+        if on { l.push(hwnd); }
+    }
+    if on { on_main(|| { prevent_activation(hwnd); prepare(hwnd); }); }
 }
 
 /// Every poll of the page: the window stays what it was made (the window library may change it when it changes one of its own flags).

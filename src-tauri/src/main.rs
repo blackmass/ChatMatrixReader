@@ -1148,7 +1148,7 @@ async fn lab_web_open(app: AppHandle, label: String, url: String, ua: Option<Str
                                 let prev = win::foreground();
                                 if prev != h { if let Ok(mut p) = LAB_PREV_FG.lock() { *p = prev; } }
                                 win::allow_key(h, true);
-                                win::set_noactivate(h, false);
+                                win::set_noactivate_light(h, false);
                                 win::grab_focus(h);
                                 let _ = win.set_focus();
                                 lab_note(format!("focus: keyboard to the page (before: {})", prev));
@@ -1157,7 +1157,7 @@ async fn lab_web_open(app: AppHandle, label: String, url: String, ua: Option<Str
                         "blur" => { // the text box was left: the keyboard goes back to where it was
                             if let Ok(h) = hwnd_of(&win) {
                                 win::allow_key(h, false);
-                                win::set_noactivate(h, true);
+                                win::set_noactivate_light(h, true);
                                 let prev = LAB_PREV_FG.lock().map(|p| *p).unwrap_or(0);
                                 if prev != 0 && prev != h { win::set_foreground(prev); }
                                 lab_note(format!("blur: keyboard back to {}", prev));
@@ -1174,7 +1174,7 @@ async fn lab_web_open(app: AppHandle, label: String, url: String, ua: Option<Str
     if let Some(ua) = ua.as_deref() { b = b.user_agent(ua); }
     let win = b.build().map_err(|e| e.to_string())?;
     // like a translation window: it never takes the keyboard of the game (a window that cannot become the key window on macOS, the "no activate" style on Windows)
-    if let Ok(h) = hwnd_of(&win) { win::make_no_key(h); win::set_noactivate(h, true); }
+    if let Ok(h) = hwnd_of(&win) { win::make_no_key(h); win::set_noactivate_light(h, true); }
     Ok(())
 }
 
