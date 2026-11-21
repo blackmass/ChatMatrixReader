@@ -16,7 +16,7 @@
   const NAMES = ['ordinary', 'always on top', 'above the game only'], COLORS = [['rgba(40,70,140,.35)', '#2f4f9a'], ['rgba(30,120,60,.35)', '#25813f'], ['rgba(170,90,20,.35)', '#b5651d']];
   document.title = 'CMR Lab Center ' + NAMES[mode];
   const dpr = () => window.devicePixelRatio || 1;
-  const MAC = /Mac/i.test(navigator.platform);                  // (macOS: the places are told in pixels like on Windows, but from where the window really is on the screen: screenX / screenY, in points, times the scale)
+  const MAC = /Mac/i.test(navigator.platform);                  // (macOS: the places are told in pixels like on Windows, from the origin the window library gives; the blur windows there are put in points: pt, k)
   const panes = [];
   // a pane: starts near the top left of the main screen (screen pixel 0,0 is at (-ox, -oy) of this window)
   function make(id, i) {
@@ -48,8 +48,8 @@
       do {
         again = false;
         const d = dpr();
-        const list = panes.map(p => { const r = p.el.getBoundingClientRect(); p.el.querySelector('.info').textContent = `${Math.round(r.width * d)}x${Math.round(r.height * d)} dpr ${d}${MAC ? ` at ${Math.round(screenX + r.left)},${Math.round(screenY + r.top)}` : ''}`;
-          return MAC ? { id: p.id, x: (screenX + r.left) * d, y: (screenY + r.top) * d, w: r.width * d, h: r.height * d, pt: true, k: d } : { id: p.id, x: ox + r.left * d, y: oy + r.top * d, w: r.width * d, h: r.height * d }; });
+        const list = panes.map(p => { const r = p.el.getBoundingClientRect(); p.el.querySelector('.info').textContent = `${Math.round(r.width * d)}x${Math.round(r.height * d)} dpr ${d}${MAC ? ` ox ${ox},${oy} screen ${Math.round(screenX)},${Math.round(screenY)} px ${Math.round(ox + r.left * d)},${Math.round(oy + r.top * d)}` : ''}`;
+          return MAC ? { id: p.id, x: ox + r.left * d, y: oy + r.top * d, w: r.width * d, h: r.height * d, pt: true, k: d } : { id: p.id, x: ox + r.left * d, y: oy + r.top * d, w: r.width * d, h: r.height * d }; });
         const key = JSON.stringify(list);
         if (key !== lastKey) { lastKey = key; await window.__TAURI__.core.invoke('lab_rects', { label: 'lab_c' + mode, panes: list }); }
       } while (again);
