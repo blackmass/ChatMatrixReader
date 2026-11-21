@@ -790,7 +790,7 @@ extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _inf
                 let look = |ev: *mut c_void| format!("flags={:x} a1={} a2={} p1={} p2={} fx1={:.2} fx2={:.2} cont={} phase={} mom={}", CGEventGetFlags(ev), CGEventGetIntegerValueField(ev, 11), CGEventGetIntegerValueField(ev, 12),
                     CGEventGetIntegerValueField(ev, 96), CGEventGetIntegerValueField(ev, 97), CGEventGetDoubleValueField(ev, 93), CGEventGetDoubleValueField(ev, 94), CGEventGetIntegerValueField(ev, 88),
                     CGEventGetIntegerValueField(ev, 99), CGEventGetIntegerValueField(ev, 123));
-                let dbg_before = if f & 0x0002_0000 != 0 { Some(look(event)) } else { None };
+                let dbg_before = Some(look(event));                 // (every turn over the window is looked at, with or without keys)
                 if f & MOD_MASK != 0 {
                     // With shift held the system turns a wheel's up-down turn into a sideways one (the numbers move from the first axis to the second): the keys are taken off, and that is put back,
                     // else a page that has nothing to scroll sideways does not move at all
@@ -803,8 +803,8 @@ extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _inf
                         if v != 0.0 { CGEventSetDoubleValueField(event, 93, v); CGEventSetDoubleValueField(event, 94, 0.0); }
                     }
                     CGEventSetFlags(event, f & !MOD_MASK);
-                    if let (Some(b), Ok(mut d)) = (dbg_before, SCROLL_DBG.try_lock()) { if d.len() < 40 { d.push(format!("scroll with shift: {b}  ->  {}", look(event))); } }
                 }
+                if let (Some(b), Ok(mut d)) = (dbg_before, SCROLL_DBG.try_lock()) { if d.len() < 80 { d.push(format!("scroll: {b}  ->  {}", look(event))); } }
                 return event;
             }
         }
