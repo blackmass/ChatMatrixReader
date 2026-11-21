@@ -107,7 +107,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     };
   }
 
-  const web = createWebHost({ getKeys: () => settings.cfg().interact_keys, getEntry: entry, getConf: id => webEntry(id), patchConf: (id, patch) => { const c = webEntry(id); if (c) settings.set({ child_windows: (settings.cfg().child_windows || []).map(x => (x === c || x.id === c.id ? { ...x, ...patch } : x)) }); }, invoke, note, wowTitle: () => settings.cfg().wow_window_title || 'World of Warcraft' });
+  const web = createWebHost({ getEntry: entry, getConf: id => webEntry(id), patchConf: (id, patch) => { const c = webEntry(id); if (c) settings.set({ child_windows: (settings.cfg().child_windows || []).map(x => (x === c || x.id === c.id ? { ...x, ...patch } : x)) }); }, invoke, note, wowTitle: () => settings.cfg().wow_window_title || 'World of Warcraft' });
 
   // One bridge for a plugin (its background page and its options page in the options window share it: one storage, one set of limits); a new one when the allowed permissions change
   const bridges = new Map();                   // id -> { key, bridge, hooks }

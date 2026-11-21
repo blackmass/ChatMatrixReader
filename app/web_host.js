@@ -9,12 +9,12 @@ const TICK_MS = 100, INFO_MS = 1000, GAME_MS = 2000, SAVE_MS = 1500, DEFAULT_W =
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };
 export const webLabel = id => 'web_' + String(id).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
 
-export function createWebHost({ getKeys = () => ['Shift'], getEntry, getConf, patchConf, invoke, note, wowTitle = () => 'World of Warcraft', setTimer = setInterval, clearTimer = clearInterval }) {
+export function createWebHost({ getEntry, getConf, patchConf, invoke, note, wowTitle = () => 'World of Warcraft', setTimer = setInterval, clearTimer = clearInterval }) {
   const open = new Map();                       // id -> { label, timers, game, ignore, lock, saveAt, last }
   // what the user chose (the window entry may not be there yet: the defaults of a new window)
   const opts = id => {
     const c = getConf(id) || {}, g = parseGeom(c.geometry);
-    return { topmost: c.topmost !== false && !c.topmost_wow_only, wow: !!c.topmost_wow_only, through: !!c.click_through, lock: !!c.lock_window, cookies: !!(((getEntry(id) || {}).web) || {}).cookies, ...(g || {}) };
+    return { topmost: c.topmost !== false && !c.topmost_wow_only, wow: !!c.topmost_wow_only, lock: !!c.lock_window, cookies: !!(((getEntry(id) || {}).web) || {}).cookies, ...(g || {}) };
   };
 
   function stopLoop(id) {
@@ -30,13 +30,6 @@ export function createWebHost({ getKeys = () => ['Shift'], getEntry, getConf, pa
       const w = opts(id);
       const mode = w.topmost ? 1 : w.wow ? 2 : 0;
       await call('web_tick', { mode, game: o.game || null }).catch(() => {});
-      // click-through, except while the keys that make windows usable are held (the same keys as the other windows: Options > Window 1 "조작 키")
-      let ignore = w.through;
-      if (w.through) {
-        const keys = getKeys() || [], s = await invoke('os_state').catch(() => null);
-        if (s && keys.length && keys.every(k => s[String(k).toLowerCase()] === true)) ignore = false;
-      }
-      if (ignore !== o.ignore) { o.ignore = ignore; await call('web_ignore', { on: ignore }).then(ex => note(id, `click-through ${ignore ? 'on' : 'off'} (style ${Number(ex).toString(16)})`), e => note(id, 'click-through failed: ' + e)); }
       if (w.lock !== o.lock) { o.lock = w.lock; await call('web_lock', { on: w.lock }).catch(() => {}); }
     };
     const follow = async () => {
@@ -44,6 +37,7 @@ export function createWebHost({ getKeys = () => ['Shift'], getEntry, getConf, pa
       try { const g = await invoke('find_game', { known: o.game || null, title: wowTitle() }); o.game = g ? g.hwnd : 0; } catch { /* next round */ }
     };
     const info = async () => {
+      for (const t of await invoke('web_events', {}).catch(() => [])) note(id, 'web window: ' + t);
       const i = await call('web_info', {}).catch(() => null);
       if (!i) return;
       if (!i.exists) { stopLoop(id); note(id, 'web window closed'); return; }
@@ -82,7 +76,6 @@ export function createWebHost({ getKeys = () => ['Shift'], getEntry, getConf, pa
     async allow(id, patterns, openAllow = []) { if (open.has(id)) await invoke('web_allow', { label: webLabel(id), allow: patterns, openAllow }).catch(() => {}); },
     // cookies and the rest the pages stored (the window must be open: the web view does it)
     async clearData(id) { await invoke('web_clear', { label: webLabel(id) }); },
-    async blocked() { return invoke('web_blocked', {}).catch(() => []); },
     patterns: (hosts, scope) => webPatterns(hosts, scope),
   };
 }

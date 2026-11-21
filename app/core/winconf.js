@@ -104,7 +104,7 @@ export function normalize(items) {
     d.owner_win = typeof d.owner_win === 'string' && /^[a-z0-9_-]{1,24}$/.test(d.owner_win) ? d.owner_win : '';
     d.page = typeof d.page === 'string' && /^[A-Za-z0-9_\-./]{1,200}\.html$/.test(d.page) && !d.page.includes('..') && !d.page.startsWith('/') && !d.page.includes('//') ? d.page : '';
     d.kind = d.kind === 'page' && d.owner && d.page ? 'page' : d.kind === 'web' && d.owner ? 'web' : '';          // (a page window needs its plugin and its page; a web window its plugin: the page is the plugin's to open)
-    if (d.kind === 'web') d.page = '';
+    if (d.kind === 'web') { d.page = ''; d.click_through = false; }          // (a web window is used with the mouse: it is not click-through)
     if (!d.kind) { d.owner = ''; d.owner_win = ''; d.page = ''; }
     if (d.dock_to === d.id) d.dock_to = 0;
     out.push(d);

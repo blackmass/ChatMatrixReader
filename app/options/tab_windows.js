@@ -205,8 +205,8 @@ const tab = {
 // The windows of a plugin show only the basic settings (the order of the windows, the background, the mouse, the lock ...): what is inside the window is the plugin's
 const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
 const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
-// a web window (a page of the web in a window of the program) has even fewer: when it opens, the lock, the order of the windows, click-through (its title is the title of the page)
-const WEB_ROWS = new Set(['open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window']);
+// a web window (a page of the web in a window of the program) has even fewer: when it opens, the lock, the order of the windows (its title is the title of the page)
+const WEB_ROWS = new Set(['open_mode', 'topmost', 'topmost_wow_only', 'lock_window']);
 const webWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.kind === 'web'); };
 for (const card of tab.cards) for (const row of card.rows) {
   const was = row.show;

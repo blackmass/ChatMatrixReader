@@ -27,14 +27,15 @@ static PREV_FG: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex
 static ZSTATE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// Windows that took the keyboard for a text box of the page -> how many rounds of the poll they have not been the one in front (see web_tick)
 static KEYMODE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-static BLOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+/// What the plugin's log should tell about the windows (addresses that were refused, the keyboard of a text box): taken by web_events
+static EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+fn event(text: String) { if let Ok(mut e) = EVENTS.lock() { if e.len() < 60 { e.push(text); } } }
 
 // Runs in EVERY frame (initialization_script_for_all_frames), not only in the page: a frame of the page (a video, an advertisement ...) gets the wheel, the zoom keys and the menu of the right
 // button itself. What a window of a browser does with these is not wanted here: the wheel with ctrl (zoom) or shift (sideways) is a plain turn of the wheel; no zoom keys; no menu.
 // (the keys that make the windows usable, ctrl / shift / alt, would otherwise stop the page from scrolling)
 const KEYS: &str = r#"(() => {
   if (window.__cmrKeys) return; window.__cmrKeys = 1;
-  const DEBUG = __DEBUG__;
   const wheel = e => {
     if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
     e.preventDefault();
@@ -51,17 +52,8 @@ const KEYS: &str = r#"(() => {
     document.addEventListener('keydown', keys, true);
     document.addEventListener('contextmenu', menu, true);
   };
-  // (only with the marker file web_debug) a dot in the corner of every frame the script runs in: green = the page itself, red = a frame in it; it goes away after 40 seconds
-  let dotted = false;
-  const dot = () => {
-    if (!DEBUG || dotted || !document.documentElement) return;
-    dotted = true;
-    const d = document.createElement('div');
-    d.style.cssText = 'position:fixed;left:2px;top:2px;width:9px;height:9px;border-radius:5px;z-index:2147483647;pointer-events:none;background:' + (window.top === window.self ? '#2c2' : '#e22');
-    document.documentElement.append(d); setTimeout(() => d.remove(), 40000);
-  };
-  arm(); dot();
-  document.addEventListener('DOMContentLoaded', () => { arm(); dot(); }); window.addEventListener('load', arm);
+  arm();
+  document.addEventListener('DOMContentLoaded', arm); window.addEventListener('load', arm);
   setInterval(arm, 2000);
 })();"#;
 
@@ -211,7 +203,8 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
         "focus" => {                                  // a text box of the page needs the keyboard: this window takes it (who had it is remembered)
             if let Ok(h) = hwnd_of(&win) {
                 let again = KEYMODE.lock().map(|k| k.contains_key(label)).unwrap_or(false);
-                if again && win::foreground() == h { return; }          // (it has the keyboard already: nothing to do, and nothing to start over)
+                if again && win::foreground() == h { return; }
+                event(format!("text box: the window takes the keyboard (had it before: {}, in front: {})", again, if win::foreground() == h { "ours" } else { "other" }));          // (it has the keyboard already: nothing to do, and nothing to start over)
                 let prev = win::foreground();
                 if prev != h && !again { if let Ok(mut p) = PREV_FG.lock() { p.insert(label.to_string(), prev); } }
                 if let Ok(mut k) = KEYMODE.lock() { k.insert(label.to_string(), 0); }
@@ -224,6 +217,7 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
         "blur" => {                                   // the text box was left: the keyboard goes back to where it was
             if let Ok(h) = hwnd_of(&win) {
                 if !KEYMODE.lock().map(|mut k| k.remove(label).is_some()).unwrap_or(false) { return; }
+                event("text box left: the keyboard goes back".into());
                 win::allow_key(h, false);
                 win::set_noactivate_light(h, true);
                 let prev = PREV_FG.lock().ok().and_then(|p| p.get(label).copied()).unwrap_or(0);
@@ -284,15 +278,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     };
     #[cfg(target_os = "macos")]
     let b = if persist { b.data_store_identifier(weblib::store_id(&key)) } else { b.incognito(true) };
-    // Windows: made like the program's own windows (transparent, no shadow): a window the mouse goes through (click-through) needs that; a page that draws no background of its own gets white
-    #[cfg(windows)]
-    let b = b.transparent(true).shadow(false).background_color(tauri::window::Color(255, 255, 255, 255));
-    // Marker files next to the program (empty files, like show_control), for finding faults: web_plain = none of our scripts is put into the pages (a page that does not like to be changed, e.g. a
-    // check of "are you a human"); web_debug = every frame our scripts run in shows a small dot for a while (green: the page, red: a frame in it)
-    let plain = crate::exe_dir().join("web_plain").exists();
-    let debug = crate::exe_dir().join("web_debug").exists();
-    let keys = KEYS.replace("__DEBUG__", if debug { "true" } else { "false" });
-    let b = if plain { b } else { b.initialization_script(script).initialization_script(keys.clone()).initialization_script_for_all_frames(keys) };
+    let b = b.initialization_script(script).initialization_script(KEYS).initialization_script_for_all_frames(KEYS);
     let mut b = b
         .title("CMR Web")
         .decorations(false)
@@ -306,7 +292,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
             let allowed = ALLOW.lock().ok().and_then(|m| m.get(&lbl).cloned()).unwrap_or_default();
             let ok = u.scheme() == "https" && u.host_str().map_or(false, |h| weblib::host_allowed(h, &allowed));
             if !ok {
-                if let (Some(h), Ok(mut bl)) = (u.host_str(), BLOCKED.lock()) { let h = h.to_ascii_lowercase(); if !bl.contains(&h) && bl.len() < 50 { bl.push(h); } }
+                event(format!("address refused: {}", u.as_str().chars().take(200).collect::<String>()));
             }
             ok
         });
@@ -349,7 +335,7 @@ pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64
     if let Ok(mut k) = KEYMODE.lock() {
         if let Some(n) = k.get_mut(&label) {
             if win::foreground() == h { *n = 0; } else { *n += 1; }
-            if *n >= 4 { k.remove(&label); win::allow_key(h, false); win::set_noactivate_light(h, true); }
+            if *n >= 4 { k.remove(&label); event("another window is in front: the keyboard state is let go".into()); win::allow_key(h, false); win::set_noactivate_light(h, true); }
         }
     }
     win::keep_style(h);
@@ -379,15 +365,6 @@ pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64
 }
 
 #[tauri::command]
-pub async fn web_ignore(app: AppHandle, label: String, on: bool) -> Result<i64, String> {
-    let w = get(&app, &label)?;
-    w.set_ignore_cursor_events(on).map_err(|e| e.to_string())?;
-    let h = hwnd_of(&w)?;
-    win::keep_style(h);
-    Ok(win::ex_style(h) as i64)        // (for the log of the plugin: the extended style after the change; 0x20 = click-through, 0x80000 = layered)
-}
-
-#[tauri::command]
 pub async fn web_lock(app: AppHandle, label: String, on: bool) -> Result<(), String> {
     let w = get(&app, &label)?;
     if let Ok(mut l) = LOCKED.lock() { l.retain(|x| x != &label); if on { l.push(label.clone()); } }
@@ -411,10 +388,10 @@ pub async fn web_info(app: AppHandle, label: String) -> Value {
     }
 }
 
-/// The hosts the windows tried to go to without being allowed since the last call (for the log of the plugin).
+/// What happened since the last call, for the log of the plugin (an address that was refused, the keyboard taken or given back for a text box).
 #[tauri::command]
-pub async fn web_blocked() -> Vec<String> {
-    BLOCKED.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default()
+pub async fn web_events() -> Vec<String> {
+    EVENTS.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default()
 }
 
 /// Cookies and the rest of what the pages stored, taken away (the window must be open).

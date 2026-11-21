@@ -74,8 +74,8 @@ async function invoke(cmd, a = {}) {
     case 'web_close': webCalls.push(['close', a.label]); return null;
     case 'web_allow': webCalls.push(['allow', a.allow]); return null;
     case 'web_info': return { exists: true, visible: true, position: [100, 50], size: [360, 640] };
-    case 'web_tick': case 'web_ignore': case 'web_lock': return null;
-    case 'web_blocked': return [];
+    case 'web_tick': case 'web_lock': return null;
+    case 'web_events': return [];
     case 'web_clear': webCalls.push(['clear', a.label]); return null;
     case 'plugin_hash': return { hash: 'abc', files: [] };
     case 'plugin_fetch': pluginFetches.push(a); return { status: 200, body: '<html>list</html>', url: a.url, type: 'text/html' };
