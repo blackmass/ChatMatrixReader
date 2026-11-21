@@ -28,6 +28,21 @@ static ZSTATE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::n
 static BLOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 const BAR: &str = r#"(() => {
+  // (in EVERY frame, not only the page: a frame of the page (a video, an advertisement ...) gets the wheel, the zoom keys and the menu of the right button itself)
+  if (!window.__cmrKeys) {
+    window.__cmrKeys = 1;
+    // what a window of a browser does with these is not wanted here: the wheel with ctrl (zoom) or shift (sideways) is a plain turn of the wheel; no zoom keys; no menu of the right button
+    // (the keys that make the windows usable, ctrl / shift / alt, would otherwise stop the page from scrolling)
+    document.addEventListener('wheel', e => {
+      if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
+      e.preventDefault();
+      let t = e.target;
+      while (t && t !== document.documentElement && !(t.scrollHeight > t.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(t).overflowY))) t = t.parentElement;
+      (t && t !== document.documentElement ? t : (document.scrollingElement || document.documentElement)).scrollBy(0, e.deltaY || e.deltaX);
+    }, { capture: true, passive: false });
+    document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0', '_'].includes(e.key)) e.preventDefault(); }, true);
+    document.addEventListener('contextmenu', e => e.preventDefault(), true);
+  }
   if (window.top !== window.self) return;                       // (only the page itself, not the frames in it: video players, advertisements ...)
   if (window.__cmrBar) return; window.__cmrBar = 1;
   const go = c => { try { location.href = 'cmr-cmd://' + c; } catch (e) {} };
@@ -36,17 +51,6 @@ const BAR: &str = r#"(() => {
   window.__cmrLocked = __LOCK__;
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
-  // what a window of a browser does with these is not wanted here: the wheel with ctrl (zoom) or shift (sideways) is a plain turn of the wheel; no zoom keys; no menu of the right button
-  // (the keys that make the windows usable, ctrl / shift / alt, would otherwise stop the page from scrolling)
-  document.addEventListener('wheel', e => {
-    if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
-    e.preventDefault();
-    let t = e.target;
-    while (t && t !== document.documentElement && !(t.scrollHeight > t.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(t).overflowY))) t = t.parentElement;
-    (t && t !== document.documentElement ? t : (document.scrollingElement || document.documentElement)).scrollBy(0, e.deltaY || e.deltaX);
-  }, { capture: true, passive: false });
-  document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0', '_'].includes(e.key)) e.preventDefault(); }, true);
-  document.addEventListener('contextmenu', e => e.preventDefault(), true);
   const external = u => { try { const a = new URL(u, location.href); if (a.protocol === 'https:') go('open?u=' + encodeURIComponent(a.href)); } catch (e) {} };
   const linkOf = e => (e.target && e.target.closest ? e.target.closest('a[href]') : null);
   document.addEventListener('click', e => {
