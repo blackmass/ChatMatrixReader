@@ -1,0 +1,10 @@
+/* A control center (3.2): a transparent page over all the screens; the translation windows are panes in it (pane.js). */
+html, body.center { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; -webkit-user-select: none; user-select: none;
+  font: 13px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; color: #fff; }
+.pane { position: absolute; display: flex; flex-direction: column; }
+.pane .pbar { flex: none; height: 22px; display: flex; align-items: flex-end; cursor: move; }
+.pane .ptitle { padding: 0 12px; height: 20px; line-height: 20px; color: #e6c66e; background: linear-gradient(rgb(54, 72, 71), rgb(42, 56, 54)); border: 1px solid rgb(138, 106, 48); border-bottom: 0; border-radius: 4px 4px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+.pane .pbody { position: relative; flex: 1; min-height: 0; }
+.pane .pbg { position: absolute; inset: 0; background: rgba(30, 31, 34, var(--bg-alpha, 1)); border-radius: 0 4px 4px 4px; }
+.pane .plines { position: absolute; inset: 4px 8px; color: #fff; }
+.pane .pgrip { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, .45) 50%); }

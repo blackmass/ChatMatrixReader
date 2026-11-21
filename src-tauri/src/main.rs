@@ -23,6 +23,7 @@ mod weblib;
 mod webwin;
 mod procrole;
 mod procstats;
+mod center;
 // everything that calls the operating system directly: the same functions in both files (win.rs: Windows, mac.rs: macOS)
 #[cfg(windows)]
 mod win;
@@ -352,6 +353,8 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             .focusable(false)
             .visible(false)
             .inner_size(40.0, 40.0),
+        // a control center: a transparent window over all the screens (center.rs); it takes the first click of an inactive program too
+        "center" => b.title("CMR Center").transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).accept_first_mouse(true).inner_size(400.0, 300.0),
         "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),
         // the control window is the program's brain, not something to look at: it is never shown. An empty file "show_control" next to app/
@@ -1128,6 +1131,7 @@ fn main() {
             plugin_fetch,
             plugin_open_url,
             process_stats,
+            center::center_rects,
             webwin::web_open,
             webwin::web_close,
             webwin::web_allow,
@@ -1246,6 +1250,7 @@ fn main() {
             make_window(&handle, "control", "control.html", "control")?;
             make_window(&handle, "main", "overlay.html", "overlay")?;
             make_window(&handle, "input", "input.html", "input")?;
+            center::start(handle.clone());                              // (3.2: the control centers, with the file center_mode)
             make_tray(app)?;
             let h = handle.clone();
             let open = move || {

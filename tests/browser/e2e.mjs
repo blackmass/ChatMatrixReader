@@ -52,7 +52,7 @@ function grabBytes(x, y, w, h) {
 }
 const BY_OWNER = true;                                              // (the default way of "just above the game")
 const topCalls = [], raised = [];
-const pluginFetches = [], pluginOpened = [], webCalls = [];
+const pluginFetches = [], pluginOpened = [], webCalls = [], centerRects = [];
 const opened = [], owners = [], placed = [], watched = [], trayTexts = [];
 let gameGone = false;
 const zoneCalls = [];                                 // what the page asked of the wheel hook (wheel_zone)
@@ -70,6 +70,7 @@ async function invoke(cmd, a = {}) {
     case 'plugin_token': return 'tok-' + a.id;
     case 'plugin_forget': return null;
     case 'plugin_open_url': pluginOpened.push(a); return null;
+    case 'center_rects': centerRects.push(a); return null;
     case 'process_stats': return { os: 'windows', self: 10, note: '', procs: [{ pid: 10, parent: 1, name: 'ChatMatrix Reader.exe', kind: 'main', sub: '', ws: 104857600, private: 83886080, cpu_ms: 1000, handles: 300, gdi: 40, user: 60 }, { pid: 11, parent: 10, name: 'msedgewebview2.exe', kind: 'renderer', sub: '', ws: 52428800, private: 31457280, cpu_ms: 500, handles: 150, gdi: 10, user: 10 }] };
     case 'web_open': webCalls.push(['open', a.args]); return null;
     case 'web_close': webCalls.push(['close', a.label]); return null;
@@ -765,6 +766,19 @@ await opt.selectOption('.row:has(b.label:text-is("글 정렬")) select', '');
 await control.waitForTimeout(1200);
 ok(cfgFile().child_windows.find(c => c.id === 3).align === null, 'options/windows: "창 1을 따름" in a choice list: null (it follows window 1)');
 await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
+// a control center (3.2): the page of a kind of order draws the windows of that kind as panes with the chat of the hub, and tells their places
+{
+  const cp = await open('center.html?mode=1&ox=0&oy=0', { width: 1200, height: 800 }); await control.waitForTimeout(1500);
+  ok(await cp.locator('.pane').count() >= 1 && (await cp.locator('.pane .cv-list').first().textContent()).length > 0, 'center: the pane of the main window shows the chat of the hub: ' + (await cp.locator('.pane .cv-list').first().textContent()).slice(0, 60));
+  ok(centerRects.length > 0 && centerRects.at(-1).label === 'center1' && centerRects.at(-1).panes.some(p => p.id === '1' && p.w > 100 && p.h > 50), 'center: the place of the pane is told to the program: ' + JSON.stringify(centerRects.at(-1)));
+  // (the panes of the windows that are open stand on each other at first: the last one is on top, it is the one the pointer meets)
+  const before = await cp.locator('.pane').last().boundingBox();
+  const bar = await cp.locator('.pane .pbar').last().boundingBox();
+  await cp.mouse.move(bar.x + 20, bar.y + 10); await cp.mouse.down(); await cp.mouse.move(bar.x + 120, bar.y + 70, { steps: 4 }); await cp.mouse.up(); await control.waitForTimeout(300);
+  const after = await cp.locator('.pane').last().boundingBox();
+  ok(Math.abs(after.x - before.x - 100) < 3 && Math.abs(after.y - before.y - 60) < 3, 'center: the bar drags the pane: ' + JSON.stringify([before, after]));
+  await cp.close();
+}
 // the tab "기록": the log moved here from "정보", and the table of the processes
 await opt.locator('#tabs li', { hasText: '기록' }).click(); await control.waitForTimeout(1500);
 ok(await opt.locator('.resmon .res-table tbody tr').count() === 2 && (await opt.locator('.res-total').textContent()).includes('2'), 'options/log: the table of the processes: ' + (await opt.locator('.res-total').textContent()));
