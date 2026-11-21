@@ -43,6 +43,7 @@ extern "C" {
     fn CGSSetWindowBackgroundBlurRadius(connection: i32, window: i32, radius: i32) -> i32;
     // (private) the tags of a window in the window server; the bit 1 << 16 is "clicking this window does not activate its program"
     fn CGSSetWindowTags(connection: i32, window: i32, tags: *const i32, size: i32) -> i32;
+    fn CGSClearWindowTags(connection: i32, window: i32, tags: *const i32, size: i32) -> i32;
 }
 #[link(name = "objc")]
 extern "C" {
@@ -535,6 +536,17 @@ pub fn set_noactivate_light(hwnd: isize, on: bool) {
         if on { l.push(hwnd); }
     }
     if on { on_main(|| { prevent_activation(hwnd); prepare(hwnd); }); }
+    else {
+        // The window may be activated by a click now (a text box of its page: the web window, see webwin.rs "prep"): the window server's tag "does not activate the program" is taken off,
+        // and put again by the next call with `on` (TAGGED forgets the window).
+        on_main(|| unsafe {
+            let number: isize = msg_send![obj(hwnd), windowNumber];
+            if number <= 0 { return; }
+            let tags: [i32; 2] = [1 << 16, 0];
+            CGSClearWindowTags(CGSDefaultConnectionForThread(), number as i32, tags.as_ptr(), 32);
+            if let Ok(mut l) = TAGGED.lock() { l.retain(|e| e.0 != hwnd); }
+        });
+    }
 }
 
 /// Every poll of the page: the window stays what it was made (the window library may change it when it changes one of its own flags).

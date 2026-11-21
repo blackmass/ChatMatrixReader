@@ -210,7 +210,7 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
         }
         "unprep" | "release" => {                     // the text box is left: back to a window that takes nothing; "release": it was used, the keyboard goes back to where it was
             if let Ok(h) = hwnd_of(&win) {
-                let was_front = win::foreground() == h;
+                let was_front = win::foreground() == h || (cfg!(target_os = "macos") && win::self_front());       // (macOS: `foreground` does not find this window)
                 win::allow_key(h, false);
                 win::set_noactivate_light(h, true);
                 if cmd == "release" && was_front {
@@ -277,6 +277,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     let mut b = b
         .title("CMR Web")
         .decorations(false)
+        .accept_first_mouse(true)          // (macOS: the click that activates the window while a text box is used is not lost)
         .resizable(!lock)
         .skip_taskbar(true)
         .visible(false)
