@@ -1109,6 +1109,7 @@ const LAB_BAR: &str = r#"(() => {
 })();"#;
 static LAB_CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);      // the window is closing: nothing may touch it any more
 static LAB_PREV_FG: std::sync::Mutex<isize> = std::sync::Mutex::new(0);      // who had the keyboard before a text box of the page asked for it
+static LAB_ZSTATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);      // 1 = the game is in front (high level), 2 = another program is (normal level, right above the game)
 static LAB_VARIANT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static LAB_EVENTS: std::sync::LazyLock<std::sync::Mutex<Vec<String>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
 fn lab_note(text: String) { let mut v = LAB_EVENTS.lock().unwrap(); v.push(text); if v.len() > 60 { v.remove(0); } }
@@ -1214,13 +1215,30 @@ async fn lab_web_noactivate(app: AppHandle, label: String, on: bool) -> Result<(
 
 /// What the translation windows do every poll: the style is put back (a window library call may have wiped it), and in "above the game only" the window is put right above the game
 #[tauri::command]
-async fn lab_web_tick(app: AppHandle, label: String, game: Option<i64>) -> Result<(), String> {
+async fn lab_web_tick(app: AppHandle, label: String, game: Option<i64>, mode: Option<u32>) -> Result<(), String> {
     if LAB_CLOSING.load(std::sync::atomic::Ordering::SeqCst) { return Ok(()); }
     let w = app.get_webview_window(&label).ok_or("no such window")?;
     let h = hwnd_of(&w)?;
     win::keep_style(h);
     win::lab_extra(h, LAB_VARIANT.load(std::sync::atomic::Ordering::SeqCst));
-    if let Some(g) = game { if g > 0 { win::place_above(h, g as isize); } }
+    if let Some(g) = game {
+        if g > 0 {
+            if mode == Some(1) {
+                // two states, like the owner way of Windows: while the game is the program in front the window has the high level (a click in the game cannot put the game over it);
+                // while another program is in front it has the normal level and sits right above the game (it goes behind what covers the game). Switched only when the state changes.
+                use std::sync::atomic::Ordering::SeqCst;
+                let front = win::foreground() == g as isize;
+                let want = if front { 1 } else { 2 };
+                if LAB_ZSTATE.load(SeqCst) != want {
+                    LAB_ZSTATE.store(want, SeqCst);
+                    if front { win::set_topmost(h, true, 0); } else { win::set_topmost(h, false, g as isize); }
+                }
+                if !front { win::place_above(h, g as isize); }
+            } else {
+                win::place_above(h, g as isize);
+            }
+        }
+    }
     Ok(())
 }
 
