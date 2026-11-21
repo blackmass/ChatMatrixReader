@@ -185,3 +185,16 @@ const code = async p => { try { await p; return 'ok'; } catch (e) { return e ins
   const h = make({ ...all, web: 'host' });
   eq(await code(h.b.call('openUrl', { url: 'https://m.example.com/x' })), 'denied', 'bridge: not with "host"');
 }
+
+{ // chat.inject with a link: the address must be one the permission covers; the link goes with the line
+  clock = 0;
+  const { b, log } = make();
+  await b.call('chat.inject', { text: 'new: Hello world', sender: 's', link: { url: 'https://m.example.com/p/1', text: 'Hello world' } });
+  b.pump();
+  const first = log.injected.at(-1);
+  eq(first && first.link && first.link.url, 'https://m.example.com/p/1', 'bridge: the line carries its link');
+  eq(first.link.target + '|' + first.link.text, 'web|Hello world', 'bridge: the link target is the web window by default');
+  for (const bad of ['http://example.com/', 'https://evil.org/', 'https://user:pw@example.com/', 'javascript:1']) eq(await code(b.call('chat.inject', { text: 'x', link: { url: bad } })), 'denied', 'bridge: a link to ' + bad + ' is refused');
+  eq(await code(b.call('chat.inject', { text: 'x', link: { url: 'https://example.com/', target: 'browser' } })), 'ok', 'bridge: a link for the browser to an allowed site');
+  eq(await code(make({ ...all, web: '' }).b.call('chat.inject', { text: 'x', link: { url: 'https://example.com/' } })), 'denied', 'bridge: no web permission: no link to the web window');
+}

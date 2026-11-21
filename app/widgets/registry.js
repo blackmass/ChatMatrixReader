@@ -5,6 +5,7 @@ export const PLACES = ['inside', 'outside'];                                  //
 export const SHOWS = ['always', 'active', 'dim'];
 export const TONES = ['idle', 'busy', 'ok', 'hot', 'warn', 'bad'];            // names, not colours: the colours are the host's (the theme)
 export const SETTING_TYPES = ['number', 'select', 'check', 'color'];
+import { cleanSvg, svgPathOk, MAX_SVG_FILE } from '../core/svg.js';
 export const MAX_WIDGETS = 32;
 export const MAX_MENU = 8;                                                     // the items of the menu of a widget (the right button)
 
@@ -13,6 +14,7 @@ export const KINDS = {
   meter: { styles: ['bar', 'battery'] },
   light: { styles: ['dot'] },
   text: { styles: ['plain'] },
+  icon: { styles: ['icon'] },                    // a picture (SVG) that the plugin gives; the text, if any, is beside it
 };
 
 export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,99}:[a-z0-9][a-z0-9_.-]{0,47}$/i;         // owner:name (the owner of a plugin's widget is the id of the plugin: up to 100)
@@ -125,6 +127,8 @@ export function cleanState(p) {
   if ('text' in p) s.text = str(p.text, 40);
   if ('tip' in p) s.tip = str(p.tip, 400);
   if ('count' in p) s.count = Math.round(num(p.count, 0, 99999, 0));
+  if ('svg' in p) s.svg = cleanSvg(p.svg, MAX_SVG_FILE);                                  // (the picture: an SVG text, cleaned; '' takes it away)
+  if ('image' in p && svgPathOk(p.image)) s.image = p.image;                // (the picture of a file of the plugin: the program reads it and turns it into `svg` before it is shown)
   if ('menu' in p) s.menu = cleanMenu(p.menu);                              // (the items of the menu can change with the state)
   return s;
 }

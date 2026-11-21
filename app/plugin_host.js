@@ -9,9 +9,11 @@ import * as winconf from './core/winconf.js';
 import { Watchdog, PING_MS } from './core/watchdog.js';
 import { PluginBridge, PluginError } from './core/pluginbridge.js';
 import { log } from './core/log.js';
+import { tr } from './core/i18n.js';
+import { LIGHT_BLUE, TIP_SEP } from './core/chattext.js';
 import { isMac } from './platform.js';
 import { createWebHost } from './web_host.js';
-import { webPatterns, openPatterns } from './core/plugins.js';
+import { webPatterns, openPatterns, hostMatches } from './core/plugins.js';
 
 const LOG_KEEP = 200;
 // what makes a plugin restart when it changes: the permissions (the hosts of netAny are not: they are changed while it runs)
@@ -31,6 +33,9 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   const base = isMac ? 'cmrplug://localhost/' : 'http://cmrplug.localhost/';
   const holder = doc.createElement('div'); holder.hidden = true; holder.id = 'plugin-frames'; doc.body.append(holder);
 
+  const chatLinks = new Map();                 // the id of a link in a chat line -> { owner, url, target } (the window sends the id back when the user clicks it)
+  let linkSeq = 0;
+  const svgCache = new Map();                  // 'plugin/path' -> the text of an .svg file the plugin asked for
   const entries = () => (settings.cfg().plugins && typeof settings.cfg().plugins === 'object' ? settings.cfg().plugins : {});
   const entry = id => ({ enabled: false, granted: {}, options: {}, ...(entries()[id] || {}) });
   const patchEntry = (id, patch) => settings.set({ plugins: { ...entries(), [id]: { ...entry(id), ...patch } } });
@@ -81,7 +86,21 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     let saveTimer = 0, pending = null;
     const flush = async () => { saveTimer = 0; if (pending === null) return; const o = pending; pending = null; try { await files.write(storePath(id), JSON.stringify(o)); } catch (e) { fail(id, 'the storage could not be saved: ' + e); } };
     return {
-      inject: ({ text, sender }) => publish(pipeline.onLine({ channel: '!PLG', id: 0, sender: sender || manifest.name, text, cls: '', base: -1 })),
+      inject: ({ text, sender, link }) => {
+        // The control characters of the chat markers are the program's own: a plugin cannot forge an item link with them. A link: the words (link.text, else the whole text) become a marker that the window
+        // draws as a link (light blue, underlined) with a tip; what the window sends back when it is clicked is `id`, and what that id stands for is kept here.
+        const safe = String(text).replace(/[\x01-\x08\x0b\x0c]/g, '');
+        let body = safe, linkId = 0;
+        if (link) {
+          const label = link.text && safe.includes(link.text.replace(/[\x01-\x08\x0b\x0c]/g, '')) ? link.text.replace(/[\x01-\x08\x0b\x0c]/g, '') : safe;
+          linkId = ++linkSeq;
+          chatLinks.set(String(linkId), { owner: id, url: link.url, target: link.target });
+          if (chatLinks.size > 500) chatLinks.delete(chatLinks.keys().next().value);
+          const mark = '\x02' + String.fromCharCode(48 + LIGHT_BLUE) + label + TIP_SEP + (link.target === 'browser' ? tr('클릭하면 브라우저로 엽니다') : tr('클릭하면 웹 창으로 엽니다')) + '\x03';
+          body = label === safe ? mark : safe.replace(label, () => mark);
+        }
+        return publish(pipeline.onLine({ channel: '!PLG', id: 0, sender: sender || manifest.name, text: body, cls: '', base: -1, ...(linkId ? { link: String(linkId) } : {}) }));
+      },
       fetch: async (r, hosts) => invoke('plugin_fetch', { url: r.url, method: r.method, headers: withDefaults(r.headers), body: r.body, hosts, maxBytes: r.max }),
       log: text => note(id, text),
       requestHost: async host => {                                    // (netAny) the plugin asks for a host: it waits in the list of the plugin tab for the user
@@ -99,6 +118,12 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       windowOpen: async name => { await ensureWindows(id); const c = windowEntry(id, name); if (c && windows) windows.openWindow(c.id); },
       windowClose: async name => { const c = windowEntry(id, name); if (c && windows) windows.closeWindow(c.id); },
       widgetRegister: def => { if (!widgets) throw new Error('the widgets of the program are not there'); widgets.registerDef(def); note(id, `widget registered: ${def.id}`); },
+      readSvg: async path => {                                            // a .svg file of the plugin's folder (kept until the plugin is stopped)
+        const key = id + '/' + path; if (svgCache.has(key)) return svgCache.get(key);
+        const text = await files.read(`plugins/${id}/${path}`);
+        if (text === null || text === undefined) throw new Error(`${path}: no such file`);
+        svgCache.set(key, text); return text;
+      },
       widgetUpdate: (wid, patch) => { if (widgets) widgets.publish(wid, patch); },
       widgetUnregister: wid => { if (widgets) widgets.unregisterDef(wid); },
       load: async () => { const t = await files.read(storePath(id)); return t ? JSON.parse(t) : null; },
@@ -183,6 +208,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     const run = running.get(id);
     if (!run) return;
     running.delete(id); dog.forget(id);
+    for (const k of [...svgCache.keys()]) if (k.startsWith(id + '/')) svgCache.delete(k);
     run.bridge.shutdown();
     await web.close(id);                                                   // (its web window goes with it)
     try { await run.hooks.flush(); } catch { /* reported */ }
@@ -318,6 +344,18 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   }, PING_MS);
   setInterval(() => { for (const b of bridges.values()) b.bridge.pump(); }, 150);       // (the lines of the plugins wait in a queue and go out one by one: core/pluginbridge.js)
 
+  // the user clicked a link that a plugin put in a line: opened in the web window of that plugin (or in the browser), only while the plugin runs and the address is still allowed
+  listen('chat-link', async ev => {
+    const l = chatLinks.get(String(ev.payload && ev.payload.id)), run = l && running.get(l.owner);
+    if (!l || !run) return;
+    const eff = run.bridge.eff, patterns = l.target === 'browser' ? openPatterns(eff) : webPatterns(eff.net, eff.web);
+    let u; try { u = new URL(l.url); } catch { return; }
+    if (u.protocol !== 'https:' || !hostMatches(u.hostname, patterns)) { note(l.owner, 'link refused (not allowed now): ' + l.url); return; }
+    try {
+      if (l.target === 'browser') { await invoke('plugin_open_url', { url: l.url, hosts: patterns }); note(l.owner, 'opened in the browser: ' + l.url); }
+      else { await ensureWindows(l.owner); await web.open(l.owner, { url: l.url, title: '', mobile: true }, patterns, openPatterns(eff)); }
+    } catch (e) { note(l.owner, 'link failed: ' + ((e && e.message) || e)); }
+  });
   if (widgets) widgets.onAction = a => {                                  // a click / a menu item of a widget: the plugin that owns it is told (only a widget it registered)
     const owner = String(a.id).split(':')[0], run = running.get(owner);
     if (!run || !run.bridge.widgetIds.has(a.id) || (a.type !== 'click' && a.type !== 'menu')) return;

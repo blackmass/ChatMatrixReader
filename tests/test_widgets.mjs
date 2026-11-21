@@ -103,3 +103,20 @@ check(sent.length === 1 && sent[0][1].id === VOICE_ID, 'a window that asks (it w
   check(cleanMenu(Array.from({ length: 20 }, (_, i) => ({ id: 'i' + i, label: 'L' }))).length === 8, 'widgets: at most 8 items');
   check(cleanState({ menu: [{ id: 'x', label: 'X' }] }).menu.length === 1 && !('menu' in cleanState({ text: 'a' })), 'widgets: a state may carry the menu');
 }
+
+// ---- the picture of a widget (SVG)
+{
+  const { cleanSvg, svgSrc, svgPathOk } = await import('../app/core/svg.js');
+  const { cleanState, checkDef } = await import('../app/widgets/registry.js');
+  const good = '<svg viewBox="0 0 10 10"><path d="M0 0h10v10z" fill="#fff"/></svg>';
+  const c = cleanSvg(good);
+  check(c.startsWith('<svg xmlns="http://www.w3.org/2000/svg"') && c.includes('<path'), 'svg: a plain SVG is kept, with its namespace');
+  check(!/script|onclick|javascript|foreignObject/i.test(cleanSvg('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><foreignObject><div/></foreignObject><rect onclick="x()" width="1" height="1"/><a href="javascript:alert(1)"><rect/></a></svg>')), 'svg: script, foreign content, events and javascript: are taken out');
+  check(!/evil\.example/.test(cleanSvg('<svg xmlns="http://www.w3.org/2000/svg"><image href="https://evil.example/x.png"/><rect style="fill:url(https://evil.example/a)"/><use xlink:href="//evil.example/a.svg#b"/></svg>')), 'svg: no outside address stays');
+  check(cleanSvg('<html><svg/></html>') === '' && cleanSvg('') === '' && cleanSvg(5) === '' && cleanSvg('<svg>' + 'x'.repeat(9000) + '</svg>') === '', 'svg: not an SVG / too big gives nothing');
+  check(cleanSvg('<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "b">]><svg xmlns="http://www.w3.org/2000/svg"><g/></svg>').startsWith('<svg'), 'svg: the xml and doctype lines are taken away');
+  check(svgSrc(c).startsWith('data:image/svg+xml') && svgSrc('') === '', 'svg: the address of the picture');
+  check(svgPathOk('icons/a.svg') && !svgPathOk('../a.svg') && !svgPathOk('/a.svg') && !svgPathOk('a.png') && !svgPathOk('a//b.svg'), 'svg: the path of a file is a plain relative .svg name');
+  check(cleanState({ svg: good }).svg.startsWith('<svg') && cleanState({ image: 'icons/a.svg' }).image === 'icons/a.svg' && !('image' in cleanState({ image: '../x.svg' })), 'svg: a state carries the picture or the path of its file');
+  check(checkDef({ id: 'p:w', kind: 'icon' }).kind === 'icon' && checkDef({ id: 'p:w', kind: 'icon' }).styles[0].id === 'icon', 'svg: the kind icon');
+}

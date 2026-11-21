@@ -6,6 +6,9 @@ body .wlayer .wa-top-left { top: 4px; left: 6px; } body .wlayer .wa-top { top: 4
 body .wlayer .wa-left { top: 50%; left: 6px; transform: translateY(-50%); flex-direction: column; } body .wlayer .wa-right { top: 50%; right: 6px; transform: translateY(-50%); flex-direction: column; }
 body .wlayer .wa-bottom-left { bottom: 4px; left: 6px; } body .wlayer .wa-bottom { bottom: 4px; left: 50%; transform: translateX(-50%); } body .wlayer .wa-bottom-right { bottom: 4px; right: 18px; }
 body.interactive .wlayer .widget.clickable { pointer-events: auto; cursor: pointer; }
+body .wlayer .widget .w-icon { display: flex; align-items: center; gap: 4px; }
+body .wlayer .widget .w-img { height: calc(20px * var(--ws)); width: auto; max-width: calc(48px * var(--ws)); filter: drop-shadow(0 0 3px var(--tone)); }
+body .wlayer .widget[data-tone="idle"] .w-img { filter: none; opacity: .85; }
 body .wlayer .widget { --ws: 1; --tone: #7b7f89; --tone-bg: #3a3d45; display: block; }
 body .wlayer .widget[data-tone="busy"] { --tone: #e6c14a; } body .wlayer .widget[data-tone="ok"] { --tone: #3f9a58; } body .wlayer .widget[data-tone="hot"] { --tone: #5fd07a; }
 body .wlayer .widget[data-tone="warn"] { --tone: #ffb36b; } body .wlayer .widget[data-tone="bad"] { --tone: #f0705a; }

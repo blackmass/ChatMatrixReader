@@ -6,6 +6,7 @@
 //   await b.call('chat.inject', { text, sender })      -> value  |  throws PluginError { code: 'denied' | 'limit' | 'args' | 'failed' }
 import { effective, netAllowed, optionValues, validHost, webPatterns, hostMatches, openPatterns } from './plugins.js';
 import { checkDef, cleanState } from '../widgets/registry.js';
+import { cleanSvg, MAX_SVG, MAX_SVG_FILE } from './svg.js';
 
 export class PluginError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -91,7 +92,17 @@ export class PluginBridge {
         // The plugin may call as often as it likes; what is limited is what comes out: the lines wait in a queue and go to the chat one by one (pump). A line that finds the queue
         // full is dropped, and the number of the dropped is told in a line of its own when there is room again (and in the log).
         if (this.injectQ.length >= LIMITS.injectQueue) { if (!this.dropped) this.hooks.log(`too many lines: the queue (${LIMITS.injectQueue}) is full, new lines are dropped`); this.dropped++; return null; }
-        this.injectQ.push({ text: args.text.trim().slice(0, LIMITS.injectText), sender });
+        // a link in the line (the user clicks it: the page opens in the plugin's web window, or in the browser with target "browser"): an address the permission covers, checked now and again at the click
+        let link = null;
+        if (args.link !== undefined && args.link !== null) {
+          if (!isObj(args.link) || typeof args.link.url !== 'string') throw new PluginError('args', 'link: { url, text?, target? }');
+          let lu; try { lu = new URL(args.link.url); } catch { throw new PluginError('args', 'link.url: not an address'); }
+          const target = args.link.target === 'browser' ? 'browser' : 'web';
+          const patterns = target === 'web' ? webPatterns(this.eff.net, this.eff.web) : openPatterns(this.eff);
+          if (lu.protocol !== 'https:' || lu.username || lu.password || !hostMatches(lu.hostname, patterns)) throw new PluginError('denied', `link: this address is not allowed for "${target}" (https and the sites the user allowed${target === 'web' ? ', permission web' : ', permission openUrl'})`);
+          link = { url: lu.href, target, text: typeof args.link.text === 'string' ? args.link.text.trim().slice(0, 200) : '' };
+        }
+        this.injectQ.push({ text: args.text.trim().slice(0, LIMITS.injectText), sender, ...(link ? { link } : {}) });
         this.pump();
         return null;
       }
@@ -136,7 +147,12 @@ export class PluginBridge {
         this.need('widgets');
         const full = isObj(args) && typeof args.id === 'string' ? this.manifest.id + ':' + args.id : '';
         if (!this.widgetIds.has(full)) throw new PluginError('args', 'this widget is not registered by the plugin');
+        if (isObj(args.state) && typeof args.state.svg === 'string' && args.state.svg.length > MAX_SVG) throw new PluginError('limit', `svg: at most ${MAX_SVG} characters (a bigger picture: a file of the plugin's folder, "image")`);
         const patch = cleanState(args.state);
+        if (patch.image !== undefined) {                                   // a picture from a file of the plugin's folder: read by the program, kept as the SVG text (cleaned)
+          const path = patch.image; delete patch.image;
+          if (this.hooks.readSvg) { let text; try { text = await this.hooks.readSvg(path); } catch (e) { throw new PluginError('failed', String((e && e.message) || e).slice(0, 200)); } patch.svg = cleanSvg(text, MAX_SVG_FILE); if (!patch.svg) throw new PluginError('args', `${path}: not an SVG that can be shown (or too big: at most ${MAX_SVG_FILE} bytes)`); }
+        }
         const t = this.now();
         if (t - (this.widgetLast[full] ?? -1e12) >= LIMITS.widgetGapMs) { this.widgetLast[full] = t; delete this.widgetPending[full]; this.hooks.widgetUpdate(full, patch); }
         else this.widgetPending[full] = { ...(this.widgetPending[full] || {}), ...patch };

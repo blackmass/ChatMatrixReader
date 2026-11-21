@@ -4,7 +4,7 @@ import * as settings from './settings.js';
 import { startI18n } from './i18n_host.js';
 import { tr } from './core/i18n.js';
 import { windowTitle, windowName, nameFor } from './winname.js';
-import { ChatView, lookFrom } from './chatview.js';
+import { ChatView, lookFrom, linkHandler } from './chatview.js';
 import { PageView } from './pageview.js';
 import { WindowFeed } from './core/windowfeed.js';
 import { MAIN } from './core/pipeline.js';
@@ -86,6 +86,7 @@ const widgetRegistry = defaultRegistry();                            // (the pro
 const widgetLayer = new WidgetLayer({ root: document.getElementById('widgets'), registry: widgetRegistry });
 let widgetIds = '';
 window.__cmrWidgets = widgetLayer;
+linkHandler.fn = id => emit('chat-link', { id });                 // (a link in a line, put there by a plugin: the hub opens it)
 widgetLayer.onAction = (id, type, item) => emit('widget-action', { id, type, ...(item ? { item } : {}) });                                   // (for the tests)
 // the widgets of this window (docs/WIDGETS.md): drawn from the settings; a widget that is turned on asks the hub for its state
 const apply = ops => view.apply(ops, feed.model);
@@ -234,6 +235,7 @@ widgetLayer.sink = {
 };
 // the popup is made a little after the start (when it stays: POPUP_IDLE_MS 0), so the first tip is there at once; only the main window asks
 if (wid === MAIN) setTimeout(() => { if (T.POPUP_IDLE_MS === 0) popup.warm(); }, 3000);
+let menuShown = false;                                              // the right-click menu is open (it may stand outside this window: the window must take the mouse for it, see the loop)
 let closeMenu = () => {};                                           // takes the right-click menu away (set by contextMenu)
 let libTopNow = null, zKey = '', zMode = '', ownerHwnd = 0, gameHwnd = 0, zTimer = null, placeTimer = null, side = null, sideBusy = false;
 const byOwner = () => T.WOW_BY_OWNER === 1;
@@ -420,7 +422,8 @@ async function tick() {
     }
     if (review !== reviewShown) { reviewShown = review; emit('hub-log', { level: 'info', msg: `window ${wid}: reading the earlier chat ${review ? 'on' : 'off'} (wheel turns taken: ${wheelCount})` }); }
     document.body.classList.toggle('review', review);                              // (the frame turns amber and a way back down shows)
-    const now = !opt('click_through', false) || (held && inside) || !gameFound || review;
+    // (a menu that is open: the part of it outside this window is a window of its own, but this window must not go back to "mouse goes through" while the pointer is there: that took the menu away)
+    const now = !opt('click_through', false) || (held && inside) || !gameFound || review || (menuShown && !inside);
     const hover = !now && inside && !!opt('hover_clear', false);                // click-through, the mouse over the window and no interact key: cleared
     if (hover !== hovering) { hovering = hover; document.body.classList.toggle('hover-clear', hover); syncBlur(); }
     if (now !== interactive) {
@@ -527,7 +530,7 @@ function contextMenu() {
   listen('win-state', e => { open = new Set(e.payload.open); });
   emit('win-state-hello', {});
   let inWindow = false;                                         // the menu is in the popup window (not in this page)
-  const hide = () => { menu.hidden = true; if (inWindow) { inWindow = false; popup.hide('menu'); } };
+  const hide = () => { menuShown = false; menu.hidden = true; if (inWindow) { inWindow = false; popup.hide('menu'); } };
   closeMenu = hide;
   addEventListener('contextmenu', async ev => {
     ev.preventDefault();
@@ -580,7 +583,7 @@ function contextMenu() {
     if (popup.usable()) {
       let at = null;
       try { at = (await invoke('os_state')).cursor; } catch { /* the page draws it */ }
-      if (at && await popup.menu({ items: list.map((e, id) => ({ id, text: e.text, cls: e.cls })), at, onPick: id => { inWindow = false; const e = list[id]; if (e && e.fn) e.fn(); } })) { inWindow = true; return; }
+      if (at && await popup.menu({ items: list.map((e, id) => ({ id, text: e.text, cls: e.cls })), at, onPick: id => { inWindow = false; menuShown = false; const e = list[id]; if (e && e.fn) e.fn(); } })) { inWindow = true; menuShown = true; return; }
     }
     menu.replaceChildren();
     for (const e of list) {
@@ -591,7 +594,7 @@ function contextMenu() {
       }
       menu.append(d);
     }
-    menu.hidden = false;
+    menu.hidden = false; menuShown = true;
     menu.style.left = Math.max(0, Math.min(ev.clientX, innerWidth - menu.offsetWidth - 2)) + 'px';
     menu.style.top = Math.max(0, Math.min(ev.clientY, innerHeight - menu.offsetHeight - 2)) + 'px';
   });

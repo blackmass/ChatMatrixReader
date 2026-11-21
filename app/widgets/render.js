@@ -2,6 +2,7 @@
 // the pointer is over it. No data of its own: it is given the settings (`set`), the states (`state`) and the pointer (`pointer`).
 // The pointer comes from the window loop (the system's cursor position), not from mouse events: it also works while the window is click-through.
 import { ANCHORS, KINDS, drawn } from './registry.js';
+import { cleanSvg, svgSrc, MAX_SVG_FILE } from '../core/svg.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const BATTERY_CELLS = 5;
@@ -19,6 +20,17 @@ export function buildView(kind, style) {
     const root = el('div', 'w-meter w-bar'), fill = el('div', 'w-fill'), mark = el('div', 'w-mark');
     root.append(fill, mark);
     return { root, update: s => { fill.style.width = (s.value || 0) * 100 + '%'; mark.hidden = typeof s.marker !== 'number'; if (typeof s.marker === 'number') mark.style.left = s.marker * 100 + '%'; } };
+  }
+  if (k === 'icon') {
+    const root = el('div', 'w-icon'), img = el('img', 'w-img'), text = el('span', 'w-text');
+    img.alt = ''; img.draggable = false;
+    root.append(img, text);
+    let last = null;
+    return { root, update: s => {
+      const src = svgSrc(cleanSvg(s.svg || '', MAX_SVG_FILE));                       // (cleaned again here: this page draws nothing that was not)
+      if (src !== last) { last = src; if (src) img.src = src; else img.removeAttribute('src'); }
+      img.hidden = !src; text.textContent = s.text || ''; text.hidden = !s.text;
+    } };
   }
   if (k === 'light') {
     const root = el('div', 'w-light'), dot = el('span', 'w-dot'), text = el('span', 'w-text');

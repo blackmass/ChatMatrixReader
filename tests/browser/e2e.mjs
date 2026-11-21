@@ -1197,6 +1197,27 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   ok(await main.locator(`.widget[data-id="${WID}"]`).count() === 1, 'plugins/widgets: a window that has it turned on draws it');
   await asked('widgets.update', { id: 'status', state: { text: '감시 중', tone: 'ok', active: true, tip: '팁입니다' } }); await control.waitForTimeout(500);
   ok((await main.locator(`.widget[data-id="${WID}"]`).textContent()).includes('감시 중'), 'plugins/widgets: its state is painted');
+  // a link in a line: the title is drawn as a link; a click on it (the window tells the hub) opens the address in the web window of the plugin; an address that is not allowed gets no link
+  const lk = await asked('chat.inject', { text: '새 글: 링크 시험 제목', sender: '게시판', link: { url: 'https://m.example.com/read/9', text: '링크 시험 제목' } });
+  const lbad = await asked('chat.inject', { text: 'x', link: { url: 'https://evil.org/x' } });
+  await control.waitForTimeout(1500);
+  const lel = await main.evaluate(() => { const e = document.querySelector('#lines .cv-link'); return e ? { text: e.textContent, link: e.dataset.link } : null; });
+  ok(lk.ok && lbad.ok === false && lbad.error.code === 'denied' && lel && lel.text === '링크 시험 제목', 'plugins/link: the title is a link in the line; an address that is not allowed is refused: ' + JSON.stringify([lk, lbad.error, lel]));
+  const before = webCalls.filter(c => c[0] === 'open').length;
+  await main.evaluate(() => document.querySelector('#lines .cv-link').dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 })));
+  await control.waitForTimeout(800);
+  const opened = webCalls.filter(c => c[0] === 'open');
+  ok(opened.length === before + 1 && opened.at(-1)[1].url === 'https://m.example.com/read/9', 'plugins/link: a click opens the address in the web window: ' + JSON.stringify(opened.at(-1)));
+  // a picture: the kind icon draws the SVG a plugin gives (from a text) as an <img>, with the script taken out
+  const ri = await asked('widgets.register', { id: 'pic', label: '그림', kind: 'icon' });
+  const ru = await asked('widgets.update', { id: 'pic', state: { active: true, svg: '<svg viewBox="0 0 10 10"><script>alert(1)</script><rect width="10" height="10" fill="#c33"/></svg>' } });
+  ok(ri.ok && ru.ok, 'plugins/icon: register and update an icon widget: ' + JSON.stringify([ri, ru]));
+  const picId = PID + ':pic';
+  await control.evaluate(([w]) => import('./settings.js').then(m => m.set({ widgets: { ...(m.cfg().widgets || {}), [w]: { place: 'inside', anchor: 'top-left', dx: 0, dy: 0, style: 'icon', show: 'always', scale: 1, opacity: 1, opts: {} } } })), [picId]);
+  await control.waitForTimeout(700);
+  const img = await main.evaluate(w => { const i = document.querySelector(`.widget[data-id="${w}"] img.w-img`); return i ? { src: decodeURIComponent(i.getAttribute('src') || ''), hidden: i.hidden } : null; }, picId);
+  ok(img && !img.hidden && img.src.startsWith('data:image/svg+xml') && img.src.includes('<rect') && !img.src.includes('script'), 'plugins/icon: the picture is drawn from a data address, without the script: ' + JSON.stringify(img));
+  await control.evaluate(([w]) => import('./settings.js').then(m => { const x = { ...(m.cfg().widgets || {}) }; delete x[w]; m.set({ widgets: x }); }), [picId]);
   // a click and a menu item of the widget reach the plugin that owns it (only its own, with the name it gave); the right-click menu of the window has its items and "plugin settings"
   await asked('widgets.update', { id: 'status', state: { menu: [{ id: 'now', label: '지금 확인' }] } }); await control.waitForTimeout(400);
   const sentTo = await control.evaluate(([id, wid]) => new Promise(res => {
@@ -1450,8 +1471,10 @@ await main.evaluate(() => { const l = document.getElementById('lines'); l.scroll
   ok(await main.evaluate(() => document.body.classList.contains('interactive')), 'popup: (click-through with the key held: the window is usable)');
   await menuAt();
   ok(await pop().locator('#ctx').isVisible(), 'popup: the menu opened with the key held');
-  kb.shift = false; await control.waitForTimeout(900);
-  ok(await pop().locator('#ctx').isHidden(), 'popup: the key let go (click-through again): the menu is taken away');
+  kb.cx = 5000; kb.shift = false; await control.waitForTimeout(900);          // (the pointer is on the part of the menu that stands outside the window, the key is let go)
+  ok(await pop().locator('#ctx').isVisible(), 'popup: the pointer is on the menu outside the window: the menu stays (it can be used)');
+  kb.cx = 100; await control.waitForTimeout(900);
+  ok(await pop().locator('#ctx').isHidden(), 'popup: the key let go and the pointer back in the window (click-through again): the menu is taken away');
   await control.evaluate(w => import('./settings.js').then(m => m.set({ click_through: w })), was); kb.cx = 0; kb.cy = 0; await control.waitForTimeout(700);
   // the tip of a widget: in the popup, above the widget, and gone when the pointer leaves
   await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: { 'core:voice-level': { place: 'inside', anchor: 'top-left', dx: 0, dy: 0, style: 'bar', show: 'always', scale: 1, opacity: 1, opts: {} } } })));

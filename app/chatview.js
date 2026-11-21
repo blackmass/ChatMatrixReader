@@ -10,6 +10,8 @@ import * as fade from './core/fade.js';
 import { T } from './core/timings.js';
 import { add as perfAdd } from './core/perf.js';
 
+// A click on a link of a line (a plugin put it there): `linkHandler.fn(id)`, set by the window page
+export const linkHandler = { fn: null };
 export const FADE_MS = 3000;           // (defaults, the values in use are T.*; see core/timings.js) how long a line takes to fade out once its time is up (tuning.py)
 export const FADE_TICK_MS = 33;        // how often fading lines are drawn
 export const FADE_IDLE_MS = 250;       // how often the age of the lines is looked at while none is fading
@@ -50,6 +52,7 @@ export class ChatView {
     this.now = now;
     this.list = document.createElement('div');
     this.list.className = 'cv-list';
+    this.list.addEventListener('click', e => { const s = e.button === 0 && e.target.closest ? e.target.closest('.cv-link') : null; if (s && linkHandler.fn) { e.stopPropagation(); linkHandler.fn(s.dataset.link); } });
     scroll.classList.add('cv-scroll');
     scroll.appendChild(this.list);
     this.look = { ...DEFAULT_LOOK };
@@ -147,6 +150,7 @@ export class ChatView {
       span.textContent = p.text.replace(/️/g, '');
       span.style.color = theme.pieceColor(p, base);
       if (p.tip && p.tip.length) { span.className = 'cv-tipped'; span._tip = p.tip; }
+      if (p.link) { span.classList.add('cv-link'); span.dataset.link = p.link; }
       el.appendChild(span);
     }
     return el;

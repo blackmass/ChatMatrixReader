@@ -159,6 +159,7 @@ export class Pipeline {
       const sym = [...first.text][0];
       pieces.splice(0, 1, piece(sym, { role: 'ping' }), piece(first.text.slice(sym.length), { quality: first.quality, tip: first.tip }));
     }
+    if (line.link) for (const p of pieces) if (p.quality === chattext.LIGHT_BLUE && p.tip.length) p.link = String(line.link);          // (a link of a plugin: the id the window sends back when it is clicked)
     const plain = chattext.plain(body);
     const translatable = !protectedText
       && !(code.startsWith('!') && !TRANSLATED_CODES.includes(code) && !chattext.isServerNotice(code, body))

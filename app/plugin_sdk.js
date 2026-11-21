@@ -4,13 +4,15 @@
 //
 //   await cmr.meta()                                      { id, name, version, api, allowed }
 //   cmr.log('text')                                       a line in the log of the plugin (plugin tab)
-//   await cmr.chat.inject({ text, sender })               a line in the chat windows            (permission chat.inject)
+//   await cmr.chat.inject({ text, sender, link })         a line in the chat windows            (permission chat.inject); link: { url, text?, target? } makes `text` (or the part of it that is `link.text`) a link:
+//                                                         a click opens `url` in the plugin's web window (target 'web', needs permission web) or in the browser (target 'browser', needs openUrl)
 //   await cmr.storage.get(key) / set(key, value) / remove(key) / keys()    the plugin's own data (permission storage)
 //   await cmr.net.fetch({ url, method, headers, body })   -> { status, body, url, type }        (permission net: https, the hosts the user allowed)
 //   await cmr.widgets.register({ id, label, kind, styles, settings, hint }) / update(id, state) / unregister(id)     a small part on the chat windows (permission widgets)
 //   cmr.widgets.onClick(fn) / onMenu(fn)                  fn({ id, type, item? }) when the user clicks a widget (with the keys that make the window usable when it lets the mouse through) / picks an item of its
 //        menu (right button; the items: `menu: [{ id, label }]` in register or in a state); `await cmr.widgets.create(def)` gives a handle: w.update(state), w.onClick(fn), w.onMenu(fn), w.remove()
-//        (kind: meter | light | text; state: { active, value 0..1, marker, tone, text, tip }; the user turns it on and places it in the options)
+//        a picture: kind 'icon' with state { svg: '<svg ...>' } (a text, up to 8000 characters) or { image: 'icons/x.svg' } (a .svg file of the plugin's folder, up to 32 KB); an SVG is only a picture: scripts, styles and outside addresses are taken out
+//        (kind: meter | light | text | icon; state: { active, value 0..1, marker, tone, text, tip }; the user turns it on and places it in the options)
 //   await cmr.windows.open(id) / close(id)                a window the plugin declared in plugin.json ("windows"); its page is shown in it (permission windows)
 //   await cmr.net.requestHost(host)                       (permission netAny) asks the user to allow a host: 'allowed' | 'pending'; the user answers in the plugin tab
 //   await cmr.net.hosts()  /  cmr.net.onHosts(fn)         the hosts the plugin may fetch now / fn(hosts) when the user allows or takes away one
