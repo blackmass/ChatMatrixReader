@@ -70,6 +70,7 @@ async function invoke(cmd, a = {}) {
     case 'plugin_token': return 'tok-' + a.id;
     case 'plugin_forget': return null;
     case 'plugin_open_url': pluginOpened.push(a); return null;
+    case 'process_stats': return { os: 'windows', self: 10, note: '', procs: [{ pid: 10, parent: 1, name: 'ChatMatrix Reader.exe', kind: 'main', sub: '', ws: 104857600, private: 83886080, cpu_ms: 1000, handles: 300, gdi: 40, user: 60 }, { pid: 11, parent: 10, name: 'msedgewebview2.exe', kind: 'renderer', sub: '', ws: 52428800, private: 31457280, cpu_ms: 500, handles: 150, gdi: 10, user: 10 }] };
     case 'web_open': webCalls.push(['open', a.args]); return null;
     case 'web_close': webCalls.push(['close', a.label]); return null;
     case 'web_allow': webCalls.push(['allow', a.allow]); return null;
@@ -764,6 +765,11 @@ await opt.selectOption('.row:has(b.label:text-is("글 정렬")) select', '');
 await control.waitForTimeout(1200);
 ok(cfgFile().child_windows.find(c => c.id === 3).align === null, 'options/windows: "창 1을 따름" in a choice list: null (it follows window 1)');
 await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
+// the tab "기록": the log moved here from "정보", and the table of the processes
+await opt.locator('#tabs li', { hasText: '기록' }).click(); await control.waitForTimeout(1500);
+ok(await opt.locator('.resmon .res-table tbody tr').count() === 2 && (await opt.locator('.res-total').textContent()).includes('2'), 'options/log: the table of the processes: ' + (await opt.locator('.res-total').textContent()));
+ok(await opt.locator('textarea, .logview').count() > 0 && !(await opt.locator('#tabs li', { hasText: '정보' }).count() === 0), 'options/log: the log is in this tab');
+await opt.locator('#tabs li', { hasText: '창' }).first().click(); await control.waitForTimeout(500);
 ok((await opt.locator('#tabs li', { hasText: '창' }).first().locator('.badge').textContent()) !== '', 'options/windows: the tab counts the changes');
 await opt.click('#revertAll');
 await control.waitForTimeout(1500);
@@ -1046,10 +1052,11 @@ ok(await opt.locator('.licview').isVisible() && (await opt.locator('.licview').i
 files.delete('LICENSE');
 
 files.set('logs/chatmatrix.log', Array.from({ length: 600 }, (_, i) => 'LOG LINE ' + i).join('\n'));
+await opt.locator('#tabs li', { hasText: '기록' }).click(); await opt.waitForTimeout(300);
 await opt.locator('.row.t-logview button', { hasText: '새로 고침' }).click();
 await control.waitForTimeout(300);
 const logText = await opt.inputValue('textarea.logtext');
-ok(logText.endsWith('LOG LINE 599') && !logText.includes('LOG LINE 100\n') && logText.split('\n').length === 400, 'options/about: the log shows its last 400 lines');
+ok(logText.endsWith('LOG LINE 599') && !logText.includes('LOG LINE 100\n') && logText.split('\n').length === 400, 'options/log: the log shows its last 400 lines');
 
 // ---- the display language: the texts of every window follow the setting, and switching back restores them
 await opt.locator('#tabs li', { hasText: '일반' }).click();
@@ -1058,7 +1065,7 @@ ok(await opt.locator('.row:has(b.label:text-is("표시 언어")) option').count(
 await opt.selectOption('.row:has(b.label:text-is("표시 언어")) select', 'en-US');
 await control.waitForTimeout(1500);
 ok(cfgFile().language === 'en-US', 'language: saved');
-ok((await opt.locator('#tabs li .name').allTextContents()).join('|') === 'General|Window|Translation|Glossary & prompt|Exceptions|Send|Voice recognition|Plugin|Advanced|About' , 'language: the side menu is in English: ' + (await opt.locator('#tabs li .name').allTextContents()).join('|'));
+ok((await opt.locator('#tabs li .name').allTextContents()).join('|') === 'General|Window|Translation|Glossary & prompt|Exceptions|Send|Voice recognition|Plugin|Advanced|About|Records' , 'language: the side menu is in English: ' + (await opt.locator('#tabs li .name').allTextContents()).join('|'));
 ok(await opt.locator('#head').textContent() === 'General' && (await opt.getAttribute('#q', 'placeholder')) === 'Search options', 'language: header and placeholder');
 ok(await opt.locator('.row b.label', { hasText: 'Display language' }).count() === 1, 'language: option rows');
 await opt.locator('#tabs li', { hasText: 'Window' }).click();

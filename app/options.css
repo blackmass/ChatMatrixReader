@@ -319,3 +319,11 @@ input.colortext.follow-input { width: 150px; }
 .pl-request { border: 1px solid var(--accent); border-radius: 6px; padding: 5px 8px; }
 .pl-hostadd { display: flex; gap: 8px; margin: 6px 0; }
 .pl-hostadd input { max-width: 260px; }
+
+/* 기록: the resource table */
+.resmon { display: flex; flex-direction: column; gap: 6px; }
+.res-total { font-weight: 600; }
+.res-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.res-table th, .res-table td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line, #3c3f46); white-space: nowrap; }
+.res-table td:nth-child(n+3), .res-table th:nth-child(n+3) { text-align: right; }
+.res-table tr.res-main td { font-weight: 600; }

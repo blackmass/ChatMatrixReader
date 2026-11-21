@@ -22,6 +22,7 @@ mod pluginlib;
 mod weblib;
 mod webwin;
 mod procrole;
+mod procstats;
 // everything that calls the operating system directly: the same functions in both files (win.rs: Windows, mac.rs: macOS)
 #[cfg(windows)]
 mod win;
@@ -827,6 +828,12 @@ fn capture_stop(id: String) {
     capture::stop(&id);
 }
 
+/// The processes of the program and what they use (the options, tab 기록). Read when asked.
+#[tauri::command]
+async fn process_stats() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(procstats::stats).await.map_err(|e| e.to_string())
+}
+
 /// Which system this is ("windows" | "macos"): a few things are done differently on macOS.
 #[tauri::command]
 fn os_kind() -> &'static str {
@@ -1120,6 +1127,7 @@ fn main() {
             plugin_hash,
             plugin_fetch,
             plugin_open_url,
+            process_stats,
             webwin::web_open,
             webwin::web_close,
             webwin::web_allow,
