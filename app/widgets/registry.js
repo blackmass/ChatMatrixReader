@@ -6,6 +6,7 @@ export const SHOWS = ['always', 'active', 'dim'];
 export const TONES = ['idle', 'busy', 'ok', 'hot', 'warn', 'bad'];            // names, not colours: the colours are the host's (the theme)
 export const SETTING_TYPES = ['number', 'select', 'check', 'color'];
 export const MAX_WIDGETS = 32;
+export const MAX_MENU = 8;                                                     // the items of the menu of a widget (the right button)
 
 // what the host can draw; an unknown kind is drawn as "text"
 export const KINDS = {
@@ -19,6 +20,8 @@ export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,99}:[a-z0-9][a-z0-9_.-]{0,47}$/i;   
 const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
 const num = (v, lo, hi, d) => { v = Number(v); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
 const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+// the items a plugin gives the menu of its widget: [{ id, label }]
+export const cleanMenu = m => (Array.isArray(m) ? m : []).filter(i => isObj(i) && /^[a-z0-9_-]{1,24}$/i.test(i.id || '') && typeof i.label === 'string' && i.label.trim()).slice(0, MAX_MENU).map(i => ({ id: i.id, label: str(i.label.trim(), 40) }));
 
 // ---- definitions
 // -> a clean definition, or an Error that says what is wrong (the registry refuses a wrong one, so that the options never draw garbage)
@@ -46,7 +49,8 @@ export function checkDef(def) {
     settings.push(e);
   }
   const hint = isObj(def.hint) ? { place: PLACES.includes(def.hint.place) ? def.hint.place : 'inside', anchor: ANCHORS.includes(def.hint.anchor) ? def.hint.anchor : 'bottom-right' } : { place: 'inside', anchor: 'bottom-right' };
-  return { id: def.id, owner, label: str(def.label, 60) || def.id, kind, styles, settings, hint };
+  const menu = cleanMenu(def.menu);
+  return { id: def.id, owner, label: str(def.label, 60) || def.id, kind, styles, settings, hint, menu, clickable: !!def.clickable || menu.length > 0 };
 }
 
 export class Registry {
@@ -121,6 +125,7 @@ export function cleanState(p) {
   if ('text' in p) s.text = str(p.text, 40);
   if ('tip' in p) s.tip = str(p.tip, 400);
   if ('count' in p) s.count = Math.round(num(p.count, 0, 99999, 0));
+  if ('menu' in p) s.menu = cleanMenu(p.menu);                              // (the items of the menu can change with the state)
   return s;
 }
 export class StateStore {

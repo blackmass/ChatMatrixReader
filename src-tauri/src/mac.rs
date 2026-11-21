@@ -44,8 +44,6 @@ extern "C" {
     // (private) the tags of a window in the window server; the bit 1 << 16 is "clicking this window does not activate its program"
     fn CGSSetWindowTags(connection: i32, window: i32, tags: *const i32, size: i32) -> i32;
     fn CGSClearWindowTags(connection: i32, window: i32, tags: *const i32, size: i32) -> i32;
-    // (private) a property of the program's connection to the window server; "SetsCursorInBackground" lets a program that is not the active one change the cursor
-    fn CGSSetConnectionProperty(connection: i32, target: i32, key: *const c_void, value: *const c_void) -> i32;
 }
 #[link(name = "objc")]
 extern "C" {
@@ -549,17 +547,6 @@ pub fn set_noactivate_light(hwnd: isize, on: bool) {
             if let Ok(mut l) = TAGGED.lock() { l.retain(|e| e.0 != hwnd); }
         });
     }
-}
-
-/// A test: the program may change the mouse cursor while it is not the active one (a window of the web that the mouse is over shows the cursor its page wants, also while the game has the keyboard).
-/// What a program that is not active gets of the mouse is up to the system, so this may change nothing.
-pub fn cursor_in_background() {
-    on_main(|| unsafe {
-        let cid = CGSDefaultConnectionForThread();
-        let key = CFString::new("SetsCursorInBackground");
-        let yes = core_foundation::boolean::CFBoolean::true_value();
-        CGSSetConnectionProperty(cid, cid, key.as_concrete_TypeRef() as *const c_void, yes.as_concrete_TypeRef() as *const c_void);
-    });
 }
 
 /// Every poll of the page: the window stays what it was made (the window library may change it when it changes one of its own flags).

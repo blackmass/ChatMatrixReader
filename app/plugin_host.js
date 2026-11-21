@@ -318,6 +318,11 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   }, PING_MS);
   setInterval(() => { for (const b of bridges.values()) b.bridge.pump(); }, 150);       // (the lines of the plugins wait in a queue and go out one by one: core/pluginbridge.js)
 
+  if (widgets) widgets.onAction = a => {                                  // a click / a menu item of a widget: the plugin that owns it is told (only a widget it registered)
+    const owner = String(a.id).split(':')[0], run = running.get(owner);
+    if (!run || !run.bridge.widgetIds.has(a.id) || (a.type !== 'click' && a.type !== 'menu')) return;
+    sendTo(run.frame, { cmr: 1, event: 'widget', value: { id: a.id.slice(owner.length + 1), type: a.type, ...(a.type === 'menu' ? { item: String(a.item || '').slice(0, 24) } : { button: 'left' }) } });
+  };
   const api = { watch: true, dog, prompted: new Set(), windowAllowed, scan, list: () => allIds().map(summary), registry, running, logs, stop: stopOne, post };
   scan();
   return api;

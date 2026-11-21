@@ -33,6 +33,7 @@ export function buildView(kind, style) {
 export class WidgetLayer {
   // root: the element the 8 containers are put into; defs: the Registry; `tipBox`: where the tip is written (made if not given)
   constructor({ root, registry, tipBox = null, sink = null }) {
+    this.onAction = null;                                // (id, 'click' | 'menu', item?) the user used a widget of a plugin (the window passes it on)
     this.sink = sink;                                    // where the tip is drawn when not here: a window of its own { usable(), show(text, rect), hide() }
     this.root = root; this.registry = registry;
     root.classList.add('wlayer');
@@ -53,11 +54,13 @@ export class WidgetLayer {
       if (!it || it.kind !== kind || it.style !== style) {
         if (it) it.node.remove();
         const view = buildView(kind, style), node = el('div', 'widget'); node.dataset.id = e.id;
+        node.addEventListener('click', ev => { const w = this.items.get(e.id); if (ev.button === 0 && w && this.clickable(w) && this.onAction) { ev.stopPropagation(); this.onAction(e.id, 'click'); } });
         node.append(view.root);
         it = { view, node, kind, style, entry: e, state: this.states.get(e.id) || null, title: def ? def.label : e.id };
         this.items.set(e.id, it);
       }
       it.entry = e;
+      it.node.classList.toggle('clickable', this.clickable(it));
       this.place(it);
       this.paint(it);
     }
@@ -72,10 +75,22 @@ export class WidgetLayer {
     const order = [...this.items.keys()];
     [...box.children].sort((a, b) => order.indexOf(a.dataset.id) - order.indexOf(b.dataset.id)).forEach(n => box.append(n));
   }
+  // may the user click this widget (a widget of a plugin that asked for it, or that has a menu)
+  clickable(it) { const def = this.registry.get(it.entry.id); return !!(def && def.owner !== 'core' && (def.clickable || this.menuOf(it).length)); }
+  // the items of its menu: the state's (a plugin changes them while it runs), else the definition's
+  menuOf(it) { const def = this.registry.get(it.entry.id), s = it.state; return (s && Array.isArray(s.menu) ? s.menu : def && def.menu) || []; }
+  // the widget an element belongs to (for the right-click menu of the window): { id, title, owner, menu, clickable } or null
+  itemOf(node) {
+    const w = node && node.closest ? node.closest('.widget') : null;
+    const it = w && this.items.get(w.dataset.id);
+    if (!it) return null;
+    const def = this.registry.get(it.entry.id);
+    return { id: it.entry.id, title: it.title, owner: def ? def.owner : '', menu: this.menuOf(it), clickable: this.clickable(it) };
+  }
   state(id, st) {
     this.states.set(id, st);
     const it = this.items.get(id);
-    if (it) { it.state = st; this.paint(it); }
+    if (it) { it.state = st; it.node.classList.toggle('clickable', this.clickable(it)); this.paint(it); }
   }
   paint(it) {
     const s = it.state || { active: false, value: 0, marker: null, tone: 'idle', text: '', tip: '' }, e = it.entry;

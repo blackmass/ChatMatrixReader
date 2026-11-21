@@ -200,4 +200,4 @@ const plugins = startPlugins({ settings, files, publish, pipeline, invoke: tauri
 windows.setPluginCheck((owner, name) => plugins.windowAllowed(owner, name));       // (a window of a plugin opens only while its plugin runs and may have it)
 
 
-window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice, plugins };
+window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice, plugins, widgets };

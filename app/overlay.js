@@ -85,7 +85,8 @@ let active = host, view = host.view, feed = host.feed;               // (of the 
 const widgetRegistry = defaultRegistry();                            // (the program's own widgets; what the plugins register comes by 'widget-defs')
 const widgetLayer = new WidgetLayer({ root: document.getElementById('widgets'), registry: widgetRegistry });
 let widgetIds = '';
-window.__cmrWidgets = widgetLayer;                                   // (for the tests)
+window.__cmrWidgets = widgetLayer;
+widgetLayer.onAction = (id, type, item) => emit('widget-action', { id, type, ...(item ? { item } : {}) });                                   // (for the tests)
 // the widgets of this window (docs/WIDGETS.md): drawn from the settings; a widget that is turned on asks the hub for its state
 const apply = ops => view.apply(ops, feed.model);
 const note = text => host.view.apply(host.feed.model.addNote(text, 'system'), host.feed.model);       // (the notes of the window are in its own pane)
@@ -536,6 +537,16 @@ function contextMenu() {
     // the tab that was clicked with the right button (its name, without being shown first); anywhere else: the tab that is shown
     const tabEl = ev.target.closest && ev.target.closest('#bar .tab');
     const target = tabEl ? panes.find(p => p.tab === tabEl) || active : active;
+    // a widget of a plugin under the mouse: its own items first, then the settings of the plugin
+    const wi = widgetLayer.itemOf(ev.target);
+    if (wi && wi.owner && wi.owner !== 'core') {
+      for (const m of wi.menu) add(m.label, () => emit('widget-action', { id: wi.id, type: 'menu', item: m.id }));
+      add(tr('플러그인 설정…'), () => {
+        try { localStorage.setItem('cmr-plugin-sel', wi.owner); localStorage.setItem('cmr-options-tab', 'plugins'); } catch { /* the options open as they were */ }
+        invoke('open_options').catch(e => note(tr('옵션 창: {e}', { e })));
+      });
+      list.push({ cls: 'sep' });
+    }
     add(tr('이 창의 옵션…'), async () => {
       try { localStorage.setItem('cmr-options-win', String(target.id)); } catch { /* the options open on the first window */ }
       invoke('open_options').catch(e => note(tr('옵션 창: {e}', { e })));

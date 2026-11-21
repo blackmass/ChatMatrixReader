@@ -1197,6 +1197,15 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   ok(await main.locator(`.widget[data-id="${WID}"]`).count() === 1, 'plugins/widgets: a window that has it turned on draws it');
   await asked('widgets.update', { id: 'status', state: { text: '감시 중', tone: 'ok', active: true, tip: '팁입니다' } }); await control.waitForTimeout(500);
   ok((await main.locator(`.widget[data-id="${WID}"]`).textContent()).includes('감시 중'), 'plugins/widgets: its state is painted');
+  // a click and a menu item of the widget reach the plugin that owns it (only its own, with the name it gave); the right-click menu of the window has its items and "plugin settings"
+  await asked('widgets.update', { id: 'status', state: { menu: [{ id: 'now', label: '지금 확인' }] } }); await control.waitForTimeout(400);
+  const sentTo = await control.evaluate(([id, wid]) => new Promise(res => {
+    const run = window.cmrHub.plugins.running.get(id); const old = window.cmrHub.plugins.post.send; const got = [];
+    window.cmrHub.plugins.post.send = (f, msg) => { if (msg.event === 'widget') got.push(msg.value); };
+    window.cmrHub.widgets.onAction({ id: wid, type: 'click' }); window.cmrHub.widgets.onAction({ id: wid, type: 'menu', item: 'now' }); window.cmrHub.widgets.onAction({ id: 'other-plugin:status', type: 'click' });
+    setTimeout(() => { window.cmrHub.plugins.post.send = old; res(got); }, 100);
+  }), [PID, WID]);
+  ok(sentTo.length === 2 && sentTo[0].id === 'status' && sentTo[0].type === 'click' && sentTo[1].type === 'menu' && sentTo[1].item === 'now', 'plugins/widgets: a click and a menu item reach the plugin: ' + JSON.stringify(sentTo));
   // a window of the plugin: made in the list of windows when the plugin is on, opened by the plugin, its page in a sandboxed frame, not deletable, basic settings only
   const pw = await control.evaluate(id => (window.cmrHub && import('./settings.js').then(m => m.cfg().child_windows.find(c => c.owner === id && c.kind === 'page'))), PID);
   ok(pw && pw.kind === 'page' && pw.owner_win === 'main' && pw.page === 'window.html' && pw.name === '플러그인 창' && pw.geometry === '300x200' && pw.open_mode === 'never' && pw.channels.length === 0, 'plugins/windows: its window is in the list of windows: ' + JSON.stringify(pw));

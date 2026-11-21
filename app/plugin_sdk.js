@@ -8,6 +8,8 @@
 //   await cmr.storage.get(key) / set(key, value) / remove(key) / keys()    the plugin's own data (permission storage)
 //   await cmr.net.fetch({ url, method, headers, body })   -> { status, body, url, type }        (permission net: https, the hosts the user allowed)
 //   await cmr.widgets.register({ id, label, kind, styles, settings, hint }) / update(id, state) / unregister(id)     a small part on the chat windows (permission widgets)
+//   cmr.widgets.onClick(fn) / onMenu(fn)                  fn({ id, type, item? }) when the user clicks a widget (with the keys that make the window usable when it lets the mouse through) / picks an item of its
+//        menu (right button; the items: `menu: [{ id, label }]` in register or in a state); `await cmr.widgets.create(def)` gives a handle: w.update(state), w.onClick(fn), w.onMenu(fn), w.remove()
 //        (kind: meter | light | text; state: { active, value 0..1, marker, tone, text, tip }; the user turns it on and places it in the options)
 //   await cmr.windows.open(id) / close(id)                a window the plugin declared in plugin.json ("windows"); its page is shown in it (permission windows)
 //   await cmr.net.requestHost(host)                       (permission netAny) asks the user to allow a host: 'allowed' | 'pending'; the user answers in the plugin tab
@@ -22,6 +24,13 @@
   const pending = new Map();
   const listeners = [];
   const hostListeners = [];
+  const widgetHandlers = { click: [], menu: [] };                 // fn(e) for every widget
+  const perWidget = new Map();                                    // id -> { click: [fn], menu: [fn] }
+  const widgetEvent = e => {
+    if (!e || typeof e.id !== 'string' || !widgetHandlers[e.type]) return;
+    const list = [...widgetHandlers[e.type], ...((perWidget.get(e.id) || {})[e.type] || [])];
+    for (const f of list) { try { f(e); } catch (err) { console.error(err); } }
+  };
   let seq = 0;
   addEventListener('message', e => {
     if (e.source !== parent) return;
@@ -29,6 +38,7 @@
     if (!m || m.cmr !== 1) return;
     if (m.event === 'ping') { parent.postMessage({ cmr: 1, event: 'pong' }, '*'); return; }          // ("are you there?": a page that is stuck in a loop cannot answer; the program starts it again)
     if (m.event === 'hosts') { for (const f of hostListeners) { try { f(m.value); } catch (err) { console.error(err); } } return; }
+    if (m.event === 'widget') { widgetEvent(m.value); return; }
     if (m.event === 'options') { for (const f of listeners) { try { f(m.value); } catch (err) { console.error(err); } } return; }
     const p = pending.get(m.id);
     if (!p) return;
@@ -55,7 +65,16 @@
     storage: { get: key => call('storage.get', { key }), set: (key, value) => call('storage.set', { key, value }), remove: key => call('storage.remove', { key }), keys: () => call('storage.keys') },
     net: { fetch: a => call('net.fetch', a), requestHost: host => call('net.requestHost', { host }), hosts: () => call('net.hosts'), onHosts: fn => { hostListeners.push(fn); } },
     windows: { open: id => call('windows.open', { id }), close: id => call('windows.close', { id }) },
-    widgets: { register: def => call('widgets.register', def), update: (id, state) => call('widgets.update', { id, state }), unregister: id => call('widgets.unregister', { id }) },
+    widgets: {
+      register: def => call('widgets.register', def), update: (id, state) => call('widgets.update', { id, state }), unregister: id => call('widgets.unregister', { id }),
+      onClick: fn => { widgetHandlers.click.push(fn); }, onMenu: fn => { widgetHandlers.menu.push(fn); },
+      // register, and get a handle: w.update(state), w.onClick(fn), w.onMenu(fn), w.remove()
+      create: async def => {
+        await call('widgets.register', def);
+        const id = def.id, mine = () => { if (!perWidget.has(id)) perWidget.set(id, { click: [], menu: [] }); return perWidget.get(id); };
+        return { id, update: state => call('widgets.update', { id, state }), onClick: fn => { mine().click.push(fn); }, onMenu: fn => { mine().menu.push(fn); }, remove: () => { perWidget.delete(id); return call('widgets.unregister', { id }); } };
+      },
+    },
     options: { get: () => call('options.get'), set: values => call('options.set', values), onChange: fn => { listeners.push(fn); } },
   };
   parent.postMessage({ cmr: 1, event: 'hello' }, '*');

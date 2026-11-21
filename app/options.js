@@ -261,11 +261,13 @@ $('quitBtn').onclick = () => window.__TAURI__.core.invoke('quit_request').catch(
 {
   const KEY = 'cmr-options-win';
   const take = () => {
+    let tabKey = ''; try { tabKey = localStorage.getItem('cmr-options-tab') || ''; localStorage.removeItem('cmr-options-tab'); } catch { /* none */ }      // ("plugin settings" of a widget: the tab of the plugins)
+    if (tabKey && TABS.some(t => t.id === tabKey)) go({ mode: 'tab', tab: tabKey });
     let id = 0;
     try { id = parseInt(localStorage.getItem(KEY) || '0', 10) || 0; localStorage.removeItem(KEY); } catch { /* none */ }
     if (id) { selected = id; go({ mode: 'tab', tab: 'windows' }); }
   };
-  addEventListener('storage', e => { if (e.key === KEY && e.newValue) take(); });
+  addEventListener('storage', e => { if ((e.key === KEY || e.key === 'cmr-options-tab') && e.newValue) take(); });
   take();
 }
 addEventListener('contextmenu', e => { if (!['INPUT', 'TEXTAREA'].includes(e.target.tagName)) e.preventDefault(); });

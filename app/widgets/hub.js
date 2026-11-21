@@ -11,6 +11,7 @@ export function startWidgets({ settings, emit, listen }) {
   const sendDefs = () => emit('widget-defs', { defs: pluginDefs.list() });
   const used = () => usedIds(settings.cfg());
   const api = {
+    onAction: null,                                       // set by the plugin host: ({ id, type: 'click' | 'menu', item })
     store,
     registerDef(def) { const d = pluginDefs.register(def); sendDefs(); return d; },
     unregisterDef(id) { if (pluginDefs.unregister(id)) { store.map.delete(id); sendDefs(); } },
@@ -23,6 +24,7 @@ export function startWidgets({ settings, emit, listen }) {
     },
   };
   listen('widget-defs-hello', () => sendDefs());
+  listen('widget-action', ev => { const p = ev.payload; if (p && typeof p.id === 'string' && api.onAction) api.onAction(p); });      // (a click or a menu item in a window: whoever owns the widget is told)
   listen('widget-hello', ev => {
     for (const id of (ev.payload && ev.payload.ids) || []) { const st = store.get(id); if (st) emit('widget-state', { id, state: st }); }
   });

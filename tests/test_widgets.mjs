@@ -93,3 +93,13 @@ check(sent.length === 1 && sent[0][1].id === VOICE_ID, 'a window that asks (it w
   let n = 0; reg.onChange(() => n++); W.syncPluginDefs(reg, [def('two')]);
   eq(n, 0, 'widgets: the same definitions again change nothing');
 }
+
+// ---- the menu and the click of a widget of a plugin
+{
+  const { checkDef, cleanState, cleanMenu } = await import('../app/widgets/registry.js');
+  const d = checkDef({ id: 'p:w', menu: [{ id: 'a', label: ' Open ' }, { id: 'bad id', label: 'x' }, { id: 'b', label: '' }, { id: 'c', label: 'C' }] });
+  check(d.menu.length === 2 && d.menu[0].label === 'Open' && d.clickable === true, 'widgets: the menu of a definition is cleaned; with a menu it is clickable');
+  check(checkDef({ id: 'p:w' }).clickable === false && checkDef({ id: 'p:w', clickable: true }).clickable === true, 'widgets: clickable only when asked or with a menu');
+  check(cleanMenu(Array.from({ length: 20 }, (_, i) => ({ id: 'i' + i, label: 'L' }))).length === 8, 'widgets: at most 8 items');
+  check(cleanState({ menu: [{ id: 'x', label: 'X' }] }).menu.length === 1 && !('menu' in cleanState({ text: 'a' })), 'widgets: a state may carry the menu');
+}
