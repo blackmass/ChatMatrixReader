@@ -2,8 +2,7 @@
 //! hub (app/web_host.js) when a plugin that may do it asks. What the experiments with it showed (windows + macOS) is kept here:
 //!   * the bar is a script that runs in the page before the page's own scripts (top frame only); what is pressed on it goes to the program by trying to go to the address
 //!     cmr-cmd://<command>, which is caught in on_navigation and never goes anywhere (the page cannot call the program: its address is not one the program trusts)
-//!   * a web window never takes the keyboard of the game: the "no activate" style (Windows); on macOS a window that does not become the key window. A text box of the page
-//!     that is clicked asks for the keyboard (the bar script tells), and gives it back when the box is left.
+//!   * a web window never takes the keyboard of the game: the "no activate" style (Windows); on macOS a window that does not become the key window. So nothing can be typed into a page of it.
 //!   * macOS: the CLASS of a window that holds a web view is never changed (the web view watches the window with key-value observing, a changed class makes the program abort
 //!     when the web view leaves it); and nothing touches a window that is closing.
 //!   * "above the game only" is two states (the game, or a window of ours, in front: the high level; another program in front: the normal level right above the game).
@@ -23,11 +22,9 @@ static OPEN_ALLOW: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new
 static ALLOW: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static CLOSING: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static LOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-static PREV_FG: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static ZSTATE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-/// Windows that took the keyboard for a text box of the page -> how many rounds of the poll they have not been the one in front (see web_tick)
-static KEYMODE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-/// What the plugin's log should tell about the windows (addresses that were refused, the keyboard of a text box): taken by web_events
+static PREV_FG: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// What the plugin's log should tell about the windows (addresses that were refused): taken by web_events
 static EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 fn event(text: String) { if let Ok(mut e) = EVENTS.lock() { if e.len() < 60 { e.push(text); } } }
 
@@ -92,13 +89,17 @@ const BAR: &str = r#"(() => {
     // (the title of the page, as it changes; what the plugin gave only until the page has one)
     const title = () => { t.textContent = document.title || TITLE || location.host; };
     title(); setInterval(title, 1000);
-    // a text box of the page asks for the keyboard (the window does not take it otherwise: the game keeps it); when the box is left the game gets it back
+    // Typing into a page. The window never takes the keyboard of the game (it is "no activate"), so a click on a text box gives nothing to type into. When the MOUSE COMES OVER a text box the program
+    // lifts that for the window ("prep": nothing moves, the game keeps the keyboard); a click on the box then activates the window like any window, by the system, and the keys go to the page.
+    // When the box is left (another place clicked, the mouse left without a click) the program puts it back ("unprep"), and when it was used the keyboard is given back to where it was ("release").
     const editable = x => !!x && (x.isContentEditable || (/^(INPUT|TEXTAREA|SELECT)$/.test(x.tagName) && !/^(button|checkbox|radio|submit|reset|image|range|color|file)$/i.test(x.type || '')));
-    // "focus" at every entry of a text box (the program ignores it when it has the keyboard already). "blur" only when the box is really left: not when the WINDOW loses the focus for a
-    // moment (the box stays the active element then), and only after a short wait (a window that is being activated loses and gets the focus again within a moment)
-    let leaveT = 0;
-    document.addEventListener('focusin', e => { if (editable(e.target)) { clearTimeout(leaveT); go('focus'); } }, true);
-    document.addEventListener('focusout', e => { if (editable(e.target)) { clearTimeout(leaveT); leaveT = setTimeout(() => { if (!editable(document.activeElement)) go('blur'); }, 250); } }, true);
+    let prepared = false, leaveT = 0;
+    const prep = on => { if (on !== prepared) { prepared = on; go(on ? 'prep' : 'unprep'); } };
+    const later = (fn, ms) => { clearTimeout(leaveT); leaveT = setTimeout(fn, ms); };
+    document.addEventListener('mouseover', e => { if (editable(e.target)) { clearTimeout(leaveT); prep(true); } }, true);
+    document.addEventListener('mouseout', e => { if (editable(e.target) && !editable(document.activeElement)) later(() => { if (!editable(document.activeElement)) prep(false); }, 300); }, true);
+    document.addEventListener('focusout', e => { if (editable(e.target)) later(() => { if (!editable(document.activeElement)) { prepared = false; go('release'); } }, 250); }, true);
+    window.addEventListener('blur', () => later(() => { if (prepared && !document.hasFocus()) prep(false); }, 400));      // (the user went to another window: nothing to give back)
     document.documentElement.append(host);
     // A scroll bar of ours, like a phone's: a thin line that shows while the page scrolls and goes away a moment later (the page's own scroll bars are hidden, see the style below)
     const bar2 = document.createElement('div');
@@ -169,7 +170,6 @@ fn forget(w: &WebviewWindow) {
     if let Ok(mut m) = OPEN_ALLOW.lock() { m.remove(&label); }
     if let Ok(mut m) = ZSTATE.lock() { m.remove(&label); }
     if let Ok(mut m) = PREV_FG.lock() { m.remove(&label); }
-    if let Ok(mut m) = KEYMODE.lock() { m.remove(&label); }
 }
 /// (called when the system asks the window to close, e.g. the window's own close)
 pub fn on_close_requested(label: &str) {
@@ -200,28 +200,23 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
         "close" => { forget(&win); let w2 = win.clone(); std::thread::spawn(move || { let _ = w2.close(); }); }
         "back" => { let _ = win.eval("history.back()"); }
         "reload" => { let _ = win.eval("location.reload()"); }
-        "focus" => {                                  // a text box of the page needs the keyboard: this window takes it (who had it is remembered)
+        "prep" => {                                   // the mouse is over a text box: a click may activate the window now (the system does it)
             if let Ok(h) = hwnd_of(&win) {
-                let again = KEYMODE.lock().map(|k| k.contains_key(label)).unwrap_or(false);
-                if again && win::foreground() == h { return; }
-                event(format!("text box: the window takes the keyboard (had it before: {}, in front: {})", again, if win::foreground() == h { "ours" } else { "other" }));          // (it has the keyboard already: nothing to do, and nothing to start over)
                 let prev = win::foreground();
-                if prev != h && !again { if let Ok(mut p) = PREV_FG.lock() { p.insert(label.to_string(), prev); } }
-                if let Ok(mut k) = KEYMODE.lock() { k.insert(label.to_string(), 0); }
+                if prev != h { if let Ok(mut p) = PREV_FG.lock() { p.insert(label.to_string(), prev); } }
                 win::allow_key(h, true);
                 win::set_noactivate_light(h, false);
-                win::grab_focus(h);
-                let _ = win.set_focus();
             }
         }
-        "blur" => {                                   // the text box was left: the keyboard goes back to where it was
+        "unprep" | "release" => {                     // the text box is left: back to a window that takes nothing; "release": it was used, the keyboard goes back to where it was
             if let Ok(h) = hwnd_of(&win) {
-                if !KEYMODE.lock().map(|mut k| k.remove(label).is_some()).unwrap_or(false) { return; }
-                event("text box left: the keyboard goes back".into());
+                let was_front = win::foreground() == h;
                 win::allow_key(h, false);
                 win::set_noactivate_light(h, true);
-                let prev = PREV_FG.lock().ok().and_then(|p| p.get(label).copied()).unwrap_or(0);
-                if prev != 0 && prev != h { win::set_foreground(prev); }
+                if cmd == "release" && was_front {
+                    let prev = PREV_FG.lock().ok().and_then(|p| p.get(label).copied()).unwrap_or(0);
+                    if prev != 0 && prev != h { win::set_foreground(prev); }
+                }
             }
         }
         _ => {}
@@ -330,14 +325,6 @@ pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64
     if is_closing(&label) { return Ok(()); }
     let w = get(&app, &label)?;
     let h = hwnd_of(&w)?;
-    // The window has the keyboard for a text box but another window came in front (the user went to the game or another program): the keyboard state is let go (not given back anywhere:
-    // the user chose the other window). A short grace: a window that is being activated is not in front for a moment.
-    if let Ok(mut k) = KEYMODE.lock() {
-        if let Some(n) = k.get_mut(&label) {
-            if win::foreground() == h { *n = 0; } else { *n += 1; }
-            if *n >= 4 { k.remove(&label); event("another window is in front: the keyboard state is let go".into()); win::allow_key(h, false); win::set_noactivate_light(h, true); }
-        }
-    }
     win::keep_style(h);
     let want = match mode {
         1 => 1,
@@ -388,7 +375,7 @@ pub async fn web_info(app: AppHandle, label: String) -> Value {
     }
 }
 
-/// What happened since the last call, for the log of the plugin (an address that was refused, the keyboard taken or given back for a text box).
+/// What happened since the last call, for the log of the plugin (an address that was refused).
 #[tauri::command]
 pub async fn web_events() -> Vec<String> {
     EVENTS.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default()
