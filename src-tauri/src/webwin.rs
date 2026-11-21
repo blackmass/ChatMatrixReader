@@ -84,7 +84,16 @@ const BAR: &str = r#"(() => {
     const sh = host.attachShadow({ mode: 'closed' });
     sh.innerHTML = '<style>.b{display:flex;align-items:center;height:22px;background:linear-gradient(#364847,#2a3836);border-bottom:1px solid #8a6a30;color:#e6c66e;font:12px "Malgun Gothic","Apple SD Gothic Neo","Segoe UI",sans-serif;cursor:move;user-select:none}.t{flex:1;padding:0 10px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-shadow:0 1px 1px #000}button{border:0;background:none;color:#e6c66e;font-size:13px;width:26px;height:22px;cursor:pointer;padding:0}button:hover{color:#ffe08a;background:#4a3f1c}</style><div class="b"><span class="t"></span><button data-c="back" title="back">‹</button><button data-c="reload" title="reload">↻</button><button data-c="close" title="close">✕</button></div>';
     const t = sh.querySelector('.t'), bar = sh.querySelector('.b');
-    bar.addEventListener('mousedown', e => { if (e.button === 0 && !e.target.closest('button')) go('drag'); });
+    // (a drag of the bar moves the window: the page under it must not start marking text meanwhile, which macOS did: no default action, no marked text, no marking while it lasts)
+    bar.addEventListener('mousedown', e => {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      e.preventDefault(); e.stopPropagation();
+      try { getSelection().removeAllRanges(); } catch (x) {}
+      const root = document.documentElement, was = root.style.userSelect;
+      root.style.userSelect = 'none'; root.style.webkitUserSelect = 'none';
+      setTimeout(() => { root.style.userSelect = was; root.style.webkitUserSelect = was; try { getSelection().removeAllRanges(); } catch (x) {} }, 1200);
+      go('drag');
+    });
     for (const b of sh.querySelectorAll('button')) b.addEventListener('click', () => go(b.dataset.c));
     // (the title of the page, as it changes; what the plugin gave only until the page has one)
     const title = () => { t.textContent = document.title || TITLE || location.host; };
@@ -97,6 +106,7 @@ const BAR: &str = r#"(() => {
     const prep = on => { if (on !== prepared) { prepared = on; go(on ? 'prep' : 'unprep'); } };
     const later = (fn, ms) => { clearTimeout(leaveT); leaveT = setTimeout(fn, ms); };
     document.addEventListener('mouseover', e => { if (editable(e.target)) { clearTimeout(leaveT); prep(true); } }, true);
+    document.addEventListener('mousedown', e => { if (e.button === 0 && editable(e.target)) go('inputclick'); }, true);      // (macOS: asked to make sure the program is active, see the program)
     document.addEventListener('mouseout', e => { if (editable(e.target) && !editable(document.activeElement)) later(() => { if (!editable(document.activeElement)) prep(false); }, 300); }, true);
     document.addEventListener('focusout', e => { if (editable(e.target)) later(() => { if (!editable(document.activeElement)) { prepared = false; go('release'); } }, 250); }, true);
     window.addEventListener('blur', () => later(() => { if (prepared && !document.hasFocus()) prep(false); }, 400));      // (the user went to another window: nothing to give back)
@@ -206,6 +216,18 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
                 if prev != h { if let Ok(mut p) = PREV_FG.lock() { p.insert(label.to_string(), prev); } }
                 win::allow_key(h, true);
                 win::set_noactivate_light(h, false);
+            }
+        }
+        "inputclick" => {                              // macOS: a click on a text box must make the program active; when the system has not done it a moment later, it is asked to
+            if cfg!(target_os = "macos") {
+                if let Ok(h) = hwnd_of(&win) {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(150));
+                        let before = win::self_front();
+                        if !before { win::allow_key(h, true); let _ = win::grab_focus(h); }
+                        event(format!("input click: the program was {} 0.15 s later{}", if before { "active" } else { "NOT active" }, if before { "" } else { ": asked to become active" }));
+                    });
+                }
             }
         }
         "unprep" | "release" => {                     // the text box is left: back to a window that takes nothing; "release": it was used, the keyboard goes back to where it was
