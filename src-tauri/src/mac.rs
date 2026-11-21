@@ -586,14 +586,6 @@ pub fn raise_top(hwnd: isize) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), orderFrontRegardless]; });
 }
 
-/// The window `hwnd` goes directly BEHIND `above` (the same level).
-pub fn place_below(hwnd: isize, above: isize) {
-    on_main(|| unsafe {
-        let n: isize = msg_send![obj(above), windowNumber];
-        if n > 0 { let _: () = msg_send![obj(hwnd), orderWindow: -1isize, relativeTo: n]; }          // NSWindowBelow
-    });
-}
-
 /// Topmost on / off for a window. On: the level of floating windows (above the game, also while another program is in front). Off: an ordinary
 /// window; with `game` it is put directly above the game window.
 pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
