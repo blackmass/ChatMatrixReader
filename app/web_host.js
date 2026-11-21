@@ -5,7 +5,7 @@
 import { webPatterns } from './core/plugins.js';
 
 export const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
-const TICK_MS = 100, INFO_MS = 1000, GAME_MS = 2000, SAVE_MS = 1500, DEFAULT_W = 360, DEFAULT_H = 640;
+const TICK_MS = 100, INFO_MS = 500, GAME_MS = 2000, SAVE_MS = 600, DEFAULT_W = 360, DEFAULT_H = 640;
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };
 export const webLabel = id => 'web_' + String(id).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
 
@@ -36,8 +36,10 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, wowT
       if (!opts(id).wow || opts(id).topmost) { o.game = 0; return; }
       try { const g = await invoke('find_game', { known: o.game || null, title: wowTitle() }); o.game = g ? g.hwnd : 0; } catch { /* next round */ }
     };
+    // the program tells the place the window had when it was closed ("geometry WxH+X+Y"): kept, so a window that is opened, moved and closed at once is not forgotten
+    const saveGeom = t => { const m = /^geometry (\d+x\d+\+-?\d+\+-?\d+)$/.exec(String(t)); if (m) patchConf(id, { geometry: m[1] }); return !!m; };
     const info = async () => {
-      for (const t of await invoke('web_events', {}).catch(() => [])) note(id, 'web window: ' + t);
+      for (const t of await invoke('web_events', {}).catch(() => [])) { if (!saveGeom(t)) note(id, 'web window: ' + t); }
       const i = await call('web_info', {}).catch(() => null);
       if (!i) return;
       if (!i.exists) { stopLoop(id); note(id, 'web window closed'); return; }
@@ -68,6 +70,8 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, wowT
     },
     async close(id) {
       const label = webLabel(id);
+      const i = open.has(id) ? await invoke('web_info', { label }).catch(() => null) : null;       // (the place it has now: kept before it goes)
+      if (i && i.exists && i.position && i.size) patchConf(id, { geometry: `${i.size[0]}x${i.size[1]}+${i.position[0]}+${i.position[1]}` });
       stopLoop(id);
       await invoke('web_close', { label }).catch(() => {});
     },

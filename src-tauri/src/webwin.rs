@@ -225,7 +225,7 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
             if let Some(url) = url { let _ = crate::plugin_open_url(url, allow); }       // (a refused address: nothing happens)
         }
         "drag" => { if !LOCKED.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) { let _ = win.start_dragging(); } }
-        "close" => { forget(&win); let w2 = win.clone(); std::thread::spawn(move || { let _ = w2.close(); }); }
+        "close" => { if let (Ok(p), Ok(s)) = (win.outer_position(), win.outer_size()) { event(format!("geometry {}x{}+{}+{}", s.width, s.height, p.x, p.y)); } forget(&win); let w2 = win.clone(); std::thread::spawn(move || { let _ = w2.close(); }); }
         "back" => { let _ = win.eval("history.back()"); }
         "reload" => { let _ = win.eval("location.reload()"); }
         "prep" => {                                   // the mouse is over a text box: a click may activate the window now (the system does it)

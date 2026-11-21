@@ -545,8 +545,9 @@ function contextMenu() {
         try { localStorage.setItem('cmr-plugin-sel', wi.owner); localStorage.setItem('cmr-options-tab', 'plugins'); } catch { /* the options open as they were */ }
         invoke('open_options').catch(e => note(tr('옵션 창: {e}', { e })));
       });
-      list.push({ cls: 'sep' });
     }
+    const widgetOnly = !!(wi && wi.owner && wi.owner !== 'core');       // (the menu of a widget of a plugin is only its own: the items of the window are not mixed in)
+    if (!widgetOnly) {
     add(tr('이 창의 옵션…'), async () => {
       try { localStorage.setItem('cmr-options-win', String(target.id)); } catch { /* the options open on the first window */ }
       invoke('open_options').catch(e => note(tr('옵션 창: {e}', { e })));
@@ -573,6 +574,7 @@ function contextMenu() {
       if (winconf.dockHost(cfg.child_windows, id)) { add(nameFor(cfg, id), null, 'off'); continue; }       // (a tab of another window)
       const isOpen = id === MAIN || open.has(id);
       add(nameFor(cfg, id), () => emit('win-command', { cmd: isOpen ? 'close' : 'open', id }), (isOpen ? 'on' : '') + (id === MAIN ? ' off' : ''));
+    }
     }
     // in a window of its own: not cut off by a small window, and it is closed by a click anywhere else (popup.js)
     if (popup.usable()) {
