@@ -25,6 +25,8 @@ static CLOSING: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::
 static LOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static PREV_FG: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static ZSTATE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Windows that took the keyboard for a text box of the page -> how many rounds of the poll they have not been the one in front (see web_tick)
+static KEYMODE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static BLOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 // Runs in EVERY frame (initialization_script_for_all_frames), not only in the page: a frame of the page (a video, an advertisement ...) gets the wheel, the zoom keys and the menu of the right
@@ -32,6 +34,7 @@ static BLOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::
 // (the keys that make the windows usable, ctrl / shift / alt, would otherwise stop the page from scrolling)
 const KEYS: &str = r#"(() => {
   if (window.__cmrKeys) return; window.__cmrKeys = 1;
+  const DEBUG = __DEBUG__;
   const wheel = e => {
     if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
     e.preventDefault();
@@ -48,8 +51,17 @@ const KEYS: &str = r#"(() => {
     document.addEventListener('keydown', keys, true);
     document.addEventListener('contextmenu', menu, true);
   };
-  arm();
-  document.addEventListener('DOMContentLoaded', arm); window.addEventListener('load', arm);
+  // (only with the marker file web_debug) a dot in the corner of every frame the script runs in: green = the page itself, red = a frame in it; it goes away after 40 seconds
+  let dotted = false;
+  const dot = () => {
+    if (!DEBUG || dotted || !document.documentElement) return;
+    dotted = true;
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:2px;top:2px;width:9px;height:9px;border-radius:5px;z-index:2147483647;pointer-events:none;background:' + (window.top === window.self ? '#2c2' : '#e22');
+    document.documentElement.append(d); setTimeout(() => d.remove(), 40000);
+  };
+  arm(); dot();
+  document.addEventListener('DOMContentLoaded', () => { arm(); dot(); }); window.addEventListener('load', arm);
   setInterval(arm, 2000);
 })();"#;
 
@@ -90,8 +102,11 @@ const BAR: &str = r#"(() => {
     title(); setInterval(title, 1000);
     // a text box of the page asks for the keyboard (the window does not take it otherwise: the game keeps it); when the box is left the game gets it back
     const editable = x => !!x && (x.isContentEditable || (/^(INPUT|TEXTAREA|SELECT)$/.test(x.tagName) && !/^(button|checkbox|radio|submit|reset|image|range|color|file)$/i.test(x.type || '')));
-    document.addEventListener('focusin', e => { if (editable(e.target)) go('focus'); }, true);
-    document.addEventListener('focusout', e => { if (editable(e.target)) go('blur'); }, true);
+    // "focus" at every entry of a text box (the program ignores it when it has the keyboard already). "blur" only when the box is really left: not when the WINDOW loses the focus for a
+    // moment (the box stays the active element then), and only after a short wait (a window that is being activated loses and gets the focus again within a moment)
+    let leaveT = 0;
+    document.addEventListener('focusin', e => { if (editable(e.target)) { clearTimeout(leaveT); go('focus'); } }, true);
+    document.addEventListener('focusout', e => { if (editable(e.target)) { clearTimeout(leaveT); leaveT = setTimeout(() => { if (!editable(document.activeElement)) go('blur'); }, 250); } }, true);
     document.documentElement.append(host);
     // A scroll bar of ours, like a phone's: a thin line that shows while the page scrolls and goes away a moment later (the page's own scroll bars are hidden, see the style below)
     const bar2 = document.createElement('div');
@@ -162,6 +177,7 @@ fn forget(w: &WebviewWindow) {
     if let Ok(mut m) = OPEN_ALLOW.lock() { m.remove(&label); }
     if let Ok(mut m) = ZSTATE.lock() { m.remove(&label); }
     if let Ok(mut m) = PREV_FG.lock() { m.remove(&label); }
+    if let Ok(mut m) = KEYMODE.lock() { m.remove(&label); }
 }
 /// (called when the system asks the window to close, e.g. the window's own close)
 pub fn on_close_requested(label: &str) {
@@ -194,8 +210,11 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
         "reload" => { let _ = win.eval("location.reload()"); }
         "focus" => {                                  // a text box of the page needs the keyboard: this window takes it (who had it is remembered)
             if let Ok(h) = hwnd_of(&win) {
+                let again = KEYMODE.lock().map(|k| k.contains_key(label)).unwrap_or(false);
+                if again && win::foreground() == h { return; }          // (it has the keyboard already: nothing to do, and nothing to start over)
                 let prev = win::foreground();
-                if prev != h { if let Ok(mut p) = PREV_FG.lock() { p.insert(label.to_string(), prev); } }
+                if prev != h && !again { if let Ok(mut p) = PREV_FG.lock() { p.insert(label.to_string(), prev); } }
+                if let Ok(mut k) = KEYMODE.lock() { k.insert(label.to_string(), 0); }
                 win::allow_key(h, true);
                 win::set_noactivate_light(h, false);
                 win::grab_focus(h);
@@ -204,6 +223,7 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
         }
         "blur" => {                                   // the text box was left: the keyboard goes back to where it was
             if let Ok(h) = hwnd_of(&win) {
+                if !KEYMODE.lock().map(|mut k| k.remove(label).is_some()).unwrap_or(false) { return; }
                 win::allow_key(h, false);
                 win::set_noactivate_light(h, true);
                 let prev = PREV_FG.lock().ok().and_then(|p| p.get(label).copied()).unwrap_or(0);
@@ -267,6 +287,12 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     // Windows: made like the program's own windows (transparent, no shadow): a window the mouse goes through (click-through) needs that; a page that draws no background of its own gets white
     #[cfg(windows)]
     let b = b.transparent(true).shadow(false).background_color(tauri::window::Color(255, 255, 255, 255));
+    // Marker files next to the program (empty files, like show_control), for finding faults: web_plain = none of our scripts is put into the pages (a page that does not like to be changed, e.g. a
+    // check of "are you a human"); web_debug = every frame our scripts run in shows a small dot for a while (green: the page, red: a frame in it)
+    let plain = crate::exe_dir().join("web_plain").exists();
+    let debug = crate::exe_dir().join("web_debug").exists();
+    let keys = KEYS.replace("__DEBUG__", if debug { "true" } else { "false" });
+    let b = if plain { b } else { b.initialization_script(script).initialization_script(keys.clone()).initialization_script_for_all_frames(keys) };
     let mut b = b
         .title("CMR Web")
         .decorations(false)
@@ -274,9 +300,6 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         .skip_taskbar(true)
         .visible(false)
         .inner_size(args.get("w").and_then(|v| v.as_f64()).unwrap_or(360.0).max(120.0), args.get("h").and_then(|v| v.as_f64()).unwrap_or(640.0).max(80.0))
-        .initialization_script(script)
-        .initialization_script(KEYS)
-        .initialization_script_for_all_frames(KEYS)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .on_navigation(move |u| {
             if weblib::is_command_url(u.scheme()) { command(&app2, &lbl, u.host_str().unwrap_or(""), u.query()); return false; }
@@ -321,6 +344,14 @@ pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64
     if is_closing(&label) { return Ok(()); }
     let w = get(&app, &label)?;
     let h = hwnd_of(&w)?;
+    // The window has the keyboard for a text box but another window came in front (the user went to the game or another program): the keyboard state is let go (not given back anywhere:
+    // the user chose the other window). A short grace: a window that is being activated is not in front for a moment.
+    if let Ok(mut k) = KEYMODE.lock() {
+        if let Some(n) = k.get_mut(&label) {
+            if win::foreground() == h { *n = 0; } else { *n += 1; }
+            if *n >= 4 { k.remove(&label); win::allow_key(h, false); win::set_noactivate_light(h, true); }
+        }
+    }
     win::keep_style(h);
     let want = match mode {
         1 => 1,
