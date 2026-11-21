@@ -27,22 +27,23 @@ static PREV_FG: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex
 static ZSTATE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static BLOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
+// Runs in EVERY frame (initialization_script_for_all_frames), not only in the page: a frame of the page (a video, an advertisement ...) gets the wheel, the zoom keys and the menu of the right
+// button itself. What a window of a browser does with these is not wanted here: the wheel with ctrl (zoom) or shift (sideways) is a plain turn of the wheel; no zoom keys; no menu.
+// (the keys that make the windows usable, ctrl / shift / alt, would otherwise stop the page from scrolling)
+const KEYS: &str = r#"(() => {
+  if (window.__cmrKeys) return; window.__cmrKeys = 1;
+  document.addEventListener('wheel', e => {
+    if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
+    e.preventDefault();
+    let t = e.target;
+    while (t && t !== document.documentElement && !(t.scrollHeight > t.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(t).overflowY))) t = t.parentElement;
+    (t && t !== document.documentElement ? t : (document.scrollingElement || document.documentElement)).scrollBy(0, e.deltaY || e.deltaX);
+  }, { capture: true, passive: false });
+  document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0', '_'].includes(e.key)) e.preventDefault(); }, true);
+  document.addEventListener('contextmenu', e => e.preventDefault(), true);
+})();"#;
+
 const BAR: &str = r#"(() => {
-  // (in EVERY frame, not only the page: a frame of the page (a video, an advertisement ...) gets the wheel, the zoom keys and the menu of the right button itself)
-  if (!window.__cmrKeys) {
-    window.__cmrKeys = 1;
-    // what a window of a browser does with these is not wanted here: the wheel with ctrl (zoom) or shift (sideways) is a plain turn of the wheel; no zoom keys; no menu of the right button
-    // (the keys that make the windows usable, ctrl / shift / alt, would otherwise stop the page from scrolling)
-    document.addEventListener('wheel', e => {
-      if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
-      e.preventDefault();
-      let t = e.target;
-      while (t && t !== document.documentElement && !(t.scrollHeight > t.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(t).overflowY))) t = t.parentElement;
-      (t && t !== document.documentElement ? t : (document.scrollingElement || document.documentElement)).scrollBy(0, e.deltaY || e.deltaX);
-    }, { capture: true, passive: false });
-    document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0', '_'].includes(e.key)) e.preventDefault(); }, true);
-    document.addEventListener('contextmenu', e => e.preventDefault(), true);
-  }
   if (window.top !== window.self) return;                       // (only the page itself, not the frames in it: video players, advertisements ...)
   if (window.__cmrBar) return; window.__cmrBar = 1;
   const go = c => { try { location.href = 'cmr-cmd://' + c; } catch (e) {} };
@@ -264,6 +265,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         .visible(false)
         .inner_size(args.get("w").and_then(|v| v.as_f64()).unwrap_or(360.0).max(120.0), args.get("h").and_then(|v| v.as_f64()).unwrap_or(640.0).max(80.0))
         .initialization_script(script)
+        .initialization_script_for_all_frames(KEYS)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .on_navigation(move |u| {
             if weblib::is_command_url(u.scheme()) { command(&app2, &lbl, u.host_str().unwrap_or(""), u.query()); return false; }
