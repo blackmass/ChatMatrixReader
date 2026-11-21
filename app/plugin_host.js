@@ -96,7 +96,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
           linkId = ++linkSeq;
           chatLinks.set(String(linkId), { owner: id, url: link.url, target: link.target });
           if (chatLinks.size > 500) chatLinks.delete(chatLinks.keys().next().value);
-          const mark = '\x02' + String.fromCharCode(48 + LIGHT_BLUE) + label + TIP_SEP + (link.target === 'browser' ? tr('클릭하면 브라우저로 엽니다') : tr('클릭하면 웹 창으로 엽니다')) + '\x03';
+          const mark = '\x02' + String.fromCharCode(48 + LIGHT_BLUE) + '[' + label + ']' + TIP_SEP + (link.target === 'browser' ? tr('클릭하면 브라우저로 엽니다') : tr('클릭하면 웹 창으로 엽니다')) + '\x03';
           body = label === safe ? mark : safe.replace(label, () => mark);
         }
         return publish(pipeline.onLine({ channel: '!PLG', id: 0, sender: sender || manifest.name, text: body, cls: '', base: -1, ...(linkId ? { link: String(linkId) } : {}) }));

@@ -55,6 +55,10 @@ const KEYS: &str = r#"(() => {
   setInterval(arm, 2000);
 })();"#;
 
+/// The smallest a web window can be (a window made too small by mistake is hard to get back)
+const MIN_W: f64 = 190.0;
+const MIN_H: f64 = 320.0;
+
 const BAR: &str = r#"(() => {
   if (window.top !== window.self) return;                       // (only the page itself, not the frames in it: video players, advertisements ...)
   if (window.__cmrBar) return; window.__cmrBar = 1;
@@ -159,10 +163,10 @@ const BAR: &str = r#"(() => {
             const now = Date.now(); if (now - last < 16) return; last = now;
             const dx = m.screenX - x0, dy = m.screenY - y0;
             let l = L, t = T, w = W, h = H;
-            if (d.includes('e')) w = Math.max(120, W + dx);
-            if (d.includes('s')) h = Math.max(80, H + dy);
-            if (d.includes('w')) { w = Math.max(120, W - dx); l = L + (W - w); }
-            if (d.includes('n')) { h = Math.max(80, H - dy); t = T + (H - h); }
+            if (d.includes('e')) w = Math.max(190, W + dx);
+            if (d.includes('s')) h = Math.max(320, H + dy);
+            if (d.includes('w')) { w = Math.max(190, W - dx); l = L + (W - w); }
+            if (d.includes('n')) { h = Math.max(320, H - dy); t = T + (H - h); }
             go(`rect?x=${l}&y=${t}&w=${w}&h=${h}`);
           };
           const up = () => { z.removeEventListener('pointermove', move); z.removeEventListener('pointerup', up); z.removeEventListener('pointercancel', up); };
@@ -214,7 +218,7 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
             let n = |k: &str| q.as_ref().and_then(|u| u.query_pairs().find(|(a, _)| a == k).and_then(|(_, v)| v.parse::<f64>().ok()));
             if let (Some(x), Some(y), Some(w), Some(h)) = (n("x"), n("y"), n("w"), n("h")) {
                 if w.is_finite() && h.is_finite() && w < 10000.0 && h < 10000.0 {
-                    let _ = win.set_size(tauri::LogicalSize::new(w.max(120.0), h.max(80.0)));
+                    let _ = win.set_size(tauri::LogicalSize::new(w.max(MIN_W), h.max(MIN_H)));
                     let _ = win.set_position(tauri::LogicalPosition::new(x, y));
                 }
             }
@@ -285,7 +289,7 @@ fn set_outer(w: &WebviewWindow, x: Option<i32>, y: Option<i32>, width: u32, heig
         (Ok(i), Ok(o)) => (o.width.saturating_sub(i.width), o.height.saturating_sub(i.height)),
         _ => (0, 0),
     };
-    w.set_size(tauri::PhysicalSize::new(width.saturating_sub(dx).max(120), height.saturating_sub(dy).max(80))).map_err(e)?;
+    w.set_size(tauri::PhysicalSize::new(width.saturating_sub(dx).max(MIN_W as u32), height.saturating_sub(dy).max(MIN_H as u32))).map_err(e)?;
     if let (Some(x), Some(y)) = (x, y) { w.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?; }
     Ok(())
 }
@@ -336,7 +340,8 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         .resizable(!lock)
         .skip_taskbar(true)
         .visible(false)
-        .inner_size(args.get("w").and_then(|v| v.as_f64()).unwrap_or(360.0).max(120.0), args.get("h").and_then(|v| v.as_f64()).unwrap_or(640.0).max(80.0))
+        .inner_size(args.get("w").and_then(|v| v.as_f64()).unwrap_or(360.0).max(MIN_W), args.get("h").and_then(|v| v.as_f64()).unwrap_or(640.0).max(MIN_H))
+        .min_inner_size(MIN_W, MIN_H)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .on_navigation(move |u| {
             if weblib::is_command_url(u.scheme()) { command(&app2, &lbl, u.host_str().unwrap_or(""), u.query()); return false; }

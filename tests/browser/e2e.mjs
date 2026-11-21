@@ -1202,7 +1202,7 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   const lbad = await asked('chat.inject', { text: 'x', link: { url: 'https://evil.org/x' } });
   await control.waitForTimeout(1500);
   const lel = await main.evaluate(() => { const e = document.querySelector('#lines .cv-link'); return e ? { text: e.textContent, link: e.dataset.link } : null; });
-  ok(lk.ok && lbad.ok === false && lbad.error.code === 'denied' && lel && lel.text === '링크 시험 제목', 'plugins/link: the title is a link in the line; an address that is not allowed is refused: ' + JSON.stringify([lk, lbad.error, lel]));
+  ok(lk.ok && lbad.ok === false && lbad.error.code === 'denied' && lel && lel.text === '[링크 시험 제목]', 'plugins/link: the title is a link in the line; an address that is not allowed is refused: ' + JSON.stringify([lk, lbad.error, lel]));
   const before = webCalls.filter(c => c[0] === 'open').length;
   await main.evaluate(() => document.querySelector('#lines .cv-link').dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 })));
   await control.waitForTimeout(800);
