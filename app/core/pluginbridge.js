@@ -151,9 +151,12 @@ export class PluginBridge {
       case 'openUrl': {                                                  // an address in the user's own browser: https, a host the user allowed, a few a minute
         this.need('openUrl');
         if (!isObj(args) || typeof args.url !== 'string') throw new PluginError('args', 'url is needed');
-        if (!netAllowed(this.eff, args.url)) throw new PluginError('denied', 'this address is not allowed (https and a host the user allowed)');
+        // the hosts the user allowed; with the web permission also the domain of them ("domain") — the same reach the web window has
+        const patterns = [...this.eff.net, ...webPatterns(this.eff.net, this.eff.web)];
+        let ou = null; try { ou = new URL(args.url); } catch { /* denied below */ }
+        if (!ou || ou.protocol !== 'https:' || ou.username || ou.password || !hostMatches(ou.hostname, patterns)) throw new PluginError('denied', 'this address is not allowed (https and a host the user allowed)');
         if (!this.opens.take()) throw new PluginError('limit', `at most ${LIMITS.openUrlPerMin} addresses a minute`);
-        try { await this.hooks.openUrl(args.url, this.eff.net); } catch (e) { throw new PluginError('failed', String((e && e.message) || e).slice(0, 200)); }
+        try { await this.hooks.openUrl(args.url, patterns); } catch (e) { throw new PluginError('failed', String((e && e.message) || e).slice(0, 200)); }
         return null;
       }
       case 'web.open': {                                                 // the page in a window of the program: https, and a host the web permission covers (see webPatterns)

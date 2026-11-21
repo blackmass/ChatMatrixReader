@@ -304,7 +304,8 @@ function panel() {
     // the web window: what the user chose for it (kept per plugin)
     if (p.manifest.permissions.web && p.granted.web) {
       detail.append(el('h4', 'pl-h', tr('웹 창')));
-      const rows = [['topmost', tr('항상 위에 표시')], ['wow', tr('와우 위에서만 표시 (항상 위가 꺼져 있을 때)')], ['through', tr('클릭 통과 (마우스가 창을 뚫고 지나감)')], ['lock', tr('위치·크기 잠금')], ['cookies', tr('로그인 정보(쿠키) 유지 — 켜면 이 플러그인 전용으로 저장됩니다')]];
+      detail.append(el('small', 'note', tr('항상 위, 클릭 통과 같은 창 설정은 옵션 > 창 에서 이 플러그인의 웹 창을 골라 정합니다.')));
+      const rows = [['cookies', tr('로그인 정보(쿠키) 유지 — 켜면 이 플러그인 전용으로 저장됩니다')]];
       for (const [k, t] of rows) {
         const lab = el('label', 'pl-webopt'), cb = el('input'); cb.type = 'checkbox'; cb.checked = !!(p.web && p.web[k]); cb.dataset.web = k;
         cb.onchange = () => ask('web', p.id, { key: k, value: cb.checked });

@@ -209,7 +209,7 @@ pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64
     win::keep_style(h);
     let want = match mode {
         1 => 1,
-        2 => match game { Some(g) if g > 0 => if win::foreground() == g as isize || win::self_front() { 21 } else { 22 }, _ => 1 },    // (no game found: like always on top, it must stay in view)
+        2 => match game { Some(g) if g > 0 => { let fg = win::foreground(); if fg == g as isize { 21 } else if win::self_front() { 23 } else { 22 } }, _ => 1 },    // (no game found: like always on top, it must stay in view)
         _ => 0,
     };
     let last = ZSTATE.lock().ok().and_then(|m| m.get(&label).copied()).unwrap_or(99);
@@ -218,7 +218,11 @@ pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64
         let g = game.unwrap_or(0) as isize;
         match want {
             0 => { win::set_owner(h, 0); win::set_topmost(h, false, 0); }
-            1 | 21 => { win::set_topmost(h, true, 0); win::set_owner(h, 0); }       // (like the translation windows: topmost first, then the owner goes)
+            // The game in front: topmost first, then the owner goes (the window never sinks behind the game). One of OUR windows in front (the options window): the owner goes
+            // FIRST: Windows keeps an owner and its owned window in the same topmost state, so "topmost" for the owned window would make the GAME topmost and it would cover the
+            // window that was just clicked (the options window "hid"). Same as the translation windows (overlay.js zStep).
+            1 | 21 => { win::set_topmost(h, true, 0); win::set_owner(h, 0); }
+            23 => { win::set_owner(h, 0); win::set_topmost(h, true, 0); }
             _ => { win::set_owner(h, g); win::set_topmost(h, false, g); }
         }
     }

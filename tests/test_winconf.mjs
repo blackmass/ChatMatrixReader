@@ -51,3 +51,9 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   const plain = w.normalize([{ id: 5, kind: 'page' }]).find(c => c.id === 5);
   check(plain.kind === '' && plain.owner === '' && plain.page === '', 'winconf: kind page without an owner and a page is an ordinary window');
 }
+
+// a web window of a plugin: kind 'web' needs its plugin, has no page
+{
+  const l = w.normalize([{ id: 2, name: 'x', owner: 'p-1', owner_win: 'web', kind: 'web', page: 'a.html', geometry: '360x640' }, { id: 3, name: 'y', kind: 'web' }]);
+  eq(l.find(c => c.id === 2).kind === 'web' && l.find(c => c.id === 2).page === '' && l.find(c => c.id === 3).kind === '' && l.find(c => c.id === 3).owner === '', true, 'winconf: a web window keeps its plugin and has no page; without a plugin it is nothing');
+}

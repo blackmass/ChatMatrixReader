@@ -28,7 +28,7 @@ const tab = {
         options: x => {
           const l = x.cfg().child_windows;
           if (dockedOf(l, x.sel).length) return [[0, '합치지 않음']];                      // (a window that has tabs cannot be a tab)
-          return [[0, '합치지 않음'], [1, nameFor(x.cfg(), 1)], ...l.filter(c => c.id !== x.sel && c.id !== 1 && !(Number(c.dock_to) > 0)).map(c => [c.id, nameFor(x.cfg(), c.id)])];
+          return [[0, '합치지 않음'], [1, nameFor(x.cfg(), 1)], ...l.filter(c => c.id !== x.sel && c.id !== 1 && c.kind !== 'web' && !(Number(c.dock_to) > 0)).map(c => [c.id, nameFor(x.cfg(), c.id)])];
         },
         note: ['고른 창 안의 탭이 됩니다. 이 창은 따로 열리지 않고, 그 창의 위쪽 탭을 눌러 오갑니다. 글은 탭마다 따로 쌓입니다.',
           '창의 위치, 배경, 클릭 관통 같은 창 자체의 설정은 그 창을 따르고, 글꼴과 채널 같은 글 설정은 이 창의 것을 씁니다 (따르는 옵션은 흐리게 보입니다).'] },
@@ -194,8 +194,8 @@ const tab = {
       pick.value = String(kids.some(c => c.id === sel) || sel === 1 ? sel : 1);
       const dh = dockHost(kids, sel), isOpen = sel === 1 || open.has(sel), mine = kids.find(c => c.id === sel), owned = !!(mine && mine.owner);
       const off = owned && !((env.cfg().plugins || {})[mine.owner] || {}).enabled;
-      state.textContent = off ? tr('플러그인이 꺼져 있습니다') : dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
-      toggle.hidden = sel === 1 || !!dh || off; toggle.textContent = isOpen ? '닫기' : '열기';
+      state.textContent = off ? tr('플러그인이 꺼져 있습니다') : mine && mine.kind === 'web' ? tr('플러그인이 엽니다') : dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
+      toggle.hidden = sel === 1 || !!dh || off || !!(mine && mine.kind === 'web'); toggle.textContent = isOpen ? '닫기' : '열기';
       del.hidden = sel === 1 || sel === VOICE_ID || owned;                                  // (the window of a plugin is not deleted here: it goes with its plugin) if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
     }
     return { el, refresh };
@@ -205,9 +205,12 @@ const tab = {
 // The windows of a plugin show only the basic settings (the order of the windows, the background, the mouse, the lock ...): what is inside the window is the plugin's
 const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
 const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
+// a web window (a page of the web in a window of the program) has even fewer: when it opens, the lock, the order of the windows, click-through (its title is the title of the page)
+const WEB_ROWS = new Set(['open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window']);
+const webWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.kind === 'web'); };
 for (const card of tab.cards) for (const row of card.rows) {
-  if (PLUGIN_ROWS.has(row.key)) continue;
   const was = row.show;
+  if (PLUGIN_ROWS.has(row.key)) { row.show = (c, x) => (!webWindow(x) || WEB_ROWS.has(row.key)) && (!was || was(c, x)); continue; }
   row.show = (c, x) => !pluginWindow(x) && (!was || was(c, x));
 }
 export default tab;

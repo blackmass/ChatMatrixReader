@@ -1189,7 +1189,7 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   await asked('widgets.update', { id: 'status', state: { text: '감시 중', tone: 'ok', active: true, tip: '팁입니다' } }); await control.waitForTimeout(500);
   ok((await main.locator(`.widget[data-id="${WID}"]`).textContent()).includes('감시 중'), 'plugins/widgets: its state is painted');
   // a window of the plugin: made in the list of windows when the plugin is on, opened by the plugin, its page in a sandboxed frame, not deletable, basic settings only
-  const pw = await control.evaluate(id => (window.cmrHub && import('./settings.js').then(m => m.cfg().child_windows.find(c => c.owner === id))), PID);
+  const pw = await control.evaluate(id => (window.cmrHub && import('./settings.js').then(m => m.cfg().child_windows.find(c => c.owner === id && c.kind === 'page'))), PID);
   ok(pw && pw.kind === 'page' && pw.owner_win === 'main' && pw.page === 'window.html' && pw.name === '플러그인 창' && pw.geometry === '300x200' && pw.open_mode === 'never' && pw.channels.length === 0, 'plugins/windows: its window is in the list of windows: ' + JSON.stringify(pw));
   ok(!(await control.evaluate(i => window.cmrHub.windows.isOpen(i), pw.id)), 'plugins/windows: it is not open until the plugin opens it');
   const ro = await asked('windows.open', { id: 'main' }); await control.waitForTimeout(500);

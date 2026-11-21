@@ -995,3 +995,5 @@ plugins 폴더의 플러그인을 켜고, 허용할 권한을 고릅니다 = Tur
 웹 창이 열려 있을 때 지울 수 있습니다 = Can be cleared while the web window is open
 지우지 못했습니다 = Could not clear
 지웠습니다 = Cleared
+플러그인이 엽니다 = Opened by the plugin
+항상 위, 클릭 통과 같은 창 설정은 옵션 > 창 에서 이 플러그인의 웹 창을 골라 정합니다. = Window settings such as always on top and click-through are in Options > Window: pick the web window of this plugin.

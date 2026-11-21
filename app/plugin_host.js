@@ -44,7 +44,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   function summary(id) {
     const r = registry.get(id), e = entry(id);
     return { id, ok: !!(r && r.ok), errors: r ? r.errors : [], warnings: r ? r.warnings : [], manifest: r ? r.manifest : null, enabled: !!e.enabled, running: running.has(id),
-      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, requested: Array.isArray(e.requested) ? e.requested : [], web: { topmost: true, wow: false, through: false, lock: false, cookies: false, ...(e.web || {}) }, webOpen: web.isOpen(id), options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
+      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, requested: Array.isArray(e.requested) ? e.requested : [], web: { cookies: !!(e.web && e.web.cookies) }, webOpen: web.isOpen(id), options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
       review: !!(r && r.ok && e.asked !== permsKey(r.manifest)) };       // review: nobody has decided about what it asks for yet (the options window asks the user, one plugin after the other)
   }
   const allIds = () => [...new Set([...registry.keys(), ...Object.keys(entries())])].sort();
@@ -93,7 +93,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
         return 'pending';
       },
       openUrl: async (url, hosts) => { await invoke('plugin_open_url', { url, hosts }); note(id, 'opened in the browser: ' + url); },
-      webOpen: (req, patterns) => web.open(id, req, patterns),
+      webOpen: async (req, patterns) => { await ensureWindows(id); return web.open(id, req, patterns); },
       webClose: () => web.close(id),
       windowOpen: async name => { await ensureWindows(id); const c = windowEntry(id, name); if (c && windows) windows.openWindow(c.id); },
       windowClose: async name => { const c = windowEntry(id, name); if (c && windows) windows.closeWindow(c.id); },
@@ -106,7 +106,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     };
   }
 
-  const web = createWebHost({ getEntry: entry, patchEntry, invoke, note, wowTitle: () => settings.cfg().wow_window_title || 'World of Warcraft' });
+  const web = createWebHost({ getEntry: entry, getConf: id => webEntry(id), patchConf: (id, patch) => { const c = webEntry(id); if (c) settings.set({ child_windows: (settings.cfg().child_windows || []).map(x => (x === c || x.id === c.id ? { ...x, ...patch } : x)) }); }, invoke, note, wowTitle: () => settings.cfg().wow_window_title || 'World of Warcraft' });
 
   // One bridge for a plugin (its background page and its options page in the options window share it: one storage, one set of limits); a new one when the allowed permissions change
   const bridges = new Map();                   // id -> { key, bridge, hooks }
@@ -124,12 +124,18 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   }
 
   // ---- the windows of a plugin: made in the list of windows (child_windows) when the plugin is on and allowed to have them; the plugin opens and closes them
+  const webEntry = id => (settings.cfg().child_windows || []).find(c => c.owner === id && c.kind === 'web');
   const windowEntry = (id, name) => (settings.cfg().child_windows || []).find(c => c.owner === id && c.owner_win === name);
   const windowAllowed = (id, name) => { const run = running.get(id), r = registry.get(id); return !!(run && r && r.ok && run.bridge.eff.windows && (r.manifest.windows || []).some(w => w.id === name)); };
   async function ensureWindows(id) {
     const r = registry.get(id), run = running.get(id);
-    if (!r || !r.ok || !run || !run.bridge.eff.windows) return;
+    if (!r || !r.ok || !run) return;
     let list = settings.cfg().child_windows || [], changed = false;
+    if (run.bridge.eff.web && !webEntry(id)) {                          // the web window has its entry too (Options > Window): a fixed name; what the user chooses there is used when the plugin opens it
+      list = [...list, { ...winconf.newConf(winconf.nextId(list), []), owner: id, owner_win: 'web', kind: 'web', name: r.manifest.name + " · " + "웹 창", open_mode: 'never', geometry: '360x640', topmost: true }];
+      changed = true;
+    }
+    if (!run.bridge.eff.windows) { if (changed) settings.set({ child_windows: list }); return; }
     for (const w of r.manifest.windows || []) {
       if (list.some(c => c.owner === id && c.owner_win === w.id)) continue;
       const wid = winconf.nextId(list);
@@ -266,7 +272,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       }
       if (cmd === 'web') {                                                 // what the user chose for the web window: topmost, wow, through, lock, cookies (only these keys)
         const k = String(ev.payload.key || '');
-        if (!['topmost', 'wow', 'through', 'lock', 'cookies'].includes(k)) return reply({ error: 'no such setting' });
+        if (k !== 'cookies') return reply({ error: 'no such setting' });
         patchEntry(id, { web: { ...(entry(id).web || {}), [k]: !!ev.payload.value } });
         return reply({});
       }

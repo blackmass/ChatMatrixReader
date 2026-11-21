@@ -549,14 +549,14 @@ function contextMenu() {
       const hostOf = winconf.dockHost(kids, target.id);
       if (hostOf) add(tr('이 탭 독립시키기'), () => setDock(target.id, 0));
       if (target.id !== MAIN && !winconf.dockedOf(kids, target.id).length) {
-        for (const h of [MAIN, ...kids.map(c => c.id)]) {
+        for (const h of [MAIN, ...kids.filter(c => c.kind !== 'web').map(c => c.id)]) {
           if (h === target.id || h === hostOf || (h !== MAIN && winconf.dockHost(kids, h)) || (h !== MAIN && Number(kids.find(c => c.id === h).dock_to) > 0)) continue;
           add(tr('{name} 창의 탭으로 붙이기', { name: nameFor(cfg, h) }), () => setDock(target.id, h));
         }
       }
     }
     list.push({ cls: 'sep' });
-    for (const id of [MAIN, ...cfg.child_windows.map(c => c.id)]) {
+    for (const id of [MAIN, ...cfg.child_windows.filter(c => c.kind !== 'web').map(c => c.id)]) {
       const tab = panes.find(p => p.id === id && p !== host);                // (a tab of this window: a click shows it)
       if (tab) { add(nameFor(cfg, id), () => activate(tab), tab === active ? 'on' : ''); continue; }
       if (winconf.dockHost(cfg.child_windows, id)) { add(nameFor(cfg, id), null, 'off'); continue; }       // (a tab of another window)

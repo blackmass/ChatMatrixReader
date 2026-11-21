@@ -158,7 +158,7 @@ const code = async p => { try { await p; return 'ok'; } catch (e) { return e ins
 { // openUrl: an address in the browser of the user
   clock = 0; const { b, log } = make();
   await b.call('openUrl', { url: 'https://example.com/view?no=3&id=x' });
-  eq(log.opened, [['https://example.com/view?no=3&id=x', ['example.com']]], 'bridge: an allowed address is handed over with the hosts');
+  eq(log.opened, [['https://example.com/view?no=3&id=x', ['example.com', '*.example.com']]], 'bridge: an allowed address is handed over with the hosts');
   for (const bad of ['http://example.com/', 'https://evil.org/', 'https://user:pw@example.com/', 'javascript:alert(1)', 'file:///etc/passwd', 'https://example.com.evil.org/']) eq(await code(b.call('openUrl', { url: bad })), 'denied', 'bridge: openUrl refuses ' + bad);
   eq(await code(b.call('openUrl', {})), 'args', 'bridge: openUrl needs an url');
   for (let i = 0; i < LIMITS.openUrlPerMin - 1; i++) await b.call('openUrl', { url: 'https://example.com/' + i });
@@ -177,4 +177,11 @@ const code = async p => { try { await p; return 'ok'; } catch (e) { return e ins
   eq(await code(h.b.call('web.open', { url: 'https://m.example.com/' })), 'denied', 'bridge: with "host" only the allowed host');
   await h.b.call('web.open', { url: 'https://example.com/' }); eq(h.log.webs[0][2], ['example.com'], 'bridge: web.open with host scope');
   eq(await code(make({ ...all, web: '' }).b.call('web.open', { url: 'https://example.com/' })), 'denied', 'bridge: web.open without the permission');
+}
+{ // openUrl with the web permission: the domain of an allowed host is allowed too (the same reach as the web window)
+  const { b, log } = make();
+  await b.call('openUrl', { url: 'https://m.example.com/x' });
+  eq(log.opened[0][0], 'https://m.example.com/x', 'bridge: openUrl accepts a host under the domain when the web permission is "domain"');
+  const h = make({ ...all, web: 'host' });
+  eq(await code(h.b.call('openUrl', { url: 'https://m.example.com/x' })), 'denied', 'bridge: not with "host"');
 }
