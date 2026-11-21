@@ -1081,6 +1081,109 @@ fn plugin_open_url(url: String, hosts: Vec<String>) -> Result<(), String> {
     launch_url(text)
 }
 
+// ------------------------------------------------------------------------------------- LAB: a window of the web with a bar of ours drawn into it (an experiment, to be removed)
+// One frameless window that shows a page of the web (a phone's page when a User-Agent is given). A small script is run in the page before its own scripts: it draws a thin bar of
+// ours at the top (title, a close button) and tells the program what is pressed by trying to go to the address cmr-cmd://<command>, which is caught in on_navigation and never goes anywhere.
+const LAB_BAR: &str = r#"(() => {
+  if (window.__cmrBar) return; window.__cmrBar = 1;
+  const go = c => { try { location.href = 'cmr-cmd://' + c; } catch (e) {} };
+  const mount = () => {
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;left:0;right:0;top:0;height:22px;z-index:2147483647;';
+    const sh = host.attachShadow({ mode: 'closed' });
+    sh.innerHTML = '<style>.b{display:flex;align-items:center;height:22px;background:linear-gradient(#364847,#2a3836);border-bottom:1px solid #8a6a30;color:#e6c66e;font:12px "Malgun Gothic","Segoe UI",sans-serif;cursor:move;user-select:none}.t{flex:1;padding:0 10px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-shadow:0 1px 1px #000}button{border:0;background:none;color:#e6c66e;font-size:13px;width:28px;height:22px;cursor:pointer}button:hover{color:#ffe08a;background:#4a3f1c}</style><div class="b"><span class="t"></span><button title="close">\u2715</button></div>';
+    const t = sh.querySelector('.t'), bar = sh.querySelector('.b');
+    bar.addEventListener('mousedown', e => { if (e.button === 0 && !e.target.closest('button')) go('drag'); });
+    sh.querySelector('button').addEventListener('click', () => go('close'));
+    const title = () => { t.textContent = document.title || location.host; };
+    title(); setInterval(title, 1000);
+    document.documentElement.append(host);
+    try { const st = new CSSStyleSheet(); st.replaceSync('html{margin-top:22px !important}'); document.adoptedStyleSheets = [...document.adoptedStyleSheets, st]; } catch (e) {}
+    setInterval(() => { if (!host.isConnected) document.documentElement.append(host); }, 1000);      // (a page that draws itself again may take it away)
+  };
+  if (document.documentElement) mount(); else document.addEventListener('DOMContentLoaded', mount);
+})();"#;
+static LAB_EVENTS: std::sync::LazyLock<std::sync::Mutex<Vec<String>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+fn lab_note(text: String) { let mut v = LAB_EVENTS.lock().unwrap(); v.push(text); if v.len() > 60 { v.remove(0); } }
+
+// (async on purpose: a window made from a synchronous command, which runs on the main thread, never comes back on Windows - the WebView2 issue wry#583)
+#[tauri::command]
+async fn lab_web_open(app: AppHandle, label: String, url: String, ua: Option<String>, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+    use tauri::webview::NewWindowResponse;
+    if let Some(old) = app.get_webview_window(&label) { let _ = old.close(); }
+    let parsed = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
+    let (app2, lbl) = (app.clone(), label.clone());
+    let b = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed));
+    #[cfg(windows)]
+    let b = b.data_directory(data_dir()).additional_browser_args(
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
+    );
+    let mut b = b
+        .title("CMR Web")
+        .decorations(false)
+        .resizable(true)
+        .skip_taskbar(true)
+        .always_on_top(true)
+        .position(x, y)
+        .inner_size(w, h)
+        .initialization_script(LAB_BAR)
+        .on_new_window(|u, _| { lab_note(format!("new window refused {}", u)); NewWindowResponse::Deny })
+        .on_page_load(|_, p| lab_note(format!("page {:?} {}", p.event(), p.url())))
+        .on_navigation(move |u| {
+            if u.scheme() == "cmr-cmd" {
+                let cmd = u.host_str().unwrap_or("").to_string();
+                if let Some(win) = app2.get_webview_window(&lbl) {
+                    match cmd.as_str() {
+                        "drag" => { let _ = win.start_dragging(); }
+                        "close" => { let w2 = win.clone(); std::thread::spawn(move || { let _ = w2.close(); }); }
+                        _ => {}
+                    }
+                }
+                return false;
+            }
+            lab_note(format!("navigate {}", u));
+            u.scheme() == "https"
+        });
+    if let Some(ua) = ua.as_deref() { b = b.user_agent(ua); }
+    b.build().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn lab_web_close(app: AppHandle, label: String) -> Result<(), String> {
+    match app.get_webview_window(&label) { Some(w) => w.close().map_err(|e| e.to_string()), None => Ok(()) }
+}
+
+/// topmost on/off (with `game`: directly above that window), the owner (0 = none)
+#[tauri::command]
+async fn lab_web_z(app: AppHandle, label: String, topmost: bool, game: Option<i64>, owner: Option<i64>) -> Result<(), String> {
+    let w = app.get_webview_window(&label).ok_or("no such window")?;
+    let h = hwnd_of(&w)?;
+    win::set_owner(h, owner.unwrap_or(0) as isize);
+    win::set_topmost(h, topmost, game.unwrap_or(0) as isize);
+    Ok(())
+}
+
+#[tauri::command]
+async fn lab_web_ignore(app: AppHandle, label: String, on: bool) -> Result<(), String> {
+    app.get_webview_window(&label).ok_or("no such window")?.set_ignore_cursor_events(on).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn lab_web_noactivate(app: AppHandle, label: String, on: bool) -> Result<(), String> {
+    let w = app.get_webview_window(&label).ok_or("no such window")?;
+    win::set_noactivate(hwnd_of(&w)?, on);
+    Ok(())
+}
+
+#[tauri::command]
+async fn lab_web_info(app: AppHandle, label: String) -> Value {
+    let events = LAB_EVENTS.lock().unwrap().clone();
+    match app.get_webview_window(&label) {
+        Some(w) => json!({ "exists": true, "url": w.url().map(|u| u.to_string()).unwrap_or_default(), "position": w.outer_position().map(|p| [p.x, p.y]).ok(), "size": w.outer_size().map(|s| [s.width, s.height]).ok(), "events": events }),
+        None => json!({ "exists": false, "events": events }),
+    }
+}
+
 // ---------------------------------------------------------------------------------------------- start
 
 /// Set by restart_app: the program was started by the previous one that is ending right now.
@@ -1118,6 +1221,12 @@ fn main() {
             plugin_hash,
             plugin_fetch,
             plugin_open_url,
+            lab_web_open,
+            lab_web_close,
+            lab_web_z,
+            lab_web_ignore,
+            lab_web_noactivate,
+            lab_web_info,
             capture_start,
             capture_stop,
             os_kind,
