@@ -49,7 +49,9 @@ pub fn start(app: AppHandle) {
 #[tauri::command]
 pub async fn lab_rects(app: AppHandle, label: String, panes: Value) -> Result<(), String> {
     let f = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
-    let panes: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane { id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(), x: f(v, "x"), y: f(v, "y"), w: f(v, "w"), h: f(v, "h"), pt: v.get("pt").and_then(|x| x.as_bool()).unwrap_or(false), k: f(v, "k").max(1.0) }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
+    let (ox, oy) = app.get_webview_window(&label).and_then(|w| w.outer_position().ok()).map(|p| (p.x as f64, p.y as f64)).unwrap_or((0.0, 0.0));       // (where the center really is)
+    let mut panes: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane { id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(), x: f(v, "x"), y: f(v, "y"), w: f(v, "w"), h: f(v, "h"), pt: v.get("pt").and_then(|x| x.as_bool()).unwrap_or(false), k: f(v, "k").max(1.0) }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
+    for p in panes.iter_mut() { p.x += ox; p.y += oy; }
     if let Ok(mut r) = RECTS.lock() { r.insert(label.clone(), panes.clone()); }
     let prefix = format!("labb_{label}_");
     for p in &panes {
@@ -60,7 +62,6 @@ pub async fn lab_rects(app: AppHandle, label: String, panes: Value) -> Result<()
             None => {
                 let Ok(x) = make_window(&app, &name, "lab_blur.html", "labb") else { continue };
                 if let Ok(hw) = hwnd_of(&x) {
-                    win::set_blur(hw, true, 3, 30, 31, 34, 0.004);
                     win::make_no_key(hw); win::set_noactivate_light(hw, true);
                 }
                 let _ = x.set_ignore_cursor_events(true);
@@ -109,6 +110,7 @@ fn apply_mode(h: isize, mode: u32, game: isize, last: &mut HashMap<isize, u32>) 
 fn run(app: AppHandle) {
     let mut ignoring: HashMap<&str, bool> = HashMap::new();
     let mut last: HashMap<isize, u32> = HashMap::new();
+    let mut blurred: std::collections::HashSet<isize> = std::collections::HashSet::new();       // (the blur is put when the window is shown: on macOS it needs the number of the window)
     let mut z_at = Instant::now() - Duration::from_secs(1);
     let mut game = 0isize;
     let mut game_at = Instant::now() - Duration::from_secs(5);
@@ -152,6 +154,7 @@ fn run(app: AppHandle) {
                 if !w.label().starts_with(&prefix) { continue; }
                 let Ok(bh) = hwnd_of(w) else { continue };
                 win::keep_style(bh);
+                if !blurred.contains(&bh) && w.is_visible().unwrap_or(false) { win::set_blur(bh, true, 3, 30, 31, 34, 0.004); blurred.insert(bh); }
                 apply_mode(bh, mode, game, &mut last);
             }
             apply_mode(ch, mode, game, &mut last);

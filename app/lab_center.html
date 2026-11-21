@@ -7,7 +7,7 @@
   .pane { position: absolute; min-width: 160px; min-height: 90px; border: 1px solid rgba(255,255,255,.55); background: var(--bg); box-shadow: 0 0 0 1px #0006; }
   .pane .bar { height: 22px; line-height: 22px; padding: 0 8px; background: var(--bar); cursor: move; white-space: nowrap; overflow: hidden; }
   .pane .body { padding: 6px 8px; font-size: 12px; }
-  .pane .grip { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, #fff9 50%); }
+  .pane .grip { position: absolute; right: 0; bottom: 0; width: 24px; height: 24px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, #fff9 50%); }
   .pane button { margin-top: 4px; }
 </style>
 <body>
@@ -49,7 +49,8 @@
         again = false;
         const d = dpr();
         const list = panes.map(p => { const r = p.el.getBoundingClientRect(); p.el.querySelector('.info').textContent = `${Math.round(r.width * d)}x${Math.round(r.height * d)} dpr ${d}${MAC ? ` ox ${ox},${oy} screen ${Math.round(screenX)},${Math.round(screenY)} px ${Math.round(ox + r.left * d)},${Math.round(oy + r.top * d)}` : ''}`;
-          return MAC ? { id: p.id, x: ox + r.left * d, y: oy + r.top * d, w: r.width * d, h: r.height * d, pt: true, k: d } : { id: p.id, x: ox + r.left * d, y: oy + r.top * d, w: r.width * d, h: r.height * d }; });
+          // (the places inside this window, in pixels: the program adds where the window really is: on macOS it may stand lower than asked, under the menu bar)
+          return { id: p.id, x: r.left * d, y: r.top * d, w: r.width * d, h: r.height * d, pt: MAC, k: d }; });
         const key = JSON.stringify(list);
         if (key !== lastKey) { lastKey = key; await window.__TAURI__.core.invoke('lab_rects', { label: 'lab_c' + mode, panes: list }); }
       } while (again);
