@@ -387,7 +387,6 @@ pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64
     let w = get(&app, &label)?;
     let h = hwnd_of(&w)?;
     win::keep_style(h);
-    let _ = win::strip_wheel_keys(h, true);                   // (macOS: the wheel over this window goes on without shift / control / option / command, also in frames our scripts do not reach)
     let want = match mode {
         1 => 1,
         2 => match game { Some(g) if g > 0 => { let fg = win::foreground(); if fg == g as isize { 21 } else if win::self_front() { 23 } else { 22 } }, _ => 1 },    // (no game found: like always on top, it must stay in view)

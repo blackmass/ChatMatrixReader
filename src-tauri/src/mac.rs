@@ -514,7 +514,6 @@ pub fn allow_key(hwnd: isize, on: bool) {
 pub fn forget(hwnd: isize) {
     if let Ok(mut l) = KEEP.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = PANELS.lock() { l.retain(|&h| h != hwnd); }
-    if let Ok(mut s) = STRIP.lock() { s.retain(|&(h, _)| h != hwnd); }
     if let Ok(mut l) = KEY_ALLOWED.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = NO_KEY.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = TAGGED.lock() { l.retain(|e| e.0 != hwnd); }
@@ -727,10 +726,6 @@ static ASKED_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 static WHEEL_SEQ: AtomicU64 = AtomicU64::new(0);
 static WHEEL: Mutex<Vec<(u64, isize, i16)>> = Mutex::new(Vec::new());                  // (number, window, delta in the units of Windows: 120 = one notch)
 static ZONES: Mutex<Vec<(isize, bool, [f64; 4])>> = Mutex::new(Vec::new());            // (window, the turns DOWN too, its rectangle l, t, r, b in points, top left origin)
-// The windows of the web: a turn of the wheel over one of them goes on WITHOUT the keys shift / control / option / command (a page, and a frame of it that no script of ours reaches, would scroll
-// sideways or zoom with them). (window, its rectangle l, t, r, b in points, top left origin)
-static STRIP: Mutex<Vec<(isize, [f64; 4])>> = Mutex::new(Vec::new());
-const MOD_MASK: u64 = 0x0002_0000 | 0x0004_0000 | 0x0008_0000 | 0x0010_0000;
 static TAP: std::sync::atomic::AtomicPtr<c_void> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 static HOOK: Mutex<Option<(bool, Instant)>> = Mutex::new(None);                        // (made?, when it was tried): None = never tried
 static ASKED_LISTEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -749,11 +744,6 @@ extern "C" {
     fn CGEventTapEnable(tap: *mut c_void, enable: bool);
     fn CGEventGetLocation(event: *mut c_void) -> CGPoint;
     fn CGEventGetIntegerValueField(event: *mut c_void, field: u32) -> i64;
-    fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
-    fn CGEventGetDoubleValueField(event: *mut c_void, field: u32) -> f64;
-    fn CGEventSetDoubleValueField(event: *mut c_void, field: u32, value: f64);
-    fn CGEventGetFlags(event: *mut c_void) -> u64;
-    fn CGEventSetFlags(event: *mut c_void, flags: u64);
     fn CGRequestListenEventAccess() -> bool;
 }
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -780,28 +770,6 @@ extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _inf
             return event;
         }
         if kind != EVENT_SCROLL { return event; }
-        let at0 = CGEventGetLocation(event);
-        if let Ok(strip) = STRIP.try_lock() {
-            if strip.iter().any(|&(_, r)| at0.x >= r[0] && at0.x < r[2] && at0.y >= r[1] && at0.y < r[3]) {
-                let f = CGEventGetFlags(event);
-                // With shift held the system turns a wheel's up-down turn into a sideways one (the numbers move from the first axis to the second): that is put back, else a page that has nothing to
-                // scroll sideways does not move at all. Only the FIRST turn after the key went down carries the shift flag, the following ones have the swapped numbers without it: so the state of
-                // the key itself is asked, not the flag of the event.
-                let shift = f & 0x0002_0000 != 0 || CGEventSourceFlagsState(1) & 0x0002_0000 != 0;
-                if f & MOD_MASK != 0 || shift {
-                    if shift && CGEventGetIntegerValueField(event, FIELD_DELTA_AXIS_1) == 0 && CGEventGetIntegerValueField(event, FIELD_POINT_DELTA_AXIS_1) == 0 {
-                        for (a1, a2) in [(11u32, 12u32), (96, 97)] {
-                            let v = CGEventGetIntegerValueField(event, a2);
-                            if v != 0 { CGEventSetIntegerValueField(event, a1, v); CGEventSetIntegerValueField(event, a2, 0); }
-                        }
-                        let v = CGEventGetDoubleValueField(event, 94);
-                        if v != 0.0 { CGEventSetDoubleValueField(event, 93, v); CGEventSetDoubleValueField(event, 94, 0.0); }
-                    }
-                    CGEventSetFlags(event, f & !MOD_MASK);
-                }
-                return event;
-            }
-        }
         // positive = the content goes down = what is above comes into view (the system has already applied the "natural scrolling" setting): the same as the turn UP of Windows
         let continuous = CGEventGetIntegerValueField(event, FIELD_IS_CONTINUOUS) != 0;
         let mut delta = CGEventGetIntegerValueField(event, FIELD_POINT_DELTA_AXIS_1);
@@ -873,18 +841,6 @@ fn zone_rect(hwnd: isize) -> [f64; 4] {
 }
 
 pub fn start_wheel_hook() {}
-
-/// A window of the web asks that the keys are taken off the wheel turns over it (called at every poll: the rectangle follows the window). false = the event tap cannot be made yet (the permission).
-pub fn strip_wheel_keys(hwnd: isize, on: bool) -> bool {
-    if !on {
-        if let Ok(mut s) = STRIP.lock() { s.retain(|&(h, _)| h != hwnd); }
-        return true;
-    }
-    if !ensure_hook() { return false; }
-    let rect = zone_rect(hwnd);
-    if let Ok(mut s) = STRIP.lock() { s.retain(|&(h, _)| h != hwnd); s.push((hwnd, rect)); }
-    true
-}
 
 /// A window asks for the wheel turns over it (`usable` is not used here: only windows the mouse goes through ask). false = it cannot be had (no permission yet).
 pub fn wheel_zone(hwnd: isize, on: bool, _usable: bool, down: bool) -> bool {
