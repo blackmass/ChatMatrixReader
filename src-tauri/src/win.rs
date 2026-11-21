@@ -213,6 +213,7 @@ pub fn make_no_key(_hwnd: isize) {}
 pub fn set_noactivate_light(hwnd: isize, on: bool) { set_noactivate(hwnd, on); }
 pub fn allow_key(_hwnd: isize, _on: bool) {}
 pub fn forget(_hwnd: isize) {}
+pub fn cursor_in_background() {}
 
 /// Asks once more for the keyboard (macOS needs this: see mac.rs). Windows: grab_focus has already waited for it.
 pub fn ask_keyboard(_hwnd: isize) {}

@@ -354,6 +354,8 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     if let (Some(w), Some(h)) = (w, h) {
         let _ = set_outer(&win, args.get("x").and_then(|v| v.as_i64()).map(|v| v as i32), args.get("y").and_then(|v| v.as_i64()).map(|v| v as i32), w as u32, h as u32);
     }
+    static CURSOR: std::sync::Once = std::sync::Once::new();
+    CURSOR.call_once(win::cursor_in_background);
     // never the keyboard of the game: a window that cannot become the key window (macOS), the "no activate" style (Windows)
     if let Ok(hw) = hwnd_of(&win) { win::make_no_key(hw); win::set_noactivate_light(hw, true); }
     let _ = win.show();
