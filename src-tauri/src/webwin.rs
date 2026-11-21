@@ -440,7 +440,9 @@ pub async fn web_info(app: AppHandle, label: String) -> Value {
 /// What happened since the last call, for the log of the plugin (an address that was refused).
 #[tauri::command]
 pub async fn web_events() -> Vec<String> {
-    EVENTS.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default()
+    let mut v = EVENTS.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
+    v.extend(win::scroll_debug());
+    v
 }
 
 /// Cookies and the rest of what the pages stored, taken away (the window must be open).

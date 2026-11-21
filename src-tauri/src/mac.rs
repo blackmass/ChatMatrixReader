@@ -730,6 +730,9 @@ static ZONES: Mutex<Vec<(isize, bool, [f64; 4])>> = Mutex::new(Vec::new());     
 // The windows of the web: a turn of the wheel over one of them goes on WITHOUT the keys shift / control / option / command (a page, and a frame of it that no script of ours reaches, would scroll
 // sideways or zoom with them). (window, its rectangle l, t, r, b in points, top left origin)
 static STRIP: Mutex<Vec<(isize, [f64; 4])>> = Mutex::new(Vec::new());
+// (a look at what the wheel turns with shift are made of, for the log of the plugin: web_events takes it)
+static SCROLL_DBG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+pub fn scroll_debug() -> Vec<String> { SCROLL_DBG.lock().map(|mut d| std::mem::take(&mut *d)).unwrap_or_default() }
 const MOD_MASK: u64 = 0x0002_0000 | 0x0004_0000 | 0x0008_0000 | 0x0010_0000;
 static TAP: std::sync::atomic::AtomicPtr<c_void> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 static HOOK: Mutex<Option<(bool, Instant)>> = Mutex::new(None);                        // (made?, when it was tried): None = never tried
@@ -784,6 +787,10 @@ extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _inf
         if let Ok(strip) = STRIP.try_lock() {
             if strip.iter().any(|&(_, r)| at0.x >= r[0] && at0.x < r[2] && at0.y >= r[1] && at0.y < r[3]) {
                 let f = CGEventGetFlags(event);
+                let look = |ev: *mut c_void| format!("flags={:x} a1={} a2={} p1={} p2={} fx1={:.2} fx2={:.2} cont={} phase={} mom={}", CGEventGetFlags(ev), CGEventGetIntegerValueField(ev, 11), CGEventGetIntegerValueField(ev, 12),
+                    CGEventGetIntegerValueField(ev, 96), CGEventGetIntegerValueField(ev, 97), CGEventGetDoubleValueField(ev, 93), CGEventGetDoubleValueField(ev, 94), CGEventGetIntegerValueField(ev, 88),
+                    CGEventGetIntegerValueField(ev, 99), CGEventGetIntegerValueField(ev, 123));
+                let dbg_before = if f & 0x0002_0000 != 0 { Some(look(event)) } else { None };
                 if f & MOD_MASK != 0 {
                     // With shift held the system turns a wheel's up-down turn into a sideways one (the numbers move from the first axis to the second): the keys are taken off, and that is put back,
                     // else a page that has nothing to scroll sideways does not move at all
@@ -796,6 +803,7 @@ extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _inf
                         if v != 0.0 { CGEventSetDoubleValueField(event, 93, v); CGEventSetDoubleValueField(event, 94, 0.0); }
                     }
                     CGEventSetFlags(event, f & !MOD_MASK);
+                    if let (Some(b), Ok(mut d)) = (dbg_before, SCROLL_DBG.try_lock()) { if d.len() < 40 { d.push(format!("scroll with shift: {b}  ->  {}", look(event))); } }
                 }
                 return event;
             }
