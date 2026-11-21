@@ -23,6 +23,7 @@ static ALLOW: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(|| M
 static CLOSING: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static LOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static ZSTATE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static DRAG: LazyLock<Mutex<HashMap<String, (i32, i32)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));       // where a window was when its drag began
 static PREV_FG: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// What the plugin's log should tell about the windows (addresses that were refused): taken by web_events
 static EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
@@ -85,7 +86,23 @@ const BAR: &str = r#"(() => {
     sh.innerHTML = '<style>.b{display:flex;align-items:center;height:22px;background:linear-gradient(#364847,#2a3836);border-bottom:1px solid #8a6a30;color:#e6c66e;font:12px "Malgun Gothic","Apple SD Gothic Neo","Segoe UI",sans-serif;cursor:move;user-select:none}.t{flex:1;padding:0 10px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-shadow:0 1px 1px #000}button{border:0;background:none;color:#e6c66e;font-size:13px;width:26px;height:22px;cursor:pointer;padding:0}button:hover{color:#ffe08a;background:#4a3f1c}</style><div class="b"><span class="t"></span><button data-c="back" title="back">‹</button><button data-c="reload" title="reload">↻</button><button data-c="close" title="close">✕</button></div>';
     const t = sh.querySelector('.t'), bar = sh.querySelector('.b');
     // (a drag of the bar moves the window: the page under it must not start marking text meanwhile, which macOS did: no default action, no marked text, no marking while it lasts)
+    // macOS: the system's own drag of a window (start_dragging) takes over the events while it lasts, and the game missed the keys that were let go meanwhile (the character kept walking). So the
+    // window is moved by our own measure there: the pointer is followed, the program puts the window at the start place plus how far the pointer went.
+    if (MAC) {
+      bar.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || e.target.closest('button') || window.__cmrLocked) return;
+        e.preventDefault();
+        try { getSelection().removeAllRanges(); } catch (x) {}
+        const x0 = e.screenX, y0 = e.screenY; let last = 0;
+        bar.setPointerCapture(e.pointerId);
+        go('dragstart');
+        const move = m => { const now = Date.now(); if (now - last < 16) return; last = now; go(`dragmove?dx=${m.screenX - x0}&dy=${m.screenY - y0}`); };
+        const up = m => { bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', up); go(`dragmove?dx=${m.screenX - x0}&dy=${m.screenY - y0}`); };
+        bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', up);
+      });
+    }
     bar.addEventListener('mousedown', e => {
+      if (MAC) { e.preventDefault(); return; }
       if (e.button !== 0 || e.target.closest('button')) return;
       e.preventDefault(); e.stopPropagation();
       try { getSelection().removeAllRanges(); } catch (x) {}
@@ -180,6 +197,7 @@ fn forget(w: &WebviewWindow) {
     if let Ok(mut m) = OPEN_ALLOW.lock() { m.remove(&label); }
     if let Ok(mut m) = ZSTATE.lock() { m.remove(&label); }
     if let Ok(mut m) = PREV_FG.lock() { m.remove(&label); }
+    if let Ok(mut m) = DRAG.lock() { m.remove(&label); }
 }
 /// (called when the system asks the window to close, e.g. the window's own close)
 pub fn on_close_requested(label: &str) {
@@ -216,6 +234,21 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
                 if prev != h { if let Ok(mut p) = PREV_FG.lock() { p.insert(label.to_string(), prev); } }
                 win::allow_key(h, true);
                 win::set_noactivate_light(h, false);
+            }
+        }
+        "dragstart" => {                                // macOS: the window is moved by the page's own measure (see the bar script)
+            if let Ok(p) = win.outer_position() { if let Ok(mut d) = DRAG.lock() { d.insert(label.to_string(), (p.x, p.y)); } }
+        }
+        "dragmove" => {
+            if LOCKED.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) { return; }
+            let start = DRAG.lock().ok().and_then(|d| d.get(label).copied());
+            let q = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok());
+            let n = |k: &str| q.as_ref().and_then(|u| u.query_pairs().find(|(a, _)| a == k).and_then(|(_, v)| v.parse::<f64>().ok()));
+            if let (Some((sx, sy)), Some(dx), Some(dy)) = (start, n("dx"), n("dy")) {
+                if dx.abs() < 20000.0 && dy.abs() < 20000.0 {
+                    let scale = win.scale_factor().unwrap_or(1.0);
+                    let _ = win.set_position(tauri::PhysicalPosition::new(sx + (dx * scale).round() as i32, sy + (dy * scale).round() as i32));
+                }
             }
         }
         "inputclick" => {                              // macOS: a click on a text box must make the program active; when the system has not done it a moment later, it is asked to
