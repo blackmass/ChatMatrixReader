@@ -31,6 +31,23 @@ const BAR: &str = r#"(() => {
   if (window.__cmrBar) return; window.__cmrBar = 1;
   const go = c => { try { location.href = 'cmr-cmd://' + c; } catch (e) {} };
   const TITLE = __TITLE__;
+  // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
+  // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
+  const external = u => { try { const a = new URL(u, location.href); if (a.protocol === 'https:') go('open?u=' + encodeURIComponent(a.href)); } catch (e) {} };
+  const linkOf = e => (e.target && e.target.closest ? e.target.closest('a[href]') : null);
+  document.addEventListener('click', e => {
+    if (!e.isTrusted) return;
+    const a = linkOf(e);
+    if (a && (e.ctrlKey || e.metaKey || e.shiftKey || a.target === '_blank')) { e.preventDefault(); e.stopPropagation(); external(a.href); }
+  }, true);
+  document.addEventListener('auxclick', e => {
+    if (!e.isTrusted || e.button !== 1) return;
+    const a = linkOf(e);
+    if (a) { e.preventDefault(); e.stopPropagation(); external(a.href); }
+  }, true);
+  try {
+    window.open = (u) => { if (u && navigator.userActivation && navigator.userActivation.isActive) external(String(u)); return null; };
+  } catch (e) {}
   const mount = () => {
     const host = document.createElement('div');
     host.style.cssText = 'position:fixed;left:0;right:0;top:0;height:22px;z-index:2147483647;';
@@ -77,9 +94,14 @@ pub fn on_close_requested(label: &str) {
 }
 
 /// What the page asked by its bar.
-fn command(app: &AppHandle, label: &str, cmd: &str) {
+fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
     let Some(win) = app.get_webview_window(label) else { return };
     match cmd {
+        "open" => {                                     // a link the user opened in a new place: the user's browser, only where the window itself may go (the same rule)
+            let url = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "u").map(|(_, v)| v.into_owned()));
+            let allow = ALLOW.lock().ok().and_then(|m| m.get(label).cloned()).unwrap_or_default();
+            if let Some(url) = url { let _ = crate::plugin_open_url(url, allow); }       // (a refused address: nothing happens)
+        }
         "drag" => { if !LOCKED.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) { let _ = win.start_dragging(); } }
         "close" => { forget(&win); let w2 = win.clone(); std::thread::spawn(move || { let _ = w2.close(); }); }
         "back" => { let _ = win.eval("history.back()"); }
@@ -155,6 +177,9 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     };
     #[cfg(target_os = "macos")]
     let b = if persist { b.data_store_identifier(weblib::store_id(&key)) } else { b.incognito(true) };
+    // Windows: made like the program's own windows (transparent, no shadow): a window the mouse goes through (click-through) needs that; a page that draws no background of its own gets white
+    #[cfg(windows)]
+    let b = b.transparent(true).shadow(false).background_color(tauri::window::Color(255, 255, 255, 255));
     let mut b = b
         .title("CMR Web")
         .decorations(false)
@@ -165,7 +190,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         .initialization_script(script)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .on_navigation(move |u| {
-            if weblib::is_command_url(u.scheme()) { command(&app2, &lbl, u.host_str().unwrap_or("")); return false; }
+            if weblib::is_command_url(u.scheme()) { command(&app2, &lbl, u.host_str().unwrap_or(""), u.query()); return false; }
             let allowed = ALLOW.lock().ok().and_then(|m| m.get(&lbl).cloned()).unwrap_or_default();
             let ok = u.scheme() == "https" && u.host_str().map_or(false, |h| weblib::host_allowed(h, &allowed));
             if !ok {
@@ -233,8 +258,12 @@ pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64
 }
 
 #[tauri::command]
-pub async fn web_ignore(app: AppHandle, label: String, on: bool) -> Result<(), String> {
-    get(&app, &label)?.set_ignore_cursor_events(on).map_err(|e| e.to_string())
+pub async fn web_ignore(app: AppHandle, label: String, on: bool) -> Result<i64, String> {
+    let w = get(&app, &label)?;
+    w.set_ignore_cursor_events(on).map_err(|e| e.to_string())?;
+    let h = hwnd_of(&w)?;
+    win::keep_style(h);
+    Ok(win::ex_style(h) as i64)        // (for the log of the plugin: the extended style after the change; 0x20 = click-through, 0x80000 = layered)
 }
 
 #[tauri::command]

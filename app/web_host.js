@@ -36,7 +36,7 @@ export function createWebHost({ getKeys = () => ['Shift'], getEntry, getConf, pa
         const keys = getKeys() || [], s = await invoke('os_state').catch(() => null);
         if (s && keys.length && keys.every(k => s[String(k).toLowerCase()] === true)) ignore = false;
       }
-      if (ignore !== o.ignore) { o.ignore = ignore; await call('web_ignore', { on: ignore }).catch(() => {}); }
+      if (ignore !== o.ignore) { o.ignore = ignore; await call('web_ignore', { on: ignore }).then(ex => note(id, `click-through ${ignore ? 'on' : 'off'} (style ${Number(ex).toString(16)})`), e => note(id, 'click-through failed: ' + e)); }
       if (w.lock !== o.lock) { o.lock = w.lock; await call('web_lock', { on: w.lock }).catch(() => {}); }
     };
     const follow = async () => {
