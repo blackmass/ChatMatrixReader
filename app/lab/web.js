@@ -18,8 +18,9 @@ catch (e) { await log('OPEN FAILED: ' + e); throw e; }
 
 let game = null, wowOnly = false;
 // like a translation window: no activation from the start, and the style kept every poll; in "above the game only" the window is put right above the game over and over
-await call('lab_web_noactivate', { on: true });
-setInterval(() => { call('lab_web_tick', { game: wowOnly && game ? game.hwnd : 0 }); }, 300);
+// (the window made itself such a window when it was opened, in Rust)
+let alive = true;
+const ticker = setInterval(() => { if (alive) call('lab_web_tick', { game: wowOnly && game ? game.hwnd : 0 }); }, 100);
 const steps = {
   5: async () => phase('(no-activate is ON all the time, like a translation window.) LOOK: is there a bar of ours at the top (title + x)? does the page look like a phone page? drag the bar: does the window move? resize at the edges? press x only at the end'),
   10: async () => { await phase('TOPMOST ON: the window must stay above other programs (click another program: it must not cover this window)'); await call('lab_web_z', { topmost: true, game: 0, owner: 0 }); },
@@ -34,16 +35,19 @@ const steps = {
   50: async () => { wowOnly = false; await phase('TOPMOST ON again, no owner'); await call('lab_web_z', { topmost: true, game: 0, owner: 0 }); },
   55: async () => { await phase('CLICK-THROUGH ON: the mouse goes through the window to what is behind it (for 10 s)'); await call('lab_web_ignore', { on: true }); },
   65: async () => { await phase('CLICK-THROUGH OFF'); await call('lab_web_ignore', { on: false }); },
-  70: async () => { await phase('KEYBOARD TEST (no-activate is on): click on the page, then type in the game (or another program): the keyboard must stay there; does the window hide when the game is in front? (for 20 s)'); },
+  70: async () => { await phase('KEYBOARD TEST (20 s): 1) click on the PAGE (not on a text box) while you hold W/A/S/D in the game: the game must KEEP the keyboard. 2) click on a TEXT BOX of the page (the search box): typing must go to the page. 3) then click in the game: the keyboard must be the game\'s again, the window must not hide'); },
   90: async () => { await phase('end of the keyboard test'); },
 };
 for (let t = 5; t <= 120; t += 5) {
   await sleep(5000);
   if (steps[t]) await steps[t]();
   const i = await info('t+' + t);
-  if (i && !i.exists) { await log('the window is gone (closed by the x?)'); break; }
+  if (i && !i.exists) { alive = false; await log('the window is gone (closed by the x?)'); break; }
 }
+alive = false; clearInterval(ticker);
 const last = await info('end');
 for (const line of (last && last.events) || []) await log('   event: ' + line);
 await invoke('lab_web_close', { label: L }).catch(() => {});
+await sleep(1500);
+await log('(if this line is written the program is still alive after the window was closed)');
 await log('== end');

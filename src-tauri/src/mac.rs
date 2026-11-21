@@ -25,7 +25,7 @@ use core_graphics::window::{
     copy_window_info, kCGNullWindowID, kCGWindowBounds, kCGWindowLayer, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly, kCGWindowName,
     kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID,
 };
-use objc2::runtime::{AnyObject, Bool};
+use objc2::runtime::{AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{class, msg_send, sel};
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -423,6 +423,36 @@ pub fn keep_awake() {
             if let Ok(mut a) = ACTIVITY.lock() { *a = kept as usize; }
         }
     });
+}
+
+// ---- a window that is never the key window (and so never takes the keyboard from the game) unless it is told that a text box of its page needs it
+static KEY_ALLOWED: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+extern "C" fn can_become_key(this: *mut AnyObject, _cmd: Sel) -> Bool {
+    let me = this as isize;
+    Bool::new(KEY_ALLOWED.lock().map(|l| l.contains(&me)).unwrap_or(false))
+}
+fn no_key_class() -> *const c_void {
+    static CLASS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CLASS.get_or_init(|| unsafe {
+        let mut b = ClassBuilder::new(c"CMRNoKeyPanel", class!(NSPanel)).expect("class CMRNoKeyPanel");
+        b.add_method(sel!(canBecomeKeyWindow), can_become_key as extern "C" fn(*mut AnyObject, Sel) -> Bool);
+        b.register() as *const _ as usize
+    }) as *const c_void
+}
+/// The window becomes a panel of a kind that does not become the key window (a click on its page does not give it the keyboard). Before set_noactivate.
+pub fn make_no_key(hwnd: isize) {
+    on_main(|| unsafe { object_setClass(hwnd as *mut AnyObject, no_key_class()); });
+}
+/// The page of the window has a text box that needs the keyboard (true), or it does not any more (false).
+pub fn allow_key(hwnd: isize, on: bool) {
+    if let Ok(mut l) = KEY_ALLOWED.lock() { l.retain(|&h| h != hwnd); if on { l.push(hwnd); } }
+}
+/// A window of ours is going away: no list keeps its address any more (a later call must not touch it).
+pub fn forget(hwnd: isize) {
+    if let Ok(mut l) = KEEP.lock() { l.retain(|&h| h != hwnd); }
+    if let Ok(mut l) = PANELS.lock() { l.retain(|&h| h != hwnd); }
+    if let Ok(mut l) = KEY_ALLOWED.lock() { l.retain(|&h| h != hwnd); }
+    if let Ok(mut l) = TAGGED.lock() { l.retain(|e| e.0 != hwnd); }
 }
 
 /// A window of ours that must not take the game's keyboard or hide while the game is in front. (On Windows: the "no activate" style.)

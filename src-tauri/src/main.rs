@@ -1097,12 +1097,18 @@ const LAB_BAR: &str = r#"(() => {
     sh.querySelector('button').addEventListener('click', () => go('close'));
     const title = () => { t.textContent = document.title || location.host; };
     title(); setInterval(title, 1000);
+    // a text box of the page asks for the keyboard (the window does not take it otherwise: the game keeps it); when the box is left the game gets it back
+    const editable = t => !!t && (t.isContentEditable || (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && !/^(button|checkbox|radio|submit|reset|image|range|color|file)$/i.test(t.type || '')));
+    document.addEventListener('focusin', e => { if (editable(e.target)) go('focus'); }, true);
+    document.addEventListener('focusout', e => { if (editable(e.target)) go('blur'); }, true);
     document.documentElement.append(host);
     try { const st = new CSSStyleSheet(); st.replaceSync('html{margin-top:22px !important}'); document.adoptedStyleSheets = [...document.adoptedStyleSheets, st]; } catch (e) {}
     setInterval(() => { if (!host.isConnected) document.documentElement.append(host); }, 1000);      // (a page that draws itself again may take it away)
   };
   if (document.documentElement) mount(); else document.addEventListener('DOMContentLoaded', mount);
 })();"#;
+static LAB_CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);      // the window is closing: nothing may touch it any more
+static LAB_PREV_FG: std::sync::Mutex<isize> = std::sync::Mutex::new(0);      // who had the keyboard before a text box of the page asked for it
 static LAB_EVENTS: std::sync::LazyLock<std::sync::Mutex<Vec<String>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
 fn lab_note(text: String) { let mut v = LAB_EVENTS.lock().unwrap(); v.push(text); if v.len() > 60 { v.remove(0); } }
 
@@ -1110,7 +1116,8 @@ fn lab_note(text: String) { let mut v = LAB_EVENTS.lock().unwrap(); v.push(text)
 #[tauri::command]
 async fn lab_web_open(app: AppHandle, label: String, url: String, ua: Option<String>, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
     use tauri::webview::NewWindowResponse;
-    if let Some(old) = app.get_webview_window(&label) { let _ = old.close(); }
+    if let Some(old) = app.get_webview_window(&label) { lab_web_forget(&old); let _ = old.close(); }
+    LAB_CLOSING.store(false, std::sync::atomic::Ordering::SeqCst);
     let parsed = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
     let (app2, lbl) = (app.clone(), label.clone());
     let b = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed));
@@ -1135,7 +1142,27 @@ async fn lab_web_open(app: AppHandle, label: String, url: String, ua: Option<Str
                 if let Some(win) = app2.get_webview_window(&lbl) {
                     match cmd.as_str() {
                         "drag" => { let _ = win.start_dragging(); }
-                        "close" => { let w2 = win.clone(); std::thread::spawn(move || { let _ = w2.close(); }); }
+                        "close" => { lab_web_forget(&win); let w2 = win.clone(); std::thread::spawn(move || { let _ = w2.close(); }); }
+                        "focus" => { // a text box of the page needs the keyboard: this window takes it (the one that had it is remembered)
+                            if let Ok(h) = hwnd_of(&win) {
+                                let prev = win::foreground();
+                                if prev != h { if let Ok(mut p) = LAB_PREV_FG.lock() { *p = prev; } }
+                                win::allow_key(h, true);
+                                win::set_noactivate(h, false);
+                                win::grab_focus(h);
+                                let _ = win.set_focus();
+                                lab_note(format!("focus: keyboard to the page (before: {})", prev));
+                            }
+                        }
+                        "blur" => { // the text box was left: the keyboard goes back to where it was
+                            if let Ok(h) = hwnd_of(&win) {
+                                win::allow_key(h, false);
+                                win::set_noactivate(h, true);
+                                let prev = LAB_PREV_FG.lock().map(|p| *p).unwrap_or(0);
+                                if prev != 0 && prev != h { win::set_foreground(prev); }
+                                lab_note(format!("blur: keyboard back to {}", prev));
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -1145,12 +1172,21 @@ async fn lab_web_open(app: AppHandle, label: String, url: String, ua: Option<Str
             u.scheme() == "https"
         });
     if let Some(ua) = ua.as_deref() { b = b.user_agent(ua); }
-    b.build().map(|_| ()).map_err(|e| e.to_string())
+    let win = b.build().map_err(|e| e.to_string())?;
+    // like a translation window: it never takes the keyboard of the game (a window that cannot become the key window on macOS, the "no activate" style on Windows)
+    if let Ok(h) = hwnd_of(&win) { win::make_no_key(h); win::set_noactivate(h, true); }
+    Ok(())
+}
+
+/// The window is going away: from now on nothing touches it, and no list of ours keeps its address.
+fn lab_web_forget(w: &WebviewWindow) {
+    LAB_CLOSING.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Ok(h) = hwnd_of(w) { win::forget(h); }
 }
 
 #[tauri::command]
 async fn lab_web_close(app: AppHandle, label: String) -> Result<(), String> {
-    match app.get_webview_window(&label) { Some(w) => w.close().map_err(|e| e.to_string()), None => Ok(()) }
+    match app.get_webview_window(&label) { Some(w) => { lab_web_forget(&w); w.close().map_err(|e| e.to_string()) }, None => Ok(()) }
 }
 
 /// topmost on/off (with `game`: directly above that window), the owner (0 = none)
@@ -1178,6 +1214,7 @@ async fn lab_web_noactivate(app: AppHandle, label: String, on: bool) -> Result<(
 /// What the translation windows do every poll: the style is put back (a window library call may have wiped it), and in "above the game only" the window is put right above the game
 #[tauri::command]
 async fn lab_web_tick(app: AppHandle, label: String, game: Option<i64>) -> Result<(), String> {
+    if LAB_CLOSING.load(std::sync::atomic::Ordering::SeqCst) { return Ok(()); }
     let w = app.get_webview_window(&label).ok_or("no such window")?;
     let h = hwnd_of(&w)?;
     win::keep_style(h);
@@ -1306,6 +1343,9 @@ fn main() {
                         if app.get_webview_window("input").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false) { let _ = place_input(app, &label, &place); }
                     }
                 }
+            }
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if window.label() == "labweb" { LAB_CLOSING.store(true, std::sync::atomic::Ordering::SeqCst); }          // (the experiment window: nothing may touch it while it closes)
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {

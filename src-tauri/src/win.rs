@@ -208,6 +208,11 @@ pub fn has_keyboard(hwnd: isize) -> bool {
     unsafe { GetForegroundWindow() == hwnd }
 }
 
+/// (macOS only: a window that never becomes the key window unless allowed; on Windows the "no activate" style does it)
+pub fn make_no_key(_hwnd: isize) {}
+pub fn allow_key(_hwnd: isize, _on: bool) {}
+pub fn forget(_hwnd: isize) {}
+
 /// Asks once more for the keyboard (macOS needs this: see mac.rs). Windows: grab_focus has already waited for it.
 pub fn ask_keyboard(_hwnd: isize) {}
 
