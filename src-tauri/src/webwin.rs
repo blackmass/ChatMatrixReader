@@ -32,15 +32,25 @@ static BLOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::
 // (the keys that make the windows usable, ctrl / shift / alt, would otherwise stop the page from scrolling)
 const KEYS: &str = r#"(() => {
   if (window.__cmrKeys) return; window.__cmrKeys = 1;
-  document.addEventListener('wheel', e => {
+  const wheel = e => {
     if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
     e.preventDefault();
     let t = e.target;
     while (t && t !== document.documentElement && !(t.scrollHeight > t.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(t).overflowY))) t = t.parentElement;
     (t && t !== document.documentElement ? t : (document.scrollingElement || document.documentElement)).scrollBy(0, e.deltaY || e.deltaX);
-  }, { capture: true, passive: false });
-  document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0', '_'].includes(e.key)) e.preventDefault(); }, true);
-  document.addEventListener('contextmenu', e => e.preventDefault(), true);
+  };
+  const keys = e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0', '_'].includes(e.key)) e.preventDefault(); };
+  const menu = e => e.preventDefault();
+  // A frame that writes its own page (document.write, as many advertisements do) loses every handler that was put on its document before. So the handlers are put there again and again
+  // (the same function twice is one handler): when the document is ready, when it is loaded, and every two seconds after.
+  const arm = () => {
+    document.addEventListener('wheel', wheel, { capture: true, passive: false });
+    document.addEventListener('keydown', keys, true);
+    document.addEventListener('contextmenu', menu, true);
+  };
+  arm();
+  document.addEventListener('DOMContentLoaded', arm); window.addEventListener('load', arm);
+  setInterval(arm, 2000);
 })();"#;
 
 const BAR: &str = r#"(() => {
@@ -265,6 +275,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         .visible(false)
         .inner_size(args.get("w").and_then(|v| v.as_f64()).unwrap_or(360.0).max(120.0), args.get("h").and_then(|v| v.as_f64()).unwrap_or(640.0).max(80.0))
         .initialization_script(script)
+        .initialization_script(KEYS)
         .initialization_script_for_all_frames(KEYS)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .on_navigation(move |u| {
