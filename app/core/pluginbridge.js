@@ -4,7 +4,7 @@
 //
 //   const b = new PluginBridge({ manifest, granted, hooks: { inject(line), fetch(req, hosts), log(text), load(), save(obj) }, options, now })
 //   await b.call('chat.inject', { text, sender })      -> value  |  throws PluginError { code: 'denied' | 'limit' | 'args' | 'failed' }
-import { effective, netAllowed, optionValues, validHost } from './plugins.js';
+import { effective, netAllowed, optionValues, validHost, webPatterns, hostMatches } from './plugins.js';
 import { checkDef, cleanState } from '../widgets/registry.js';
 
 export class PluginError extends Error {
@@ -16,7 +16,7 @@ export const LIMITS = {
   fetchGapMs: 1000, fetchQueue: 20, fetchBody: 1_000_000, fetchAnswer: 2_000_000, fetchHeaders: 30,       // requests to one host are spaced; they wait their turn in a queue
   storageBytes: 1_000_000, storageKeys: 1000, storageKey: 100,
   logPerMin: 120, logText: 500,
-  windowCallsPerMin: 20, hostRequestsPerMin: 10, openUrlPerMin: 6,                               // opening / closing the plugin's windows; asking the user for a host                                                       // opening / closing the plugin's windows
+  windowCallsPerMin: 20, hostRequestsPerMin: 10, openUrlPerMin: 6, webOpenPerMin: 6,                               // opening / closing the plugin's windows; asking the user for a host                                                       // opening / closing the plugin's windows
   widgets: 8, widgetGapMs: 100,                                                // widgets a plugin may have; its state is passed on at most every 100 ms (the newest wins)
 };
 
@@ -50,6 +50,7 @@ export class PluginBridge {
     this.windowCalls = new Limiter(LIMITS.windowCallsPerMin, 60_000, now);
     this.hostRequests = new Limiter(LIMITS.hostRequestsPerMin, 60_000, now);
     this.opens = new Limiter(LIMITS.openUrlPerMin, 60_000, now);
+    this.webOpens = new Limiter(LIMITS.webOpenPerMin, 60_000, now);
     this.data = null;                                   // the storage, read at the first use
     this.widgetIds = new Set();                         // the full ids of the widgets this plugin registered
     this.widgetLast = {}; this.widgetPending = {};     // full id -> when its state went out last / a state that waits for its time
@@ -155,6 +156,19 @@ export class PluginBridge {
         try { await this.hooks.openUrl(args.url, this.eff.net); } catch (e) { throw new PluginError('failed', String((e && e.message) || e).slice(0, 200)); }
         return null;
       }
+      case 'web.open': {                                                 // the page in a window of the program: https, and a host the web permission covers (see webPatterns)
+        this.need('web');
+        if (!isObj(args) || typeof args.url !== 'string') throw new PluginError('args', 'url is needed');
+        let u;
+        try { u = new URL(args.url); } catch { throw new PluginError('args', 'url: not an address'); }
+        const patterns = webPatterns(this.eff.net, this.eff.web);
+        if (u.protocol !== 'https:' || u.username || u.password || !hostMatches(u.hostname, patterns)) throw new PluginError('denied', 'this address is not allowed (https and a host the user allowed, with its domain when the permission says so)');
+        if (!this.webOpens.take()) throw new PluginError('limit', `at most ${LIMITS.webOpenPerMin} web windows a minute`);
+        const title = typeof args.title === 'string' ? args.title.slice(0, 80) : '';
+        try { await this.hooks.webOpen({ url: u.href, title, mobile: args.mobile !== false }, patterns); } catch (e) { throw new PluginError('failed', String((e && e.message) || e).slice(0, 200)); }
+        return null;
+      }
+      case 'web.close': this.need('web'); await this.hooks.webClose(); return null;
       case 'net.hosts': return [...this.eff.net];
       case 'net.requestHost': {                                         // (netAny) the plugin asks that the user allow a host; the user decides in the plugin tab
         if (!this.eff.netAny) throw new PluginError('denied', 'the plugin may not ask for hosts (permission netAny)');

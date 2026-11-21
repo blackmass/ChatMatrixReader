@@ -210,9 +210,6 @@ pub fn has_keyboard(hwnd: isize) -> bool {
 
 /// (macOS only: a window that never becomes the key window unless allowed; on Windows the "no activate" style does it)
 pub fn make_no_key(_hwnd: isize) {}
-pub fn lab_diag(_hwnd: isize) -> String { String::new() }
-pub fn lab_variant(_hwnd: isize, _v: u32) {}
-pub fn lab_extra(_hwnd: isize, _v: u32) {}
 pub fn set_noactivate_light(hwnd: isize, on: bool) { set_noactivate(hwnd, on); }
 pub fn allow_key(_hwnd: isize, _on: bool) {}
 pub fn forget(_hwnd: isize) {}

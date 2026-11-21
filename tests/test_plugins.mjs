@@ -15,7 +15,7 @@ const parse = (o, folder = ID) => p.parseManifest(JSON.stringify(o), folder);
 { // a good manifest
   const r = parse(good());
   check(r.ok && r.errors.length === 0 && r.warnings.length === 0, 'plugins: a good manifest is accepted: ' + JSON.stringify(r.errors.concat(r.warnings)));
-  eq(r.manifest.permissions, { net: ['example.com', 'api.example.com'], netAny: false, 'chat.inject': true, storage: true, widgets: false, windows: false, openUrl: false }, 'plugins: the permissions are cleaned');
+  eq(r.manifest.permissions, { net: ['example.com', 'api.example.com'], netAny: false, 'chat.inject': true, storage: true, widgets: false, windows: false, openUrl: false, web: "" }, 'plugins: the permissions are cleaned');
   eq(r.manifest.main, 'background.html', 'plugins: main defaults to background.html');
   eq(r.manifest.options.map(o => [o.key, o.type, o.default]), [['url', 'text', ''], ['interval', 'number', 60], ['on', 'check', false], ['mode', 'select', 'b']], 'plugins: the options with their defaults');
 }
@@ -55,10 +55,10 @@ const parse = (o, folder = ID) => p.parseManifest(JSON.stringify(o), folder);
   eq(p.missing(m, null).map(x => x.perm + (x.host ? ':' + x.host : '')), ['net:example.com', 'net:api.example.com', 'chat.inject', 'storage'], 'plugins: nothing allowed yet: everything is missing');
   const g = { net: ['example.com'], 'chat.inject': true, storage: true };
   eq(p.missing(m, g).map(x => x.host), ['api.example.com'], 'plugins: one host is still to be allowed');
-  eq(p.effective(m, g), { net: ['example.com'], netAny: false, 'chat.inject': true, storage: true, widgets: false, windows: false, openUrl: false }, 'plugins: what may be done = asked AND allowed');
-  eq(p.effective(m, { net: ['other.org', 'example.com'], storage: true }), { net: ['example.com'], netAny: false, 'chat.inject': false, storage: true, widgets: false, windows: false, openUrl: false }, 'plugins: an allowed host the manifest does not name is not used');
+  eq(p.effective(m, g), { net: ['example.com'], netAny: false, 'chat.inject': true, storage: true, widgets: false, windows: false, openUrl: false, web: "" }, 'plugins: what may be done = asked AND allowed');
+  eq(p.effective(m, { net: ['other.org', 'example.com'], storage: true }), { net: ['example.com'], netAny: false, 'chat.inject': false, storage: true, widgets: false, windows: false, openUrl: false, web: "" }, 'plugins: an allowed host the manifest does not name is not used');
   const none = p.effective(parse({ ...good(), permissions: {} }).manifest, g);
-  eq(none, { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false, openUrl: false }, 'plugins: a permission removed from the manifest is not used any more');
+  eq(none, { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false, openUrl: false, web: "" }, 'plugins: a permission removed from the manifest is not used any more');
   const eff = p.effective(m, g);
   check(p.netAllowed(eff, 'https://example.com/a?b=1') && !p.netAllowed(eff, 'http://example.com/') && !p.netAllowed(eff, 'https://api.example.com/') && !p.netAllowed(eff, 'https://example.com.evil.org/')
     && !p.netAllowed(eff, 'https://user:pw@example.com/') && !p.netAllowed(eff, 'not a url') && !p.netAllowed(eff, 'https://EXAMPLE.com@evil.org/'), 'plugins: an address is allowed only for an exact host over https');
@@ -96,4 +96,19 @@ const parse = (o, folder = ID) => p.parseManifest(JSON.stringify(o), folder);
   const plain = parse(good()).manifest;
   eq(p.effective(plain, { net: ['example.com', 'forum.example.org'], netAny: true }).net, ['example.com'], 'plugins: without netAny in the manifest a granted host that it does not name is not used');
   check(p.permsKey(plain) !== p.permsKey(mm), 'plugins: netAny asks the user again');
+}
+
+// ---- the web permission
+{
+  const { registrableDomain, webPatterns, hostMatches, effective, parseManifest, missing } = await import('../app/core/plugins.js');
+  check(registrableDomain('m.gall.dcinside.com') === 'dcinside.com' && registrableDomain('a.b.example.co.kr') === 'example.co.kr' && registrableDomain('example.com') === 'example.com', 'plugins: registrable domain');
+  check(JSON.stringify(webPatterns(['gall.dcinside.com'], 'host')) === '["gall.dcinside.com"]' && JSON.stringify(webPatterns(['gall.dcinside.com', 'm.dcinside.com'], 'domain')) === '["*.dcinside.com"]' && webPatterns(['a.com'], '').length === 0, 'plugins: web patterns host / domain');
+  check(hostMatches('m.dcinside.com', ['*.dcinside.com']) && hostMatches('dcinside.com', ['*.dcinside.com']) && !hostMatches('evildcinside.com', ['*.dcinside.com']) && !hostMatches('a.dcinside.com', ['dcinside.com']), 'plugins: pattern match');
+  const base = { id: 'web-test', name: 'W', version: '1.0.0', api: 1, permissions: { net: ['a.example.com'], web: 'domain' } };
+  const r = parseManifest(JSON.stringify(base), 'web-test');
+  check(r.ok && r.manifest.permissions.web === 'domain', 'plugins: web is parsed');
+  check(!parseManifest(JSON.stringify({ ...base, permissions: { web: 'all' } }), 'web-test').ok, 'plugins: web must be host or domain');
+  check(missing(r.manifest, {}).some(x => x.perm === 'web'), 'plugins: web asked and not allowed is missing');
+  check(effective(r.manifest, { net: ['a.example.com'], web: 'host' }).web === 'host' && effective(r.manifest, { net: ['a.example.com'], web: 'domain' }).web === 'domain'
+    && effective(parseManifest(JSON.stringify({ ...base, permissions: { net: ['a.example.com'], web: 'host' } }), 'web-test').manifest, { net: ['a.example.com'], web: 'domain' }).web === 'host', 'plugins: the user may narrow domain to host, not widen host to domain');
 }

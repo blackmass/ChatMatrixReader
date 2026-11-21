@@ -46,7 +46,9 @@ const PERMS = {
   windows: () => tr('플러그인 전용 창 열기'),
   netAny: () => tr('원하는 사이트에 접속 (사이트는 하나씩 허용)'),
   openUrl: () => tr('기본 브라우저로 주소 열기'),
+  web: () => tr('웹 페이지를 플러그인 창으로 보기'),
 };
+const SCOPES = () => [['host', tr('허용한 사이트 안에서만 이동')], ['domain', tr('허용한 사이트의 도메인 전체 (하위 사이트 포함)')]];
 const pendingList = () => state.filter(x => x.review && x.ok && !decided.has(x.id)).sort((a, b) => a.id.localeCompare(b.id));
 const nameOf = p => (p.manifest && p.manifest.name) || p.id;
 
@@ -62,6 +64,7 @@ const asks = p => {
   if (m.permissions.widgets) out.push({ key: 'widgets', label: PERMS.widgets(), reason: m.reasons.widgets });
   if (m.permissions.windows) out.push({ key: 'windows', label: PERMS.windows(), reason: m.reasons.windows });
   if (m.permissions.openUrl) out.push({ key: 'openUrl', label: PERMS.openUrl(), reason: m.reasons.openUrl });
+  if (m.permissions.web) out.push({ key: 'web', label: PERMS.web(), reason: m.reasons.web, scope: m.permissions.web });
   return out;
 };
 
@@ -70,6 +73,7 @@ const asks = p => {
 function permBoxes(p, start, onChange) {
   const root = el('div', 'pl-perms');
   const boxes = [];
+  let scopeSel = null;
   for (const a of asks(p)) {
     const block = el('div', 'pl-perm');
     const head = el('div', 'pl-perm-head');
@@ -80,6 +84,13 @@ function permBoxes(p, start, onChange) {
     }
     block.append(head);
     if (a.reason) block.append(el('small', 'note', a.reason));
+    if (a.scope) {                                     // (web: how far the window may go; the plugin asks for 'host' or 'domain', the user may take 'domain' down to 'host')
+      const sel = el('select'); sel.dataset.webScope = '1';
+      for (const [v, t] of SCOPES()) if (a.scope === 'domain' || v === 'host') sel.append(Object.assign(el('option', '', t), { value: v }));
+      sel.value = start.web === 'host' ? 'host' : a.scope === 'domain' ? 'domain' : 'host';
+      sel.onchange = () => onChange && onChange();
+      block.append(sel); scopeSel = sel;
+    }
     if (a.hosts) for (const h of a.hosts) {
       const lab = el('label', 'pl-host'), box = el('input'); box.type = 'checkbox'; box.checked = (start.net || []).includes(h); box.dataset.host = h; box.onchange = () => onChange && onChange();
       lab.append(box, el('code', '', ' ' + h)); block.append(lab); boxes.push(box);
@@ -87,7 +98,7 @@ function permBoxes(p, start, onChange) {
     root.append(block);
   }
   if (!asks(p).length) root.append(el('small', 'note', tr('이 플러그인은 특별한 권한을 요구하지 않습니다.')));
-  return { root, granted: () => ({ net: boxes.filter(b => b.dataset.host && b.checked).map(b => b.dataset.host), 'chat.inject': !!boxes.find(b => b.dataset.key === 'chat.inject' && b.checked), storage: !!boxes.find(b => b.dataset.key === 'storage' && b.checked), netAny: !!boxes.find(b => b.dataset.key === 'netAny' && b.checked), openUrl: !!boxes.find(b => b.dataset.key === 'openUrl' && b.checked), widgets: !!boxes.find(b => b.dataset.key === 'widgets' && b.checked), windows: !!boxes.find(b => b.dataset.key === 'windows' && b.checked) }) };
+  return { root, granted: () => ({ net: boxes.filter(b => b.dataset.host && b.checked).map(b => b.dataset.host), 'chat.inject': !!boxes.find(b => b.dataset.key === 'chat.inject' && b.checked), storage: !!boxes.find(b => b.dataset.key === 'storage' && b.checked), netAny: !!boxes.find(b => b.dataset.key === 'netAny' && b.checked), openUrl: !!boxes.find(b => b.dataset.key === 'openUrl' && b.checked), widgets: !!boxes.find(b => b.dataset.key === 'widgets' && b.checked), windows: !!boxes.find(b => b.dataset.key === 'windows' && b.checked), web: boxes.find(b => b.dataset.key === 'web' && b.checked) && scopeSel ? scopeSel.value : '' }) };
 }
 
 // ---------------------------------------------------------------- the window that asks (a plugin nobody decided about yet)
@@ -106,7 +117,7 @@ function showApproval(p, opts = {}) {
   card.append(el('small', 'note', [m.author ? tr('만든 이: {a}', { a: m.author }) : '', tr('버전 {v}', { v: m.version })].filter(Boolean).join(' · ')));
   if (m.description) card.append(el('p', 'pl-desc', m.description));
   card.append(el('p', 'pl-ask', tr('이 플러그인이 요구하는 권한입니다. 허용할 것을 고르세요:')));
-  const start = { net: m.permissions.net, 'chat.inject': m.permissions['chat.inject'], storage: m.permissions.storage, widgets: m.permissions.widgets, windows: m.permissions.windows, netAny: m.permissions.netAny, openUrl: m.permissions.openUrl };      // (everything it asks is checked at first, the user may take some away)
+  const start = { net: m.permissions.net, 'chat.inject': m.permissions['chat.inject'], storage: m.permissions.storage, widgets: m.permissions.widgets, windows: m.permissions.windows, netAny: m.permissions.netAny, openUrl: m.permissions.openUrl, web: m.permissions.web };      // (everything it asks is checked at first, the user may take some away)
   const boxes = permBoxes(p, start);
   card.append(boxes.root);
   card.append(el('small', 'note pl-warn', tr('플러그인은 격리된 곳에서 실행되고 허용한 권한만 쓸 수 있습니다. 믿을 수 있는 곳에서 받은 플러그인인지 확인하세요. 권한은 나중에 이 탭에서 바꿀 수 있습니다.')));
@@ -264,7 +275,7 @@ function panel() {
 
     // permissions
     detail.append(el('h4', 'pl-h', tr('권한')));
-    const start = { net: p.granted.net || [], 'chat.inject': !!p.granted['chat.inject'], storage: !!p.granted.storage, widgets: !!p.granted.widgets, windows: !!p.granted.windows, netAny: !!p.granted.netAny, openUrl: !!p.granted.openUrl };
+    const start = { net: p.granted.net || [], 'chat.inject': !!p.granted['chat.inject'], storage: !!p.granted.storage, widgets: !!p.granted.widgets, windows: !!p.granted.windows, netAny: !!p.granted.netAny, openUrl: !!p.granted.openUrl, web: p.granted.web || '' };
     const boxes = permBoxes(p, start, () => ask('grant', p.id, { granted: boxes.granted() }));
     detail.append(boxes.root);
     // netAny: the hosts the user allows one by one, and the ones the plugin has asked for and wait for an answer
@@ -289,6 +300,19 @@ function panel() {
       inp.type = 'text'; inp.placeholder = 'example.com'; inp.dataset.hostAdd = '1';
       addBtn.onclick = async () => { const r = await ask('grantHost', p.id, { host: inp.value.trim() }); if (r.error) { inp.classList.add('bad'); inp.title = r.error; } else inp.value = ''; };
       add.append(inp, addBtn); detail.append(add);
+    }
+    // the web window: what the user chose for it (kept per plugin)
+    if (p.manifest.permissions.web && p.granted.web) {
+      detail.append(el('h4', 'pl-h', tr('웹 창')));
+      const rows = [['topmost', tr('항상 위에 표시')], ['wow', tr('와우 위에서만 표시 (항상 위가 꺼져 있을 때)')], ['through', tr('클릭 통과 (마우스가 창을 뚫고 지나감)')], ['lock', tr('위치·크기 잠금')], ['cookies', tr('로그인 정보(쿠키) 유지 — 켜면 이 플러그인 전용으로 저장됩니다')]];
+      for (const [k, t] of rows) {
+        const lab = el('label', 'pl-webopt'), cb = el('input'); cb.type = 'checkbox'; cb.checked = !!(p.web && p.web[k]); cb.dataset.web = k;
+        cb.onchange = () => ask('web', p.id, { key: k, value: cb.checked });
+        lab.append(cb, el('span', '', ' ' + t)); detail.append(lab);
+      }
+      const clr = el('button', 'btn', tr('저장된 로그인 정보 지우기')); clr.disabled = !p.webOpen; clr.title = p.webOpen ? '' : tr('웹 창이 열려 있을 때 지울 수 있습니다');
+      clr.onclick = async () => { const r = await ask('webClear', p.id, {}); clr.textContent = r && r.error ? tr('지우지 못했습니다') : tr('지웠습니다'); };
+      detail.append(clr);
     }
     if (p.missing.length) detail.append(el('small', 'note pl-missing', tr('요구하는 권한 중 허용하지 않은 것이 있습니다. 허용하지 않은 것은 쓸 수 없습니다.')));
 

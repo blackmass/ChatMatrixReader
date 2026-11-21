@@ -52,7 +52,7 @@ function grabBytes(x, y, w, h) {
 }
 const BY_OWNER = true;                                              // (the default way of "just above the game")
 const topCalls = [], raised = [];
-const pluginFetches = [], pluginOpened = [];
+const pluginFetches = [], pluginOpened = [], webCalls = [];
 const opened = [], owners = [], placed = [], watched = [], trayTexts = [];
 let gameGone = false;
 const zoneCalls = [];                                 // what the page asked of the wheel hook (wheel_zone)
@@ -69,6 +69,13 @@ async function invoke(cmd, a = {}) {
     case 'plugin_token': return 'tok-' + a.id;
     case 'plugin_forget': return null;
     case 'plugin_open_url': pluginOpened.push(a); return null;
+    case 'web_open': webCalls.push(['open', a.args]); return null;
+    case 'web_close': webCalls.push(['close', a.label]); return null;
+    case 'web_allow': webCalls.push(['allow', a.allow]); return null;
+    case 'web_info': return { exists: true, visible: true, position: [100, 50], size: [360, 640] };
+    case 'web_tick': case 'web_ignore': case 'web_lock': return null;
+    case 'web_blocked': return [];
+    case 'web_clear': webCalls.push(['clear', a.label]); return null;
     case 'plugin_hash': return { hash: 'abc', files: [] };
     case 'plugin_fetch': pluginFetches.push(a); return { status: 200, body: '<html>list</html>', url: a.url, type: 'text/html' };
     case 'app_folder': return 'C:\\fake\\ChatMatrixReader';
@@ -1124,7 +1131,7 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
 {
   const PID = 'e2e-plugin-0123456789abcdef';
   files.set(`plugins/${PID}/plugin.json`, JSON.stringify({ id: PID, name: '시험 플러그인', version: '1.0.0', api: 1,
-    permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true }, reasons: { net: 'a', netAny: 'f', 'chat.inject': 'b', storage: 'c', widgets: 'd', windows: 'e', openUrl: 'g' }, options: [{ key: 'n', type: 'number', default: 3 }],
+    permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, reasons: { net: 'a', netAny: 'f', 'chat.inject': 'b', storage: 'c', widgets: 'd', windows: 'e', openUrl: 'g', web: 'h' }, options: [{ key: 'n', type: 'number', default: 3 }],
     windows: [{ id: 'main', title: '플러그인 창', page: 'window.html', width: 300, height: 200 }] }));
   files.set('plugins/broken-one/plugin.json', '{ not json');
   files.set('plugins/not-a-plugin/readme.txt', 'x');
@@ -1132,9 +1139,9 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   const KEY = await control.evaluate(id => import('./core/plugins.js').then(p => p.permsKey(window.cmrHub.plugins.registry.get(id).manifest)), PID);       // (the user has decided about it: no window asks)
   const list = () => control.evaluate(() => window.cmrHub.plugins.list().map(p => ({ id: p.id, ok: p.ok, running: p.running, enabled: p.enabled, missing: p.missing.length, errors: p.errors.length })));
   const l0 = await list();
-  ok(l0.find(p => p.id === PID).ok && l0.find(p => p.id === PID).missing === 7 && !l0.find(p => p.id === PID).running, 'plugins: a good plugin is found; nothing is allowed yet (7 to approve), it is not running: ' + JSON.stringify(l0));
+  ok(l0.find(p => p.id === PID).ok && l0.find(p => p.id === PID).missing === 8 && !l0.find(p => p.id === PID).running, 'plugins: a good plugin is found; nothing is allowed yet (8 to approve), it is not running: ' + JSON.stringify(l0));
   ok(l0.find(p => p.id === 'broken-one').ok === false && l0.find(p => p.id === 'not-a-plugin').errors === 1, 'plugins: a broken plugin.json and a folder without one are found, with errors');
-  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true }, options: { n: 7 } } } })), [PID, KEY]);
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, options: { n: 7 } } } })), [PID, KEY]);
   await control.waitForTimeout(600);
   const fr = await control.evaluate(id => { const f = document.querySelector(`#plugin-frames iframe[data-plugin="${id}"]`); return f ? { sandbox: f.getAttribute('sandbox'), src: f.src } : null; }, PID);
   ok(fr && fr.sandbox === 'allow-scripts' && fr.src === `http://cmrplug.localhost/tok-${PID}/background.html`, 'plugins: enabled: it runs in a sandboxed frame at its own address: ' + JSON.stringify(fr));
@@ -1152,6 +1159,12 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   ok(pluginFetches.filter(f => f.url === 'https://example.com/list').at(-1).headers.some(([k, v]) => k === 'User-Agent' && v.includes('Mozilla/5.0')) && pluginFetches.at(-1).headers.some(([k]) => k === 'Accept-Language'), 'plugins: a request looks like a browser one (User-Agent, Accept-Language) unless the plugin says otherwise');
   ok(r4.ok && r4.value.status === 200 && pluginFetches.at(-1).hosts.join() === 'example.com' && r5.ok === false && r5.error.code === 'denied', 'plugins: net.fetch to an allowed host goes through the exe command with the hosts; another host is denied: ' + JSON.stringify(r5));
   const r6 = await asked('options.get'); ok(r6.ok && r6.value.n === 7, 'plugins: the options of the user reach the plugin');
+  // web: the page in a window of the program: only https and a host the permission covers (the domain of an allowed host when the user said so)
+  const w1 = await asked('web.open', { url: 'https://m.example.com/view?no=3', title: 'x' }); const w2 = await asked('web.open', { url: 'https://evil.org/' });
+  const wo = webCalls.find(c => c[0] === 'open');
+  ok(w1.ok && wo && wo[1].url === 'https://m.example.com/view?no=3' && wo[1].allow.join() === '*.example.com' && wo[1].ua.includes('iPhone') && wo[1].persist === false && wo[1].label.startsWith('web_') && w2.ok === false && w2.error.code === 'denied', 'plugins/web: the address goes to the exe with the domain pattern, a mobile agent and no cookies; another host is denied');
+  const wc = await asked('web.close', {});
+  ok(wc.ok && webCalls.some(c => c[0] === 'close'), 'plugins/web: close goes to the exe');
   // openUrl: an address goes to the browser of the user, only for an allowed host over https
   const ou = await asked('openUrl', { url: 'https://example.com/view?no=3' }); const ou2 = await asked('openUrl', { url: 'https://evil.org/' });
   ok(ou.ok && pluginOpened.at(-1).url === 'https://example.com/view?no=3' && pluginOpened.at(-1).hosts.includes('example.com') && ou2.ok === false && ou2.error.code === 'denied', 'plugins/openUrl: an address of an allowed host goes to the exe command, another one is denied');
@@ -1199,7 +1212,7 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   await tick(12000);
   await control.evaluate(() => { window.cmrHub.plugins.watch = false; window.cmrHub.plugins.dog.timeoutMs = 20000; });
   ok((await control.evaluate(id => window.cmrHub.plugins.logs.get(id) || [], PID)).some(l => l.includes('did not answer')), 'plugins/watchdog: a page that does not answer is started again (the log says so)');
-  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true }, options: { n: 7 } } } })), [PID, KEY]);
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, options: { n: 7 } } } })), [PID, KEY]);
   await control.waitForTimeout(500);
   // a message from anything that is not the frame of a plugin is ignored
   const stray = await control.evaluate(() => new Promise(res => { const t = setTimeout(() => res('ignored'), 300); const old = window.cmrHub.plugins.post.send; window.cmrHub.plugins.post.send = () => { clearTimeout(t); window.cmrHub.plugins.post.send = old; res('answered'); };

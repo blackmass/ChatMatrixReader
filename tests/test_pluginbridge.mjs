@@ -5,14 +5,14 @@ import { check, eq } from './helpers.mjs';
 
 const ID = 'bridge-test-plugin-0123456789';
 const manifest = parseManifest(JSON.stringify({ id: ID, name: 'T', version: '1.0.0', api: 1,
-  permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true }, reasons: { net: 'a', 'chat.inject': 'b', storage: 'c', widgets: 'd', windows: 'e', openUrl: 'g' }, windows: [{ id: 'main', page: 'w.html' }],
+  permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, reasons: { net: 'a', 'chat.inject': 'b', storage: 'c', widgets: 'd', windows: 'e', openUrl: 'g' }, windows: [{ id: 'main', page: 'w.html' }],
   options: [{ key: 'url', type: 'text', default: 'u' }, { key: 'n', type: 'number', default: 3 }] }), ID).manifest;
-const all = { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true };
+const all = { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' };
 let clock = 0;
 const make = (granted = all, extra = {}) => {
   const log = { injected: [], fetched: [], saved: [], logs: [] };
   const hooks = { inject: l => log.injected.push(l), fetch: async (r, hosts) => { log.fetched.push([r, hosts]); return { status: 200, body: 'ok', url: r.url, type: 'text/html' }; },
-    log: t => log.logs.push(t), load: async () => extra.stored ?? null, save: async o => { log.saved.push(o); }, setOptions: async o => { (log.options = log.options || []).push(o); }, widgetRegister: d => (log.defs = log.defs || []).push(d), widgetUpdate: (id, p) => (log.states = log.states || []).push([id, p]), widgetUnregister: id => (log.gone = log.gone || []).push(id), openUrl: async (u, hosts) => (log.opened = log.opened || []).push([u, hosts]), requestHost: async h => { (log.requests = log.requests || []).push(h); return 'pending'; }, windowOpen: async id => (log.wins = log.wins || []).push(['open', id]), windowClose: async id => (log.wins = log.wins || []).push(['close', id]), sleep: extra.sleep || (async ms => { clock += ms; }) };
+    log: t => log.logs.push(t), load: async () => extra.stored ?? null, save: async o => { log.saved.push(o); }, setOptions: async o => { (log.options = log.options || []).push(o); }, widgetRegister: d => (log.defs = log.defs || []).push(d), widgetUpdate: (id, p) => (log.states = log.states || []).push([id, p]), widgetUnregister: id => (log.gone = log.gone || []).push(id), webOpen: async (r, pat) => (log.webs = log.webs || []).push(['open', r, pat]), webClose: async () => (log.webs = log.webs || []).push(['close']), openUrl: async (u, hosts) => (log.opened = log.opened || []).push([u, hosts]), requestHost: async h => { (log.requests = log.requests || []).push(h); return 'pending'; }, windowOpen: async id => (log.wins = log.wins || []).push(['open', id]), windowClose: async id => (log.wins = log.wins || []).push(['close', id]), sleep: extra.sleep || (async ms => { clock += ms; }) };
   return { b: new PluginBridge({ manifest, granted, hooks, options: extra.options, now: () => clock }), log };
 };
 const code = async p => { try { await p; return 'ok'; } catch (e) { return e instanceof PluginError ? e.code : 'other:' + e; } };
@@ -27,7 +27,7 @@ const code = async p => { try { await p; return 'ok'; } catch (e) { return e ins
   eq(await code(b.call('chat.inject', { text: 'x' })), 'denied', 'bridge: chat.inject is denied without the permission');
   eq(await code(b.call('storage.get', { key: 'a' })), 'denied', 'bridge: storage is denied');
   eq(await code(b.call('net.fetch', { url: 'https://example.com/' })), 'denied', 'bridge: net.fetch is denied');
-  eq((await b.call('meta')).allowed, { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false, openUrl: false }, 'bridge: meta tells what is allowed');
+  eq((await b.call('meta')).allowed, { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false, openUrl: false, web: "" }, 'bridge: meta tells what is allowed');
   eq(await code(b.call('nothing')), 'args', 'bridge: an unknown call');
 }
 { // chat.inject: the plugin may call as often as it likes; the lines go out one by one, spaced (a queue), and what does not fit is dropped and told
@@ -163,5 +163,18 @@ const code = async p => { try { await p; return 'ok'; } catch (e) { return e ins
   eq(await code(b.call('openUrl', {})), 'args', 'bridge: openUrl needs an url');
   for (let i = 0; i < LIMITS.openUrlPerMin - 1; i++) await b.call('openUrl', { url: 'https://example.com/' + i });
   eq(await code(b.call('openUrl', { url: 'https://example.com/more' })), 'limit', 'bridge: openUrl is limited');
-  eq(await code(make({ ...all, openUrl: false }).b.call('openUrl', { url: 'https://example.com/' })), 'denied', 'bridge: openUrl is denied without the permission');
+  eq(await code(make({ ...all, openUrl: false, web: "" }).b.call('openUrl', { url: 'https://example.com/' })), 'denied', 'bridge: openUrl is denied without the permission');
+}
+
+{ // web.open: the page in a window of the program (https, a host the web permission covers)
+  const { b, log } = make();
+  await b.call('web.open', { url: 'https://m.example.com/a?x=1', title: 'T' });
+  eq(log.webs[0][1], { url: 'https://m.example.com/a?x=1', title: 'T', mobile: true }, 'bridge: web.open passes the address');
+  eq(log.webs[0][2], ['*.example.com'], 'bridge: web.open tells the window where it may go (domain)');
+  for (const bad of ['http://example.com/', 'https://evil.org/', 'https://example.com.evil.org/', 'https://u:p@example.com/', 'javascript:1', 'nonsense']) eq(await code(b.call('web.open', { url: bad })), bad === 'nonsense' ? 'args' : 'denied', 'bridge: web.open refuses ' + bad);
+  await b.call('web.close', {}); eq(log.webs[1][0], 'close', 'bridge: web.close');
+  const h = make({ ...all, web: 'host' });
+  eq(await code(h.b.call('web.open', { url: 'https://m.example.com/' })), 'denied', 'bridge: with "host" only the allowed host');
+  await h.b.call('web.open', { url: 'https://example.com/' }); eq(h.log.webs[0][2], ['example.com'], 'bridge: web.open with host scope');
+  eq(await code(make({ ...all, web: '' }).b.call('web.open', { url: 'https://example.com/' })), 'denied', 'bridge: web.open without the permission');
 }

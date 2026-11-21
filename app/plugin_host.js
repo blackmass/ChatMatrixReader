@@ -10,6 +10,8 @@ import { Watchdog, PING_MS } from './core/watchdog.js';
 import { PluginBridge, PluginError } from './core/pluginbridge.js';
 import { log } from './core/log.js';
 import { isMac } from './platform.js';
+import { createWebHost } from './web_host.js';
+import { webPatterns } from './core/plugins.js';
 
 const LOG_KEEP = 200;
 // what makes a plugin restart when it changes: the permissions (the hosts of netAny are not: they are changed while it runs)
@@ -42,7 +44,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   function summary(id) {
     const r = registry.get(id), e = entry(id);
     return { id, ok: !!(r && r.ok), errors: r ? r.errors : [], warnings: r ? r.warnings : [], manifest: r ? r.manifest : null, enabled: !!e.enabled, running: running.has(id),
-      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, requested: Array.isArray(e.requested) ? e.requested : [], options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
+      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, requested: Array.isArray(e.requested) ? e.requested : [], web: { topmost: true, wow: false, through: false, lock: false, cookies: false, ...(e.web || {}) }, webOpen: web.isOpen(id), options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
       review: !!(r && r.ok && e.asked !== permsKey(r.manifest)) };       // review: nobody has decided about what it asks for yet (the options window asks the user, one plugin after the other)
   }
   const allIds = () => [...new Set([...registry.keys(), ...Object.keys(entries())])].sort();
@@ -91,6 +93,8 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
         return 'pending';
       },
       openUrl: async (url, hosts) => { await invoke('plugin_open_url', { url, hosts }); note(id, 'opened in the browser: ' + url); },
+      webOpen: (req, patterns) => web.open(id, req, patterns),
+      webClose: () => web.close(id),
       windowOpen: async name => { await ensureWindows(id); const c = windowEntry(id, name); if (c && windows) windows.openWindow(c.id); },
       windowClose: async name => { const c = windowEntry(id, name); if (c && windows) windows.closeWindow(c.id); },
       widgetRegister: def => { if (!widgets) throw new Error('the widgets of the program are not there'); widgets.registerDef(def); note(id, `widget registered: ${def.id}`); },
@@ -101,6 +105,8 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       flush,
     };
   }
+
+  const web = createWebHost({ getEntry: entry, patchEntry, invoke, note, wowTitle: () => settings.cfg().wow_window_title || 'World of Warcraft' });
 
   // One bridge for a plugin (its background page and its options page in the options window share it: one storage, one set of limits); a new one when the allowed permissions change
   const bridges = new Map();                   // id -> { key, bridge, hooks }
@@ -158,6 +164,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     if (!run) return;
     running.delete(id); dog.forget(id);
     run.bridge.shutdown();
+    await web.close(id);                                                   // (its web window goes with it)
     try { await run.hooks.flush(); } catch { /* reported */ }
     run.frame.remove();
     invoke('plugin_forget', { id }).catch(() => {});
@@ -174,6 +181,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       if (restKey(e.granted) !== run.granted) { await stopOne(id, 'restarted: the allowed permissions changed'); continue; }
       const hosts = JSON.stringify(run.bridge.eff.net);
       run.bridge.setGranted(r.manifest, e.granted);
+      if (JSON.stringify(run.bridge.eff.net) !== hosts) web.allow(id, webPatterns(run.bridge.eff.net, run.bridge.eff.web));      // (a host taken away: the web window may not go there any more)
       if (JSON.stringify(run.bridge.eff.net) !== hosts) sendTo(run.frame, { cmr: 1, event: 'hosts', value: run.bridge.eff.net });       // (the plugin is told: it may fetch now)
       if (JSON.stringify(e.options || {}) !== run.options) {                // (the options changed: the plugin is told; it keeps running)
         run.options = JSON.stringify(e.options || {});
@@ -256,6 +264,13 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
         else patchEntry(id, { requested });
         return reply({});
       }
+      if (cmd === 'web') {                                                 // what the user chose for the web window: topmost, wow, through, lock, cookies (only these keys)
+        const k = String(ev.payload.key || '');
+        if (!['topmost', 'wow', 'through', 'lock', 'cookies'].includes(k)) return reply({ error: 'no such setting' });
+        patchEntry(id, { web: { ...(entry(id).web || {}), [k]: !!ev.payload.value } });
+        return reply({});
+      }
+      if (cmd === 'webClear') { if (!web.isOpen(id)) return reply({ error: 'open' }); await web.clearData(id); note(id, 'cookies and stored data of the web window cleared'); return reply({}); }
       if (cmd === 'hash') return reply(await invoke('plugin_hash', { id }));
       if (cmd === 'logs') return reply({ lines: logs.get(id) || [] });
     } catch (err) { reply({ error: String((err && err.message) || err) }); }

@@ -9,7 +9,7 @@
 export const API_VERSION = 1;                         // the version of the plugin interface this program speaks
 export const MAX_OPTIONS = 50;
 export const MAX_WINDOWS = 3;
-export const PERMISSIONS = ['net', 'netAny', 'chat.inject', 'storage', 'widgets', 'windows', 'openUrl'];
+export const PERMISSIONS = ['net', 'netAny', 'chat.inject', 'storage', 'widgets', 'windows', 'openUrl', 'web'];
 export const MAX_USER_HOSTS = 30;                    // the hosts the user may allow for one plugin (netAny)
 export const MAX_REQUESTS = 10;                      // requests of hosts that wait for the user's answer      // (a timer is not a permission: a plugin has its own setInterval; what costs is limited where it is called)
 export const OPTION_TYPES = ['text', 'number', 'check', 'select'];
@@ -106,7 +106,7 @@ export function parseManifest(text, folder) {
   }
 
   // permissions: only the known ones, in the exact shape
-  const perms = { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false, openUrl: false };
+  const perms = { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false, openUrl: false, web: '' };
   const p = m.permissions === undefined ? {} : m.permissions;
   if (!isObj(p)) errors.push('permissions: must be an object');
   else {
@@ -118,6 +118,7 @@ export function parseManifest(text, folder) {
         else if (!perms.net.includes(h)) perms.net.push(h);
       }
     }
+    if (p.web !== undefined) { if (p.web === 'host' || p.web === 'domain') perms.web = p.web; else if (p.web !== false) errors.push('permissions.web: "host" (only the hosts the plugin may use) or "domain" (those hosts and all hosts under their domains)'); }
     for (const k of ['netAny', 'chat.inject', 'storage', 'widgets', 'windows', 'openUrl']) if (p[k] !== undefined) { if (typeof p[k] !== 'boolean') errors.push(`permissions.${k}: true or false`); else perms[k] = p[k]; }
   }
   const reasons = {};
@@ -137,8 +138,11 @@ export function parseManifest(text, folder) {
 // the permissions a manifest asks for, by name (net counts when it names a host)
 export const asked = perms => PERMISSIONS.filter(k => (k === 'net' ? perms.net.length > 0 : !!perms[k]));
 
+// the scope of the web window the user allowed ('' none, 'host', 'domain'): never wider than the manifest asked for
+const webOf = (asked, g) => (asked && (g === 'host' || g === 'domain') ? (asked === 'host' ? 'host' : g) : '');
+
 // granted: what the user allowed, kept in the settings: { net: [host...], 'chat.inject': bool, storage: bool }
-const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net.filter(validHost).slice(0, MAX_USER_HOSTS + 20) : [], netAny: !!(g && g.netAny), 'chat.inject': !!(g && g['chat.inject']), storage: !!(g && g.storage), widgets: !!(g && g.widgets), windows: !!(g && g.windows), openUrl: !!(g && g.openUrl) });
+const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net.filter(validHost).slice(0, MAX_USER_HOSTS + 20) : [], netAny: !!(g && g.netAny), 'chat.inject': !!(g && g['chat.inject']), storage: !!(g && g.storage), widgets: !!(g && g.widgets), windows: !!(g && g.windows), openUrl: !!(g && g.openUrl), web: g && (g.web === 'host' || g.web === 'domain') ? g.web : '' });
 
 // what is asked for and not yet allowed: [{ perm, host? }]
 export function missing(manifest, granted) {
@@ -150,6 +154,7 @@ export function missing(manifest, granted) {
   if (p.widgets && !g.widgets) out.push({ perm: 'widgets' });
   if (p.windows && !g.windows) out.push({ perm: 'windows' });
   if (p.openUrl && !g.openUrl) out.push({ perm: 'openUrl' });
+  if (p.web && !g.web) out.push({ perm: 'web' });
   return out;
 }
 
@@ -158,7 +163,7 @@ export function effective(manifest, granted) {
   const g = grantedOf(granted), p = manifest.permissions;
   // netAny: besides the hosts of the manifest, the hosts the user allowed one by one (they are in granted.net)
   const netAny = !!(p.netAny && g.netAny);
-  return { net: netAny ? g.net.slice(0, MAX_USER_HOSTS + p.net.length) : p.net.filter(h => g.net.includes(h)), netAny, 'chat.inject': p['chat.inject'] && g['chat.inject'], storage: p.storage && g.storage, widgets: p.widgets && g.widgets, windows: p.windows && g.windows, openUrl: p.openUrl && g.openUrl };
+  return { net: netAny ? g.net.slice(0, MAX_USER_HOSTS + p.net.length) : p.net.filter(h => g.net.includes(h)), netAny, 'chat.inject': p['chat.inject'] && g['chat.inject'], storage: p.storage && g.storage, widgets: p.widgets && g.widgets, windows: p.windows && g.windows, openUrl: p.openUrl && g.openUrl, web: webOf(p.web, g.web) };
 }
 
 // is this address one the plugin may fetch? (https only; the host must be one of the allowed ones, exactly)
@@ -169,7 +174,7 @@ export function netAllowed(eff, url) {
 }
 
 // what a plugin asks for, as one text: when it changes (a new permission, a new host), the user is asked again
-export const permsKey = manifest => JSON.stringify([manifest.id, [...manifest.permissions.net].sort(), !!manifest.permissions['chat.inject'], !!manifest.permissions.netAny, !!manifest.permissions.storage, !!manifest.permissions.widgets, !!manifest.permissions.windows, !!manifest.permissions.openUrl, (manifest.windows || []).map(w => w.id).sort()]);
+export const permsKey = manifest => JSON.stringify([manifest.id, [...manifest.permissions.net].sort(), !!manifest.permissions['chat.inject'], !!manifest.permissions.netAny, !!manifest.permissions.storage, !!manifest.permissions.widgets, !!manifest.permissions.windows, !!manifest.permissions.openUrl, manifest.permissions.web || '', (manifest.windows || []).map(w => w.id).sort()]);
 
 // a value of an option, made right for its declaration (a wrong one becomes the default)
 export function cleanOptionValue(def, v) {
@@ -200,4 +205,28 @@ export function optionValues(manifest, saved) {
     out[k] = JSON.parse(t); n++; bytes += t.length;
   }
   return out;
+}
+
+// The registrable domain of a host (example.co.kr for a.b.example.co.kr): the last two labels, three when the last two are a known second level (co.kr ...).
+const SECOND_LEVEL = new Set(['co.kr', 'or.kr', 'ne.kr', 'go.kr', 'ac.kr', 're.kr', 'pe.kr', 'co.jp', 'or.jp', 'ne.jp', 'ac.jp', 'go.jp', 'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'com.tw', 'com.hk', 'com.sg', 'com.br', 'co.nz', 'co.in', 'com.mx']);
+export function registrableDomain(host) {
+  const parts = String(host).toLowerCase().replace(/\.$/, '').split('.');
+  if (parts.length <= 2) return parts.join('.');
+  return parts.slice(SECOND_LEVEL.has(parts.slice(-2).join('.')) ? -3 : -2).join('.');
+}
+
+// The addresses a web window may go to: the hosts the plugin may use; with 'domain' also every host under their domains ("*.example.com" = the domain itself and all below).
+export function webPatterns(hosts, scope) {
+  const out = [];
+  for (const h of hosts || []) {
+    const p = scope === 'domain' ? '*.' + registrableDomain(h) : String(h).toLowerCase();
+    if (scope && !out.includes(p)) out.push(p);
+  }
+  return out;
+}
+
+// The same test the program does in Rust (weblib::host_allowed): a pattern is a host, or "*.domain".
+export function hostMatches(host, patterns) {
+  const h = String(host).toLowerCase().replace(/\.$/, '');
+  return (patterns || []).some(p => (p.startsWith('*.') ? h === p.slice(2) || h.endsWith(p.slice(1)) : h === p));
 }
