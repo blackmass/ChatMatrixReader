@@ -223,6 +223,9 @@ pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64
             // window that was just clicked (the options window "hid"). Same as the translation windows (overlay.js zStep).
             1 | 21 => { win::set_topmost(h, true, 0); win::set_owner(h, 0); }
             23 => { win::set_owner(h, 0); win::set_topmost(h, true, 0); }
+            // From "one of our windows in front" (23): the window goes down to just above the game FIRST, then the owner is set. The other way round (owner first) re-ordered the
+            // windows when the owner of a topmost window changed, and the options window that stood above the game sank behind it.
+            22 if last == 23 => { win::set_topmost(h, false, g); win::set_owner(h, g); }
             _ => { win::set_owner(h, g); win::set_topmost(h, false, g); }
         }
     }

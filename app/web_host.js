@@ -9,7 +9,7 @@ const TICK_MS = 100, INFO_MS = 1000, GAME_MS = 2000, SAVE_MS = 1500, DEFAULT_W =
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };
 export const webLabel = id => 'web_' + String(id).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
 
-export function createWebHost({ getEntry, getConf, patchConf, invoke, note, wowTitle = () => 'World of Warcraft', setTimer = setInterval, clearTimer = clearInterval }) {
+export function createWebHost({ getKeys = () => ['Shift'], getEntry, getConf, patchConf, invoke, note, wowTitle = () => 'World of Warcraft', setTimer = setInterval, clearTimer = clearInterval }) {
   const open = new Map();                       // id -> { label, timers, game, ignore, lock, saveAt, last }
   // what the user chose (the window entry may not be there yet: the defaults of a new window)
   const opts = id => {
@@ -30,7 +30,13 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, wowT
       const w = opts(id);
       const mode = w.topmost ? 1 : w.wow ? 2 : 0;
       await call('web_tick', { mode, game: o.game || null }).catch(() => {});
-      if (w.through !== o.ignore) { o.ignore = w.through; await call('web_ignore', { on: w.through }).catch(() => {}); }
+      // click-through, except while the keys that make windows usable are held (the same keys as the other windows: Options > Window 1 "조작 키")
+      let ignore = w.through;
+      if (w.through) {
+        const keys = getKeys() || [], s = await invoke('os_state').catch(() => null);
+        if (s && keys.length && keys.every(k => s[String(k).toLowerCase()] === true)) ignore = false;
+      }
+      if (ignore !== o.ignore) { o.ignore = ignore; await call('web_ignore', { on: ignore }).catch(() => {}); }
       if (w.lock !== o.lock) { o.lock = w.lock; await call('web_lock', { on: w.lock }).catch(() => {}); }
     };
     const follow = async () => {
