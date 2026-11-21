@@ -476,6 +476,35 @@ pub fn make_no_key(hwnd: isize) {
         if let Ok(mut l) = NO_KEY.lock() { if !l.contains(&hwnd) { l.push(hwnd); } }
     });
 }
+// ---- LAB: the window of the web flickers when the game is clicked: what is its state, and which of these helps (bit 1: no show/hide animation, 2: ordered to the front at every
+// poll, 4: may not be hidden by the system)
+pub fn lab_diag(hwnd: isize) -> String {
+    on_main(|| unsafe {
+        let w = obj(hwnd);
+        let visible: Bool = msg_send![w, isVisible];
+        let occ: usize = msg_send![w, occlusionState];
+        let alpha: f64 = msg_send![w, alphaValue];
+        let level: isize = msg_send![w, level];
+        let space: Bool = msg_send![w, isOnActiveSpace];
+        let key: Bool = msg_send![w, isKeyWindow];
+        let active: Bool = msg_send![shared_app(), isActive];
+        let hides: Bool = msg_send![w, hidesOnDeactivate];
+        format!("visible={} occlusion={} alpha={:.2} level={} onActiveSpace={} key={} appActive={} hidesOnDeactivate={}", visible.as_bool() as u8, occ, alpha, level, space.as_bool() as u8, key.as_bool() as u8, active.as_bool() as u8, hides.as_bool() as u8)
+    })
+}
+pub fn lab_variant(hwnd: isize, v: u32) {
+    on_main(|| unsafe {
+        let w = obj(hwnd);
+        let anim: isize = if v & 1 != 0 { 2 } else { 0 };                                  // NSWindowAnimationBehaviorNone / Default
+        let _: () = msg_send![w, setAnimationBehavior: anim];
+        let hide: Bool = if v & 4 != 0 { Bool::NO } else { Bool::YES };
+        let _: () = msg_send![w, setCanHide: hide];
+    });
+}
+pub fn lab_extra(hwnd: isize, v: u32) {
+    if v & 2 != 0 { on_main(|| unsafe { let _: () = msg_send![obj(hwnd), orderFrontRegardless]; }); }
+}
+
 /// The page of the window has a text box that needs the keyboard (true), or it does not any more (false).
 pub fn allow_key(hwnd: isize, on: bool) {
     if let Ok(mut l) = KEY_ALLOWED.lock() { l.retain(|&h| h != hwnd); if on { l.push(hwnd); } }

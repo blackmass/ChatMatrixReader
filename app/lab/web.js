@@ -1,53 +1,44 @@
-// LAB (a test, to be removed): a frameless window of the web with a bar of ours drawn into it. Runs once at the start of the program when app/lab/RUN is there; writes logs/lab_web.txt.
+// LAB (a test, to be removed): the window of the web flickers on a Mac when the game is clicked. Runs once at the start when app/lab/RUN is there; writes logs/lab_web.txt.
 const T = globalThis.__TAURI__;
 if (!(T && await T.core.invoke('fs_kind', { path: 'app/lab/RUN' }).catch(() => '') === 'file')) throw new Error('lab off');
 const invoke = T.core.invoke;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const t0 = Date.now();
 const log = text => invoke('fs_append', { path: 'logs/lab_web.txt', text: text + '\n' }).catch(() => {});
+const stamp = () => String(Date.now() - t0).padStart(6, ' ') + ' ms';
 const L = 'labweb';
 const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
-const info = async tag => { try { const i = await invoke('lab_web_info', { label: L }); await log(`[${tag}] ${JSON.stringify({ exists: i.exists, url: i.url, position: i.position, size: i.size })}`); return i; } catch (e) { await log(`[${tag}] info failed: ${e}`); return null; } };
-const call = async (name, args) => invoke(name, { label: L, ...args }).catch(e => log(`   ${name} FAILED: ${e}`));
-const phase = async text => { await log(`>>> ${text}`); };
+const call = (name, args) => invoke(name, { label: L, ...args }).catch(e => log(`   ${name} FAILED: ${e}`));
 
-await log(`== lab web window ${new Date().toISOString()}  os=${await invoke('os_kind').catch(() => '?')}`);
+await log(`== lab web flicker ${new Date().toISOString()}  os=${await invoke('os_kind').catch(() => '?')}`);
 await sleep(6000);
-await log('open https://m.dcinside.com/ (a phone) at 200,120 size 360x640');
-try { await invoke('lab_web_open', { label: L, url: 'https://m.dcinside.com/', ua: MOBILE_UA, x: 200, y: 120, w: 360, h: 640 }); await log('opened'); }
-catch (e) { await log('OPEN FAILED: ' + e); throw e; }
-
-let game = null, wowOnly = false;
-// like a translation window: no activation from the start, and the style kept every poll; in "above the game only" the window is put right above the game over and over
-// (the window made itself such a window when it was opened, in Rust)
+await invoke('lab_web_open', { label: L, url: 'https://m.dcinside.com/', ua: MOBILE_UA, x: 200, y: 120, w: 360, h: 640 }).then(() => log('opened'), e => log('OPEN FAILED: ' + e));
+await call('lab_web_z', { topmost: true, game: 0, owner: 0 });
 let alive = true;
-const ticker = setInterval(() => { if (alive) call('lab_web_tick', { game: wowOnly && game ? game.hwnd : 0 }); }, 100);
-const steps = {
-  5: async () => phase('(no-activate is ON all the time, like a translation window.) LOOK: is there a bar of ours at the top (title + x)? does the page look like a phone page? drag the bar: does the window move? resize at the edges? press x only at the end'),
-  10: async () => { await phase('TOPMOST ON: the window must stay above other programs (click another program: it must not cover this window)'); await call('lab_web_z', { topmost: true, game: 0, owner: 0 }); },
-  25: async () => { await phase('TOPMOST OFF: now another program may cover it'); await call('lab_web_z', { topmost: false, game: 0, owner: 0 }); },
-  30: async () => {
-    game = await invoke('find_game', { known: null, title: 'World of Warcraft' }).catch(() => null);
-    if (!game) return phase('WOW-ONLY: no game window found: skipped');
-    await phase(`WOW-ONLY (owner = the game ${game.hwnd}): it must stay right above the game and go behind a program that covers the game`);
-    wowOnly = true;
-    await call('lab_web_z', { topmost: false, game: game.hwnd, owner: game.hwnd });
-  },
-  50: async () => { wowOnly = false; await phase('TOPMOST ON again, no owner'); await call('lab_web_z', { topmost: true, game: 0, owner: 0 }); },
-  55: async () => { await phase('CLICK-THROUGH ON: the mouse goes through the window to what is behind it (for 10 s)'); await call('lab_web_ignore', { on: true }); },
-  65: async () => { await phase('CLICK-THROUGH OFF'); await call('lab_web_ignore', { on: false }); },
-  70: async () => { await phase('KEYBOARD TEST (20 s): 1) click on the PAGE (not on a text box) while you hold W/A/S/D in the game: the game must KEEP the keyboard. 2) click on a TEXT BOX of the page (the search box): typing must go to the page. 3) then click in the game: the keyboard must be the game\'s again, the window must not hide'); },
-  90: async () => { await phase('end of the keyboard test'); },
-};
-for (let t = 5; t <= 120; t += 5) {
-  await sleep(5000);
-  if (steps[t]) await steps[t]();
-  const i = await info('t+' + t);
-  if (i && !i.exists) { alive = false; await log('the window is gone (closed by the x?)'); break; }
+const ticker = setInterval(() => { if (alive) call('lab_web_tick', { game: 0 }); }, 100);
+// every change of the state of the window is written with its time: a hide shows as visible=0 or a change of occlusion / alpha / level / space
+let last = '';
+const watcher = setInterval(async () => {
+  if (!alive) return;
+  const s = await invoke('lab_web_diag', { label: L }).catch(() => '');
+  if (s && s !== last) { last = s; await log(`${stamp()}  ${s}`); }
+}, 60);
+
+const phases = [
+  [0, 'PHASE 0 (nothing changed): click inside the GAME many times, hold W/A/S/D: does the window flicker?'],
+  [1, 'PHASE 1: no show/hide animation'],
+  [2, 'PHASE 2: the window is ordered to the front at every poll'],
+  [4, 'PHASE 3: the system may not hide the window'],
+  [7, 'PHASE 4: all of these together'],
+];
+for (const [v, text] of phases) {
+  await call('lab_web_variant', { v });
+  await log(`${stamp()}  >>> ${text}   (variant ${v}) for 20 s`);
+  await sleep(20000);
+  const gone = await invoke('lab_web_info', { label: L }).then(i => !i.exists).catch(() => true);
+  if (gone) { await log('the window is gone'); break; }
 }
-alive = false; clearInterval(ticker);
-const last = await info('end');
-for (const line of (last && last.events) || []) await log('   event: ' + line);
+alive = false; clearInterval(ticker); clearInterval(watcher);
 await invoke('lab_web_close', { label: L }).catch(() => {});
 await sleep(1500);
-await log('(if this line is written the program is still alive after the window was closed)');
-await log('== end');
+await log('== end (the program is alive)');

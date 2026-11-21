@@ -1109,6 +1109,7 @@ const LAB_BAR: &str = r#"(() => {
 })();"#;
 static LAB_CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);      // the window is closing: nothing may touch it any more
 static LAB_PREV_FG: std::sync::Mutex<isize> = std::sync::Mutex::new(0);      // who had the keyboard before a text box of the page asked for it
+static LAB_VARIANT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static LAB_EVENTS: std::sync::LazyLock<std::sync::Mutex<Vec<String>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
 fn lab_note(text: String) { let mut v = LAB_EVENTS.lock().unwrap(); v.push(text); if v.len() > 60 { v.remove(0); } }
 
@@ -1218,7 +1219,23 @@ async fn lab_web_tick(app: AppHandle, label: String, game: Option<i64>) -> Resul
     let w = app.get_webview_window(&label).ok_or("no such window")?;
     let h = hwnd_of(&w)?;
     win::keep_style(h);
+    win::lab_extra(h, LAB_VARIANT.load(std::sync::atomic::Ordering::SeqCst));
     if let Some(g) = game { if g > 0 { win::place_above(h, g as isize); } }
+    Ok(())
+}
+
+#[tauri::command]
+async fn lab_web_diag(app: AppHandle, label: String) -> Result<String, String> {
+    if LAB_CLOSING.load(std::sync::atomic::Ordering::SeqCst) { return Ok(String::new()); }
+    let w = app.get_webview_window(&label).ok_or("no such window")?;
+    Ok(win::lab_diag(hwnd_of(&w)?))
+}
+
+#[tauri::command]
+async fn lab_web_variant(app: AppHandle, label: String, v: u32) -> Result<(), String> {
+    LAB_VARIANT.store(v, std::sync::atomic::Ordering::SeqCst);
+    let w = app.get_webview_window(&label).ok_or("no such window")?;
+    win::lab_variant(hwnd_of(&w)?, v);
     Ok(())
 }
 
@@ -1274,6 +1291,8 @@ fn main() {
             lab_web_ignore,
             lab_web_noactivate,
             lab_web_tick,
+            lab_web_diag,
+            lab_web_variant,
             lab_web_info,
             capture_start,
             capture_stop,
