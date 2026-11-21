@@ -16,6 +16,11 @@ pub fn host_allowed(host: &str, patterns: &[String]) -> bool {
     })
 }
 
+/// May the user's browser be sent to this host? "*" in the list = any host (only the program puts it there: the user allowed any address).
+pub fn open_allowed(host: &str, patterns: &[String]) -> bool {
+    (patterns.iter().any(|p| p.trim() == "*") && !host.trim_end_matches('.').is_empty()) || host_allowed(host, patterns)
+}
+
 /// The commands the bar that is drawn into the page can send: the page tries to go to "cmr-cmd://<command>", which is caught and never goes anywhere.
 pub fn is_command_url(scheme: &str) -> bool { scheme == "cmr-cmd" }
 
@@ -49,6 +54,7 @@ mod tests {
         for bad in ["example.com", "x.m.example.com", "baddcinside.com", "dcinside.com.evil.org", "evil.org", "", "com"] { assert!(!host_allowed(bad, &pats), "{bad}"); }
         assert!(!host_allowed("a.com", &p(&[])));
         assert!(!host_allowed("a.com", &p(&["*.", "", "*"])));
+        assert!(open_allowed("a.com", &p(&["*"])) && !open_allowed("", &p(&["*"])) && !open_allowed("a.com", &p(&["b.com"])) && open_allowed("x.b.com", &p(&["*.b.com"])));
     }
 
     #[test]

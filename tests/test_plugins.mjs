@@ -112,3 +112,14 @@ const parse = (o, folder = ID) => p.parseManifest(JSON.stringify(o), folder);
   check(effective(r.manifest, { net: ['a.example.com'], web: 'host' }).web === 'host' && effective(r.manifest, { net: ['a.example.com'], web: 'domain' }).web === 'domain'
     && effective(parseManifest(JSON.stringify({ ...base, permissions: { net: ['a.example.com'], web: 'host' } }), 'web-test').manifest, { net: ['a.example.com'], web: 'domain' }).web === 'host', 'plugins: the user may narrow domain to host, not widen host to domain');
 }
+
+// ---- openUrl: only the allowed sites, or any https address (the user may take "any" down)
+{
+  const { parseManifest, effective, openPatterns, missing } = await import('../app/core/plugins.js');
+  const mk = o => parseManifest(JSON.stringify({ id: 'open-test', name: 'O', version: '1.0.0', api: 1, permissions: { net: ['a.example.com'], web: 'domain', openUrl: o } }), 'open-test');
+  check(mk('any').ok && mk(true).ok && mk('all').ok === false, 'plugins: openUrl is true, "any" or false');
+  const g = { net: ['a.example.com'], web: 'domain', openUrl: 'any' };
+  check(effective(mk('any').manifest, g).openUrl === 'any' && effective(mk('any').manifest, { ...g, openUrl: true }).openUrl === true && effective(mk(true).manifest, g).openUrl === true && effective(mk(true).manifest, { ...g, openUrl: false }).openUrl === false, 'plugins: openUrl "any" never wider than the manifest asks, and the user may lower it');
+  check(JSON.stringify(openPatterns(effective(mk('any').manifest, g))) === '["*"]' && JSON.stringify(openPatterns(effective(mk(true).manifest, g))) === '["a.example.com","*.example.com"]' && openPatterns(effective(mk(true).manifest, { ...g, openUrl: false })).length === 0, 'plugins: where the browser may be sent');
+  check(missing(mk('any').manifest, { net: ['a.example.com'], web: 'domain' }).some(x => x.perm === 'openUrl'), 'plugins: openUrl asked and not allowed is missing');
+}

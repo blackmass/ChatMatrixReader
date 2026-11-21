@@ -119,7 +119,8 @@ export function parseManifest(text, folder) {
       }
     }
     if (p.web !== undefined) { if (p.web === 'host' || p.web === 'domain') perms.web = p.web; else if (p.web !== false) errors.push('permissions.web: "host" (only the hosts the plugin may use) or "domain" (those hosts and all hosts under their domains)'); }
-    for (const k of ['netAny', 'chat.inject', 'storage', 'widgets', 'windows', 'openUrl']) if (p[k] !== undefined) { if (typeof p[k] !== 'boolean') errors.push(`permissions.${k}: true or false`); else perms[k] = p[k]; }
+    if (p.openUrl !== undefined) { if (typeof p.openUrl === 'boolean' || p.openUrl === 'any') perms.openUrl = p.openUrl; else errors.push('permissions.openUrl: true (only the sites the plugin may use), "any" (any https address) or false'); }
+    for (const k of ['netAny', 'chat.inject', 'storage', 'widgets', 'windows']) if (p[k] !== undefined) { if (typeof p[k] !== 'boolean') errors.push(`permissions.${k}: true or false`); else perms[k] = p[k]; }
   }
   const reasons = {};
   if (m.reasons !== undefined) {
@@ -142,7 +143,7 @@ export const asked = perms => PERMISSIONS.filter(k => (k === 'net' ? perms.net.l
 const webOf = (asked, g) => (asked && (g === 'host' || g === 'domain') ? (asked === 'host' ? 'host' : g) : '');
 
 // granted: what the user allowed, kept in the settings: { net: [host...], 'chat.inject': bool, storage: bool }
-const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net.filter(validHost).slice(0, MAX_USER_HOSTS + 20) : [], netAny: !!(g && g.netAny), 'chat.inject': !!(g && g['chat.inject']), storage: !!(g && g.storage), widgets: !!(g && g.widgets), windows: !!(g && g.windows), openUrl: !!(g && g.openUrl), web: g && (g.web === 'host' || g.web === 'domain') ? g.web : '' });
+const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net.filter(validHost).slice(0, MAX_USER_HOSTS + 20) : [], netAny: !!(g && g.netAny), 'chat.inject': !!(g && g['chat.inject']), storage: !!(g && g.storage), widgets: !!(g && g.widgets), windows: !!(g && g.windows), openUrl: g && g.openUrl === 'any' ? 'any' : !!(g && g.openUrl), web: g && (g.web === 'host' || g.web === 'domain') ? g.web : '' });
 
 // what is asked for and not yet allowed: [{ perm, host? }]
 export function missing(manifest, granted) {
@@ -163,7 +164,7 @@ export function effective(manifest, granted) {
   const g = grantedOf(granted), p = manifest.permissions;
   // netAny: besides the hosts of the manifest, the hosts the user allowed one by one (they are in granted.net)
   const netAny = !!(p.netAny && g.netAny);
-  return { net: netAny ? g.net.slice(0, MAX_USER_HOSTS + p.net.length) : p.net.filter(h => g.net.includes(h)), netAny, 'chat.inject': p['chat.inject'] && g['chat.inject'], storage: p.storage && g.storage, widgets: p.widgets && g.widgets, windows: p.windows && g.windows, openUrl: p.openUrl && g.openUrl, web: webOf(p.web, g.web) };
+  return { net: netAny ? g.net.slice(0, MAX_USER_HOSTS + p.net.length) : p.net.filter(h => g.net.includes(h)), netAny, 'chat.inject': p['chat.inject'] && g['chat.inject'], storage: p.storage && g.storage, widgets: p.widgets && g.widgets, windows: p.windows && g.windows, openUrl: p.openUrl ? (p.openUrl === 'any' && g.openUrl === 'any' ? 'any' : !!g.openUrl) : false, web: webOf(p.web, g.web) };
 }
 
 // is this address one the plugin may fetch? (https only; the host must be one of the allowed ones, exactly)
@@ -174,7 +175,7 @@ export function netAllowed(eff, url) {
 }
 
 // what a plugin asks for, as one text: when it changes (a new permission, a new host), the user is asked again
-export const permsKey = manifest => JSON.stringify([manifest.id, [...manifest.permissions.net].sort(), !!manifest.permissions['chat.inject'], !!manifest.permissions.netAny, !!manifest.permissions.storage, !!manifest.permissions.widgets, !!manifest.permissions.windows, !!manifest.permissions.openUrl, manifest.permissions.web || '', (manifest.windows || []).map(w => w.id).sort()]);
+export const permsKey = manifest => JSON.stringify([manifest.id, [...manifest.permissions.net].sort(), !!manifest.permissions['chat.inject'], !!manifest.permissions.netAny, !!manifest.permissions.storage, !!manifest.permissions.widgets, !!manifest.permissions.windows, manifest.permissions.openUrl || false, manifest.permissions.web || '', (manifest.windows || []).map(w => w.id).sort()]);
 
 // a value of an option, made right for its declaration (a wrong one becomes the default)
 export function cleanOptionValue(def, v) {
@@ -228,5 +229,13 @@ export function webPatterns(hosts, scope) {
 // The same test the program does in Rust (weblib::host_allowed): a pattern is a host, or "*.domain".
 export function hostMatches(host, patterns) {
   const h = String(host).toLowerCase().replace(/\.$/, '');
-  return (patterns || []).some(p => (p.startsWith('*.') ? h === p.slice(2) || h.endsWith(p.slice(1)) : h === p));
+  return (patterns || []).some(p => p === '*' || (p.startsWith('*.') ? h === p.slice(2) || h.endsWith(p.slice(1)) : h === p));
+}
+
+// Where the user's browser may be sent to, as patterns (see hostMatches; "*" = any host, only here): the sites the plugin may use (and their domains when the web permission says so),
+// or any https address when the user allowed that. Nothing without the permission.
+export function openPatterns(eff) {
+  if (!eff.openUrl) return [];
+  if (eff.openUrl === 'any') return ['*'];
+  return [...eff.net, ...webPatterns(eff.net, eff.web)];
 }

@@ -1072,7 +1072,7 @@ fn launch_url(url: &str) -> Result<(), String> {
 fn plugin_open_url(url: String, hosts: Vec<String>) -> Result<(), String> {
     use tauri_plugin_http::reqwest;
     let u = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
-    let host_ok = u.host_str().map_or(false, |h| weblib::host_allowed(h, &hosts));       // (hosts: exact names or "*.domain")
+    let host_ok = u.host_str().map_or(false, |h| weblib::open_allowed(h, &hosts));       // (hosts: exact names or "*.domain")
     if u.scheme() != "https" || !u.username().is_empty() || u.password().is_some() || u.port().is_some() || !host_ok || url.len() > 2000 {
         return Err("this address is not allowed for the plugin".into());
     }

@@ -4,7 +4,7 @@
 //
 //   const b = new PluginBridge({ manifest, granted, hooks: { inject(line), fetch(req, hosts), log(text), load(), save(obj) }, options, now })
 //   await b.call('chat.inject', { text, sender })      -> value  |  throws PluginError { code: 'denied' | 'limit' | 'args' | 'failed' }
-import { effective, netAllowed, optionValues, validHost, webPatterns, hostMatches } from './plugins.js';
+import { effective, netAllowed, optionValues, validHost, webPatterns, hostMatches, openPatterns } from './plugins.js';
 import { checkDef, cleanState } from '../widgets/registry.js';
 
 export class PluginError extends Error {
@@ -16,7 +16,7 @@ export const LIMITS = {
   fetchGapMs: 1000, fetchQueue: 20, fetchBody: 1_000_000, fetchAnswer: 2_000_000, fetchHeaders: 30,       // requests to one host are spaced; they wait their turn in a queue
   storageBytes: 1_000_000, storageKeys: 1000, storageKey: 100,
   logPerMin: 120, logText: 500,
-  windowCallsPerMin: 20, hostRequestsPerMin: 10, openUrlPerMin: 6, webOpenPerMin: 6,                               // opening / closing the plugin's windows; asking the user for a host                                                       // opening / closing the plugin's windows
+  windowCallsPerMin: 20, hostRequestsPerMin: 10, openUrlPerMin: 10, webOpenPerMin: 30,                               // opening / closing the plugin's windows; asking the user for a host                                                       // opening / closing the plugin's windows
   widgets: 8, widgetGapMs: 100,                                                // widgets a plugin may have; its state is passed on at most every 100 ms (the newest wins)
 };
 
@@ -152,7 +152,7 @@ export class PluginBridge {
         this.need('openUrl');
         if (!isObj(args) || typeof args.url !== 'string') throw new PluginError('args', 'url is needed');
         // the hosts the user allowed; with the web permission also the domain of them ("domain") — the same reach the web window has
-        const patterns = [...this.eff.net, ...webPatterns(this.eff.net, this.eff.web)];
+        const patterns = openPatterns(this.eff);
         let ou = null; try { ou = new URL(args.url); } catch { /* denied below */ }
         if (!ou || ou.protocol !== 'https:' || ou.username || ou.password || !hostMatches(ou.hostname, patterns)) throw new PluginError('denied', 'this address is not allowed (https and a host the user allowed)');
         if (!this.opens.take()) throw new PluginError('limit', `at most ${LIMITS.openUrlPerMin} addresses a minute`);
@@ -168,7 +168,7 @@ export class PluginBridge {
         if (u.protocol !== 'https:' || u.username || u.password || !hostMatches(u.hostname, patterns)) throw new PluginError('denied', 'this address is not allowed (https and a host the user allowed, with its domain when the permission says so)');
         if (!this.webOpens.take()) throw new PluginError('limit', `at most ${LIMITS.webOpenPerMin} web windows a minute`);
         const title = typeof args.title === 'string' ? args.title.slice(0, 80) : '';
-        try { await this.hooks.webOpen({ url: u.href, title, mobile: args.mobile !== false }, patterns); } catch (e) { throw new PluginError('failed', String((e && e.message) || e).slice(0, 200)); }
+        try { await this.hooks.webOpen({ url: u.href, title, mobile: args.mobile !== false }, patterns, openPatterns(this.eff)); } catch (e) { throw new PluginError('failed', String((e && e.message) || e).slice(0, 200)); }
         return null;
       }
       case 'web.close': this.need('web'); await this.hooks.webClose(); return null;

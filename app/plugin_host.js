@@ -11,7 +11,7 @@ import { PluginBridge, PluginError } from './core/pluginbridge.js';
 import { log } from './core/log.js';
 import { isMac } from './platform.js';
 import { createWebHost } from './web_host.js';
-import { webPatterns } from './core/plugins.js';
+import { webPatterns, openPatterns } from './core/plugins.js';
 
 const LOG_KEEP = 200;
 // what makes a plugin restart when it changes: the permissions (the hosts of netAny are not: they are changed while it runs)
@@ -93,7 +93,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
         return 'pending';
       },
       openUrl: async (url, hosts) => { await invoke('plugin_open_url', { url, hosts }); note(id, 'opened in the browser: ' + url); },
-      webOpen: async (req, patterns) => { await ensureWindows(id); return web.open(id, req, patterns); },
+      webOpen: async (req, patterns, openAllow) => { await ensureWindows(id); return web.open(id, req, patterns, openAllow); },
       webClose: () => web.close(id),
       windowOpen: async name => { await ensureWindows(id); const c = windowEntry(id, name); if (c && windows) windows.openWindow(c.id); },
       windowClose: async name => { const c = windowEntry(id, name); if (c && windows) windows.closeWindow(c.id); },
@@ -187,7 +187,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       if (restKey(e.granted) !== run.granted) { await stopOne(id, 'restarted: the allowed permissions changed'); continue; }
       const hosts = JSON.stringify(run.bridge.eff.net);
       run.bridge.setGranted(r.manifest, e.granted);
-      if (JSON.stringify(run.bridge.eff.net) !== hosts) web.allow(id, webPatterns(run.bridge.eff.net, run.bridge.eff.web));      // (a host taken away: the web window may not go there any more)
+      if (JSON.stringify(run.bridge.eff.net) !== hosts) web.allow(id, webPatterns(run.bridge.eff.net, run.bridge.eff.web), openPatterns(run.bridge.eff));      // (a host taken away: the web window may not go there any more)
       if (JSON.stringify(run.bridge.eff.net) !== hosts) sendTo(run.frame, { cmr: 1, event: 'hosts', value: run.bridge.eff.net });       // (the plugin is told: it may fetch now)
       if (JSON.stringify(e.options || {}) !== run.options) {                // (the options changed: the plugin is told; it keeps running)
         run.options = JSON.stringify(e.options || {});

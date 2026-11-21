@@ -19,6 +19,7 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder}
 
 use crate::{hwnd_of, weblib, win};
 
+static OPEN_ALLOW: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));       // where the user's browser may be sent to from the window
 static ALLOW: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static CLOSING: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static LOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
@@ -33,6 +34,17 @@ const BAR: &str = r#"(() => {
   const TITLE = __TITLE__;
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
+  // what a window of a browser does with these is not wanted here: the wheel with ctrl (zoom) or shift (sideways) is a plain turn of the wheel; no zoom keys; no menu of the right button
+  // (the keys that make the windows usable, ctrl / shift / alt, would otherwise stop the page from scrolling)
+  document.addEventListener('wheel', e => {
+    if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
+    e.preventDefault();
+    let t = e.target;
+    while (t && t !== document.documentElement && !(t.scrollHeight > t.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(t).overflowY))) t = t.parentElement;
+    (t && t !== document.documentElement ? t : (document.scrollingElement || document.documentElement)).scrollBy(0, e.deltaY || e.deltaX);
+  }, { capture: true, passive: false });
+  document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0', '_'].includes(e.key)) e.preventDefault(); }, true);
+  document.addEventListener('contextmenu', e => e.preventDefault(), true);
   const external = u => { try { const a = new URL(u, location.href); if (a.protocol === 'https:') go('open?u=' + encodeURIComponent(a.href)); } catch (e) {} };
   const linkOf = e => (e.target && e.target.closest ? e.target.closest('a[href]') : null);
   document.addEventListener('click', e => {
@@ -85,6 +97,7 @@ fn forget(w: &WebviewWindow) {
     if let Ok(mut c) = CLOSING.lock() { if !c.contains(&label) { c.push(label.clone()); } }
     if let Ok(h) = hwnd_of(w) { win::forget(h); }
     if let Ok(mut m) = ALLOW.lock() { m.remove(&label); }
+    if let Ok(mut m) = OPEN_ALLOW.lock() { m.remove(&label); }
     if let Ok(mut m) = ZSTATE.lock() { m.remove(&label); }
     if let Ok(mut m) = PREV_FG.lock() { m.remove(&label); }
 }
@@ -99,7 +112,7 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
     match cmd {
         "open" => {                                     // a link the user opened in a new place: the user's browser, only where the window itself may go (the same rule)
             let url = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "u").map(|(_, v)| v.into_owned()));
-            let allow = ALLOW.lock().ok().and_then(|m| m.get(label).cloned()).unwrap_or_default();
+            let allow = OPEN_ALLOW.lock().ok().and_then(|m| m.get(label).cloned()).unwrap_or_default();
             if let Some(url) = url { let _ = crate::plugin_open_url(url, allow); }       // (a refused address: nothing happens)
         }
         "drag" => { if !LOCKED.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) { let _ = win.start_dragging(); } }
@@ -151,6 +164,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     let host_ok = url.scheme() == "https" && url.host_str().map_or(false, |h| weblib::host_allowed(h, &allow));
     if !host_ok { return Err("this address is not allowed".into()); }
     if let Ok(mut m) = ALLOW.lock() { m.insert(label.clone(), allow.clone()); }
+    if let Ok(mut m) = OPEN_ALLOW.lock() { m.insert(label.clone(), strs(&args, "open_allow")); }
     let lock = args.get("lock").and_then(|v| v.as_bool()).unwrap_or(false);
     if let Ok(mut l) = LOCKED.lock() { l.retain(|x| x != &label); if lock { l.push(label.clone()); } }
     // open already: it goes to the address and comes to the front
@@ -218,8 +232,9 @@ pub async fn web_close(app: AppHandle, label: String) -> Result<(), String> {
 
 /// The addresses a window may go to (the user allowed something more or took something away).
 #[tauri::command]
-pub async fn web_allow(label: String, allow: Vec<String>) -> Result<(), String> {
+pub async fn web_allow(label: String, allow: Vec<String>, open_allow: Option<Vec<String>>) -> Result<(), String> {
     if !label_ok(&label) { return Err("bad label".into()); }
+    if let Ok(mut m) = OPEN_ALLOW.lock() { m.insert(label.clone(), open_allow.unwrap_or_default()); }
     if let Ok(mut m) = ALLOW.lock() { m.insert(label, allow); }
     Ok(())
 }

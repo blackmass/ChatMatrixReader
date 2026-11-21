@@ -59,9 +59,9 @@ export function createWebHost({ getKeys = () => ['Shift'], getEntry, getConf, pa
 
   return {
     // url: the address (the bridge has checked it); patterns: what the window may go to
-    async open(id, { url, title = '', mobile = true }, patterns) {
+    async open(id, { url, title = '', mobile = true }, patterns, openAllow = []) {
       const w = opts(id);
-      const args = { label: webLabel(id), url, title, ua: mobile ? MOBILE_UA : '', allow: patterns, persist: !!w.cookies, key: id, lock: !!w.lock,
+      const args = { label: webLabel(id), url, title, ua: mobile ? MOBILE_UA : '', allow: patterns, open_allow: openAllow, persist: !!w.cookies, key: id, lock: !!w.lock,
         w: Number.isFinite(w.w) ? w.w : null, h: Number.isFinite(w.h) ? w.h : null, x: Number.isFinite(w.x) ? w.x : null, y: Number.isFinite(w.y) ? w.y : null };
       if (args.w === null || args.h === null) { delete args.w; delete args.h; delete args.x; delete args.y; args.w = DEFAULT_W; args.h = DEFAULT_H; }
       await invoke('web_open', { args });
@@ -79,7 +79,7 @@ export function createWebHost({ getKeys = () => ['Shift'], getEntry, getConf, pa
     },
     isOpen: id => open.has(id),
     // the user took something away from what the window may go to
-    async allow(id, patterns) { if (open.has(id)) await invoke('web_allow', { label: webLabel(id), allow: patterns }).catch(() => {}); },
+    async allow(id, patterns, openAllow = []) { if (open.has(id)) await invoke('web_allow', { label: webLabel(id), allow: patterns, openAllow }).catch(() => {}); },
     // cookies and the rest the pages stored (the window must be open: the web view does it)
     async clearData(id) { await invoke('web_clear', { label: webLabel(id) }); },
     async blocked() { return invoke('web_blocked', {}).catch(() => []); },
