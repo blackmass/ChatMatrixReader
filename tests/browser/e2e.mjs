@@ -1033,6 +1033,11 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     ok(await zOf('web_b1') < 1000 && await zOf('web_b2') < 1000 && (await cp.evaluate(() => Math.min(...[...document.querySelectorAll('.pane:not(.webpane)')].map(e => Number(e.style.zIndex)))) >= 1000), 'browser/order: every translation window is above every web window');
     await cp.locator('.webpane[data-web="web_b1"] .paddrbar').dispatchEvent('pointerdown');
     await until(() => sentZ('web_b1') > sentZ('web_b2'), 'a window that is touched comes to the front: the program is told the new order');
+    // what a window draws is not drawn where a window in front of it covers it (the pages of the web windows are under the center: the frame of the one behind would show over the one in front)
+    const maskOf = label => cp.evaluate(l => document.querySelector(`.webpane[data-web="${l}"]`).style.maskImage || document.querySelector(`.webpane[data-web="${l}"]`).style.webkitMaskImage || '', label);
+    await until(async () => (await maskOf('web_b1')) === '' && (await maskOf('web_b2')) !== '', 'the window behind is masked where the one in front covers it; the one in front is whole');
+    await cp.locator('.webpane[data-web="web_b2"] .paddrbar').dispatchEvent('pointerdown');
+    await until(async () => (await maskOf('web_b2')) === '' && (await maskOf('web_b1')) !== '', 'and the other way round when the other is touched');
     await cmd('close', 2);
     await until(async () => (await cp.locator('.webpane').count()) === 1, 'the second window is closed');
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.filter(b => b.id !== 2) })));

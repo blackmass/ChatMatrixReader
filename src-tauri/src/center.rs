@@ -140,6 +140,11 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
 
 /// The web windows that follow a center: the window of the system of a web window (webwin.rs) is where its page is drawn by the center (a box with `web`), directly under the center, so
 /// that the bar and the strips of the center take the mouse and the page the rest. label -> (the center, where it is: x, y, w, h in pixels).
+/// The order the windows of a center were put in last time, and when it was last put right (a window of the system is put again only when the order wanted changed, or the system's order is found
+/// wrong again after a while: putting it again at every round made the pages flicker on macOS).
+static ORDER: LazyLock<Mutex<HashMap<String, (Vec<isize>, Option<std::time::Instant>)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static ORDER_LOGS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 static WEBS: LazyLock<Mutex<HashMap<String, (String, [i32; 4], i64)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn sync_webs(app: &AppHandle, center: &str, panes: &[Pane]) {
@@ -345,7 +350,21 @@ fn run(app: AppHandle) {
             if want.len() > 1 {
                 let seen = win::z_order(&want);
                 let expected: Vec<isize> = want.iter().copied().filter(|h| seen.contains(h)).collect();
-                if seen != expected { for pair in want.windows(2) { win::place_below(pair[1], pair[0]); } }
+                let (changed, due) = {
+                    let o = ORDER.lock().ok();
+                    let prev = o.as_ref().and_then(|m| m.get(label).cloned());
+                    (prev.as_ref().map_or(true, |p| p.0 != want), prev.and_then(|p| p.1).map_or(true, |t| t.elapsed() > std::time::Duration::from_millis(400)))
+                };
+                if seen != expected && (changed || due) {
+                    for pair in want.windows(2) { win::place_below(pair[1], pair[0]); }
+                    if let Ok(mut m) = ORDER.lock() { m.insert(label.to_string(), (want.clone(), Some(std::time::Instant::now()))); }
+                    // (macOS: what was wanted and what the system said: for the log, a few lines only)
+                    if cfg!(target_os = "macos") && ORDER_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 120 {
+                        crate::startup_log(&format!("web order {label}: wanted {want:?}, system said {seen:?}, changed={changed}"));
+                    }
+                } else if changed {
+                    if let Ok(mut m) = ORDER.lock() { m.insert(label.to_string(), (want.clone(), None)); }
+                }
             }
         }
     }

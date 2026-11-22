@@ -140,7 +140,7 @@ let lastOs = null;                             // the last state of the system (
 let gameFound = true;                          // no game = the windows stay in view: nothing to click through to
 await listen('game-state', e => { gameFound = !!e.payload.found; });
 emit('game-hello', {});
-let lastKey = '', copyPrev = false, webLmb = false;
+let lastKey = '', copyPrev = false, webLmb = false, webClickLogs = 0;
 // runs all the time: the mouse and the keys against the windows (pane.tick), and Ctrl+C (the windows never take the keyboard: the game keeps it)
 (async function loop() {
   for (;;) {
@@ -155,7 +155,7 @@ let lastKey = '', copyPrev = false, webLmb = false;
     if (lmbNow && !webLmb) {
       let best = null;
       for (const w of webs.values()) { const b = w.screenBox(); if (s.cursor[0] >= b.x && s.cursor[0] < b.x + b.w && s.cursor[1] >= b.y && s.cursor[1] < b.y + b.h && (!best || Number(w.el.style.zIndex) > Number(best.el.style.zIndex))) best = w; }
-      if (best) center.raise(best);
+      if (best) { if (webClickLogs++ < 6) invoke('startup_js', { text: `web page pressed: ${best.label} z=${best.el.style.zIndex}` }).catch(() => {}); center.raise(best); }
     }
     webLmb = lmbNow;
     if (changed) report();
@@ -174,7 +174,52 @@ let lastKey = '', copyPrev = false, webLmb = false;
     perfAdd('OVERLAY_POLL_MS', performance.now() - t0);
   }
 })();
+// A web window's page is a window of the system UNDER this page, so what is drawn here (its bar, its frame) would show over the page of a window in front of it. Where a window in front covers it, what it
+// draws is cut away (a mask): the windows then overlap like windows of the system do.
+function clipWebs() {
+  const list = [...webs.values()].map(p => ({ p, z: Number(p.el.style.zIndex) || 0, r: p.cover() }));
+  for (const { p, z, r } of list) {
+    const covers = list.filter(o => o.p !== p && o.z > z).map(o => o.r);
+    p.setClip(covers, r);
+  }
+}
+// What a web window draws in this page (its bar, frame, strips) lies over every page of the web windows (the pages are windows of the system under this one). So the part that a web window IN FRONT
+// of it covers is not drawn: an opaque rectangle for each part that stays visible, as the mask of the window (rectangles cut out of the whole one by the rectangles in front).
+function visibleParts(whole, covers) {
+  let parts = [whole];
+  for (const c of covers) {
+    const next = [];
+    for (const r of parts) {
+      const x1 = Math.max(r.x, c.x), y1 = Math.max(r.y, c.y), x2 = Math.min(r.x + r.w, c.x + c.w), y2 = Math.min(r.y + r.h, c.y + c.h);
+      if (x1 >= x2 || y1 >= y2) { next.push(r); continue; }
+      if (y1 > r.y) next.push({ x: r.x, y: r.y, w: r.w, h: y1 - r.y });
+      if (y2 < r.y + r.h) next.push({ x: r.x, y: y2, w: r.w, h: r.y + r.h - y2 });
+      if (x1 > r.x) next.push({ x: r.x, y: y1, w: x1 - r.x, h: y2 - y1 });
+      if (x2 < r.x + r.w) next.push({ x: x2, y: y1, w: r.x + r.w - x2, h: y2 - y1 });
+    }
+    parts = next;
+  }
+  return parts;
+}
+const clipKey = new WeakMap();
+function applyClips() {
+  const list = [...webs.values()].map(p => ({ p, z: Number(p.el.style.zIndex) || 0, b: { x: p.rect.x, y: p.rect.y - p.head, w: p.rect.w, h: p.rect.h + p.head } }));
+  for (const { p, z, b } of list) {
+    const covers = list.filter(o => o.p !== p && o.z > z).map(o => ({ x: o.b.x - b.x, y: o.b.y - b.y, w: o.b.w, h: o.b.h }));
+    const parts = covers.length ? visibleParts({ x: 0, y: 0, w: b.w, h: b.h }, covers) : null;
+    const key = parts ? b.w + 'x' + b.h + ':' + parts.map(r => [r.x, r.y, r.w, r.h].map(v => Math.round(v * 10) / 10).join(',')).join(';') : '';
+    if ((clipKey.get(p) || '') === key) continue;
+    clipKey.set(p, key);
+    if (!parts) { p.el.style.webkitMaskImage = ''; p.el.style.maskImage = ''; continue; }
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${b.w}' height='${b.h}' viewBox='0 0 ${b.w} ${b.h}'>` + parts.map(r => `<rect x='${r.x}' y='${r.y}' width='${r.w}' height='${r.h}' fill='black'/>`).join('') + '</svg>';
+    const url = `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`;
+    p.el.style.webkitMaskImage = url; p.el.style.maskImage = url;
+    p.el.style.webkitMaskSize = '100% 100%'; p.el.style.maskSize = '100% 100%'; p.el.style.webkitMaskRepeat = 'no-repeat'; p.el.style.maskRepeat = 'no-repeat';
+  }
+}
 function report() {
+  applyClips();
+  clipWebs();
   const list = [...panes.values()].map(p => ({ ...p.box(), hit: p.interactive, blur: p.blurLevel() })).concat([...webs.values()].flatMap(p => p.boxes()));          // (a window that is click-through takes no mouse: it goes through; the place is kept for the send box)
   const wheel = [...panes.values()].filter(p => p.zone).map(p => p.box());                    // (the wheel over these goes to the window, not to the game)
   if (!menuEl.hidden) list.push({ id: 'menu', x: 0, y: 0, w: innerWidth * center.dpr(), h: innerHeight * center.dpr(), bar: 0 });          // (while the menu is open, the center takes the whole mouse: a click anywhere else closes it)

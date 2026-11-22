@@ -105,6 +105,29 @@ export class WebPane {
       : '<svg viewBox="0 0 12 16" width="10" height="13"><rect x="2" y="1" width="8" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="12.5" r=".9" fill="currentColor"/></svg>';
     b.title = pc ? tr('PC 화면입니다. 누르면 모바일 화면으로 바꿉니다.') : tr('모바일 화면입니다. 누르면 PC 화면으로 바꿉니다.');
   }
+  // the whole window as this page draws it: [left, top, right, bottom] in css pixels of the page (the bar above the page included)
+  cover() { const r = this.rect; return [r.x, r.y - this.head, r.x + r.w, r.y + r.h]; }
+  // `covers`: the windows in front of this one: what is under them is not drawn (a mask over this window's element); `mine`: this window's own place
+  setClip(covers, mine) {
+    const [l, t, rr, b] = mine, w = rr - l, h = b - t;
+    const cut = [];
+    for (const c of covers) { const x0 = Math.max(l, c[0]), y0 = Math.max(t, c[1]), x1 = Math.min(rr, c[2]), y1 = Math.min(b, c[3]); if (x1 > x0 && y1 > y0) cut.push([x0, y0, x1, y1]); }
+    const key = cut.length ? [Math.round(w), Math.round(h), ...cut.flat().map(Math.round)].join(',') + '@' + Math.round(l) + ',' + Math.round(t) : '';
+    if (key === this.clipKey) return;
+    this.clipKey = key;
+    const st = this.el.style;
+    if (!cut.length) { st.webkitMaskImage = st.maskImage = ''; return; }
+    // the holes are the cells of a grid made from the edges of the covers: no cell lies over another, so "evenodd" never turns one back on
+    const xs = [...new Set([l, rr, ...cut.flatMap(c => [c[0], c[2]])])].sort((a, c) => a - c), ys = [...new Set([t, b, ...cut.flatMap(c => [c[1], c[3]])])].sort((a, c) => a - c);
+    let d = `M0 0H${w}V${h}H0Z`;
+    for (let i = 0; i + 1 < xs.length; i++) for (let j = 0; j + 1 < ys.length; j++) {
+      const mx = (xs[i] + xs[i + 1]) / 2, my = (ys[j] + ys[j + 1]) / 2;
+      if (cut.some(c => mx > c[0] && mx < c[2] && my > c[1] && my < c[3])) d += `M${xs[i] - l} ${ys[j] - t}h${xs[i + 1] - xs[i]}v${ys[j + 1] - ys[j]}h${-(xs[i + 1] - xs[i])}Z`;
+    }
+    const url = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><path fill-rule="evenodd" d="${d}"/></svg>`)}")`;
+    st.webkitMaskImage = st.maskImage = url;
+    st.webkitMaskSize = st.maskSize = '100% 100%'; st.webkitMaskRepeat = st.maskRepeat = 'no-repeat';
+  }
   // the page was made larger or smaller: the size shows for a moment in the address line
   setZoom(z) {
     const c = this.el.querySelector('.pzoom'); if (!c || !Number.isFinite(z)) return;
