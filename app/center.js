@@ -302,6 +302,13 @@ await listen('center-layout', e => layout(e.payload));
 // the web windows: which are open (the hub), the title and the address of the page, how far it has scrolled (the program: webwin.rs)
 await listen('web-state', e => { webBy[e.payload.source === 'browser' ? 'browser' : 'plugin'] = e.payload.windows || []; webWins = [...webBy.plugin, ...webBy.browser]; sync(); });
 await listen('web-zoom', e => { const p = webs.get(e.payload.label); if (p && p.setZoom) p.setZoom(e.payload.zoom); });
+await listen('web-order', e => {                                    // (a page that was pressed was brought to the front by the system: the windows are numbered in the order it says, front first)
+  const labels = (e.payload && e.payload.labels) || [], list = labels.map(l => webs.get(l)).filter(Boolean).reverse();
+  if (list.length < 2) return;
+  if (webTop + list.length >= 990) { webTop = 100; for (const w of [...webs.values()].sort((a, b) => Number(a.el.style.zIndex) - Number(b.el.style.zIndex))) w.el.style.zIndex = String(++webTop); }
+  for (const w of list) w.el.style.zIndex = String(++webTop);
+  report();
+});
 await listen('web-title', e => { const p = webs.get(e.payload.label); if (p) p.setTitle(e.payload.title); });
 await listen('web-nav', e => { const p = webs.get(e.payload.label); if (p) p.setUrl(e.payload.url); });
 await listen('web-scroll', e => { const p = webs.get(e.payload.label); if (p) p.setScroll(e.payload.p, e.payload.s); });

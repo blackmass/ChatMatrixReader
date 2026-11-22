@@ -143,6 +143,9 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
 /// The order the windows of a center were put in last time, and when it was last put right (a window of the system is put again only when the order wanted changed, or the system's order is found
 /// wrong again after a while: putting it again at every round made the pages flicker on macOS).
 static ORDER: LazyLock<Mutex<HashMap<String, (Vec<isize>, Option<std::time::Instant>)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// What the system said of the order of the web windows of a center at the last look (their labels, from the front), a different order that is waiting to be believed (since when), and when the
+/// windows were last put by us. A page that is pressed is brought to the front by the system itself: that order is then what the user wants (see the loop).
+static OBSERVED: LazyLock<Mutex<HashMap<String, (Vec<String>, Option<(Vec<String>, Instant)>, Option<Instant>)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static ORDER_LOGS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 static WEBS: LazyLock<Mutex<HashMap<String, (String, [i32; 4], i64)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -338,11 +341,12 @@ fn run(app: AppHandle) {
             // the blur windows of this center follow it: the same order (the layer of the center), and directly under it
             let blurs: Vec<(String, isize)> = BLURS.lock().map(|b| b.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (k.clone(), v.2)).collect()).unwrap_or_default();
             // the web windows: in the order the center draws their frames (the highest `z` first), so that a page and its frame are never one over and one under another window's
-            let mut webs: Vec<(i64, isize)> = WEBS.lock().map(|m| m.iter().filter(|(_, v)| v.0 == label).filter_map(|(k, v)| app.get_webview_window(k).and_then(|w| hwnd_of(&w).ok()).map(|h| (v.2, h))).collect()).unwrap_or_default();
+            let mut webs: Vec<(i64, isize, String)> = WEBS.lock().map(|m| m.iter().filter(|(_, v)| v.0 == label).filter_map(|(k, v)| app.get_webview_window(k).and_then(|w| hwnd_of(&w).ok()).map(|h| (v.2, h, k.clone()))).collect()).unwrap_or_default();
             webs.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+            let web_labels: Vec<(isize, String)> = webs.iter().map(|w| (w.1, w.2.clone())).collect();
             // from the front: the center, the blurs of its windows (they blur what is under the windows: the pages too), the web windows
             let mut want: Vec<isize> = vec![ch];
-            for bh in blurs.into_iter().map(|b| b.1).chain(webs.into_iter().map(|w| w.1)) {
+            for bh in blurs.into_iter().map(|b| b.1).chain(webs.iter().map(|w| w.1)) {
                 win::keep_style(bh);
                 apply_mode(bh, mode, game, &mut last);
                 want.push(bh);
@@ -355,8 +359,34 @@ fn run(app: AppHandle) {
                     let prev = o.as_ref().and_then(|m| m.get(label).cloned());
                     (prev.as_ref().map_or(true, |p| p.0 != want), prev.and_then(|p| p.1).map_or(true, |t| t.elapsed() > std::time::Duration::from_millis(400)))
                 };
-                if seen != expected && (changed || due) {
+                // A page that is pressed is brought to the front by the system itself, before this program has heard of the press (the center asks the mouse a few times a second and a short click
+                // can go by between two looks). When the order of the web windows has become another one that nobody here made, and stays so for a moment, that order is what the user did: the center
+                // is told and numbers the windows that way (instead of this program putting them back, which was seen as a window that is given the front and loses it again).
+                let mut hold = false;                                               // (a new order is waiting to be believed: nothing is put back meanwhile)
+                {
+                    let obs: Vec<String> = seen.iter().filter_map(|h| web_labels.iter().find(|w| w.0 == *h).map(|w| w.1.clone())).collect();
+                    let wanted_labels: Vec<String> = web_labels.iter().filter(|w| seen.contains(&w.0)).map(|w| w.1.clone()).collect();
+                    let now = Instant::now();
+                    if let Ok(mut m) = OBSERVED.lock() {
+                        let e = m.entry(label.to_string()).or_insert((Vec::new(), None, None));
+                        let just_put = e.2.map_or(false, |t| now.duration_since(t) < Duration::from_millis(250));
+                        if obs == wanted_labels || obs.len() < 2 || just_put || changed {                // (an order that this program has just changed is not the user's)
+                            e.0 = obs.clone(); e.1 = None;
+                        } else if obs != e.0 {                                       // (a new order: it has to stay for a moment before it is believed)
+                            e.0 = obs.clone(); e.1 = Some((obs.clone(), now));
+                        } else if let Some((cand, since)) = e.1.clone() {
+                            if cand == obs && now.duration_since(since) >= Duration::from_millis(60) {
+                                e.1 = None; e.0 = obs.clone();
+                                let _ = app.emit_to(label, "web-order", json!({ "labels": obs }));
+                                if cfg!(target_os = "macos") && ORDER_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 120 { crate::startup_log(&format!("web order {label}: the system's order is believed: {obs:?}")); }
+                            }
+                        }
+                        hold = e.1.is_some();
+                    }
+                }
+                if seen != expected && (changed || due) && !hold {
                     for pair in want.windows(2) { win::place_below(pair[1], pair[0]); }
+                    if let Ok(mut m) = OBSERVED.lock() { if let Some(e) = m.get_mut(label) { e.2 = Some(Instant::now()); } }
                     if let Ok(mut m) = ORDER.lock() { m.insert(label.to_string(), (want.clone(), Some(std::time::Instant::now()))); }
                     // (macOS: what was wanted and what the system said: for the log, a few lines only)
                     if cfg!(target_os = "macos") && ORDER_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 120 {
