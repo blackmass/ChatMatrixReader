@@ -504,7 +504,15 @@ pub async fn web_ua(app: AppHandle, label: String, ua: String, hints: Option<Val
 }
 
 /// A fade of the window `label` to `target` within `ms` milliseconds, from where it is now (a new one takes over: the old one stops). Returns the number of this fade.
+/// (macOS experiment: the number in the file `mac_alpha_mode`, see mac.rs fade_begin)
+fn alpha_mode() -> u8 {
+    if !cfg!(target_os = "macos") { return 0; }
+    std::fs::read_to_string(crate::base_dir().join("mac_alpha_mode")).ok().and_then(|t| t.trim().parse::<u8>().ok()).unwrap_or(0)
+}
+
 fn fade(app: &AppHandle, label: &str, hwnd: isize, target: f64, ms: u64) -> u64 {
+    let mode = alpha_mode();
+    if target < 0.999 { win::fade_begin(hwnd, mode); }
     if cfg!(target_os = "macos") { crate::startup_log(&format!("web alpha {label}: to {target:.2} in {ms} ms, now: {}", win::alpha_info(hwnd))); }
     let (gen, from) = {
         let Ok(mut m) = ALPHA.lock() else { return 0 };
@@ -514,6 +522,7 @@ fn fade(app: &AppHandle, label: &str, hwnd: isize, target: f64, ms: u64) -> u64 
     };
     if ms < 40 || (target - from).abs() < 0.01 {
         win::set_alpha(hwnd, target);
+        win::fade_end(hwnd, mode, target >= 0.999);
         if let Ok(mut m) = ALPHA.lock() { if let Some(e) = m.get_mut(label) { if e.0 == gen { e.1 = target; } } }
         return gen;
     }
@@ -531,7 +540,8 @@ fn fade(app: &AppHandle, label: &str, hwnd: isize, target: f64, ms: u64) -> u64 
             if app.get_webview_window(&label).is_none() { return; }
             win::set_alpha(hwnd, v);
         }
-        if cfg!(target_os = "macos") { crate::startup_log(&format!("web alpha {label}: {target:.2} reached: {}", win::alpha_info(hwnd))); }       // (a window that darkens instead of fading: what the system says of it)
+        win::fade_end(hwnd, mode, target >= 0.999);
+        if cfg!(target_os = "macos") { crate::startup_log(&format!("web alpha {label}: {target:.2} reached (mode {mode}): {}", win::alpha_info(hwnd))); }       // (a window that darkens instead of fading: what the system says of it)
     });
     gen
 }

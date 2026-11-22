@@ -93,7 +93,7 @@ fn app_dir() -> PathBuf {
 }
 
 /// The program folder: the one that holds `app/` (and next to which config.json, Glossary.txt, the logs ... live).
-fn base_dir() -> PathBuf {
+pub(crate) fn base_dir() -> PathBuf {
     app_dir().parent().map(|p| p.to_path_buf()).unwrap_or_default()
 }
 
