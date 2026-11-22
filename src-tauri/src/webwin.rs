@@ -311,8 +311,14 @@ pub async fn web_cmd(app: AppHandle, label: String, cmd: String, url: Option<Str
 pub async fn web_forget(key: String) -> Result<(), String> {
     let k = weblib::data_key(&key);
     if k.starts_with('_') || k == "plugin" { return Err("not a folder of the mini browser".into()); }
-    let dir = crate::data_dir().join("web").join(k);
-    if dir.exists() { std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?; }
+    #[cfg(windows)]
+    {
+        let dir = crate::data_dir().join("web").join(k);
+        if dir.exists() { std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?; }
+    }
+    // (macOS: the login of a window is in a store of the system's web view, not in a folder of ours: it is cleared while the window is open ("web_clear"); a closed window's store is not reached yet)
+    #[cfg(not(windows))]
+    let _ = k;
     Ok(())
 }
 
