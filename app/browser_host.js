@@ -2,7 +2,7 @@
 // webwin.rs (the same as for a plugin, but it may go to any http or https address); its bar, its address and its order are the control center's (center.js, webpane.js). This file opens and closes
 // the windows (what the menus and the options ask: 'browser-command'), keeps where each window is and the address it was at, and tells the centers which are open ('web-state').
 import * as B from './core/browsers.js';
-import { mobileProfile } from './web_host.js';
+import { mobileProfile, desktopProfile } from './web_host.js';
 
 const INFO_MS = 500, SAVE_MS = 600, NAV_MS = 800;
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };
@@ -10,11 +10,12 @@ export const browserLabel = id => 'web_b' + Number(id);
 export const browserKey = id => 'browser' + Number(id);                       // (the name of the folder of its cookies: a window that keeps the login)
 
 export function startBrowsers({ settings, invoke, emit, listen, note = () => {}, setTimer = setInterval, clearTimer = clearInterval }) {
-  const open = new Map();                       // id -> { label, title, timers, last, pending, saveAt, navAt, url }
+  const open = new Map();                       // id -> { label, title, timers, last, pending, saveAt, navAt, url, mode }
+  const once = new Map();                       // id -> { mode, url }: for the next time it is opened (a window that changes between the phone and the computer by being opened again)
   const list = () => settings.cfg().browser_windows || [];
   const entry = id => list().find(b => b.id === id);
   const change = (id, patch) => settings.set({ browser_windows: list().map(b => (b.id === id ? { ...b, ...patch } : b)) });
-  const publish = () => emit('web-state', { source: 'browser', windows: [...open].map(([id, o]) => ({ kind: 'browser', win: id, label: o.label, title: o.title, lock: !!(entry(id) || {}).lock_window })) });
+  const publish = () => emit('web-state', { source: 'browser', windows: [...open].map(([id, o]) => ({ kind: 'browser', win: id, label: o.label, title: o.title, mode: o.mode, lock: !!(entry(id) || {}).lock_window })) });
 
   function stop(id) {
     const o = open.get(id);
@@ -27,14 +28,17 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
   async function openWindow(id) {
     const b = entry(id);
     if (!b || open.has(id)) return;
-    const url = b.start_kind === 'last' && B.isWebUrl(b.last_url) ? b.last_url : (B.isWebUrl(b.start_url) ? b.start_url : B.START_URL);
+    const again = once.get(id); once.delete(id);
+    let url = b.start_kind === 'last' && B.isWebUrl(b.last_url) ? b.last_url : (B.isWebUrl(b.start_url) ? b.start_url : B.START_URL);
+    if (again && B.isWebUrl(again.url)) url = again.url;
+    const mode = again ? again.mode : b.mode;
     const g = parseGeom(b.geometry), label = browserLabel(id);
-    const phone = b.mode === 'mobile' ? mobileProfile() : {};
-    const size = g || (b.mode === 'pc' ? { w: 960, h: 640 } : { w: 360, h: 640 });
+    const phone = mode === 'mobile' ? mobileProfile() : {};
+    const size = g || (mode === 'pc' ? { w: 960, h: 640 } : { w: 360, h: 640 });
     const args = { label, url, title: '', ua: phone.ua || '', ua_hints: phone.hints || null, allow: [], open_allow: ['*'], free: true, persist: !!b.persist, key: browserKey(id), render: settings.cfg().web_render || 'auto', w: size.w, h: size.h };
     if (g) { args.x = g.x; args.y = g.y; }
     try { await invoke('web_open', { args }); } catch (e) { note('mini browser: ' + e); return; }
-    const o = { label, title: '', timers: [], last: '', pending: null, saveAt: 0, navAt: 0, url };
+    const o = { label, title: '', timers: [], last: '', pending: null, saveAt: 0, navAt: 0, url, mode };
     open.set(id, o);
     publish();
     o.timers.push(setTimer(() => info(id, o), INFO_MS));
@@ -60,6 +64,23 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
     await invoke('web_close', { label: o.label }).catch(() => {});
   }
 
+  // The window goes to the other way of seeing a page (the phone / the computer), for as long as it is open: the settings are not changed. Windows: the web view is told what it is now and the page is
+  // loaded again, nothing is closed (the login stays). Where that is not possible the window is opened again at the same address (a login that is not kept is lost).
+  async function switchMode(id) {
+    const o = open.get(id); if (!o) return;
+    const to = o.mode === 'pc' ? 'mobile' : 'pc';
+    try {
+      const p = to === 'mobile' ? mobileProfile() : await desktopProfile();
+      await invoke('web_ua', { label: o.label, ua: p.ua, hints: p.hints || null });
+      o.mode = to; publish();
+      await invoke('web_cmd', { label: o.label, cmd: 'reload' }).catch(() => {});
+      note('mini browser: window ' + id + ' now looks like ' + to);
+    } catch {
+      once.set(id, { mode: to, url: o.url });
+      await closeWindow(id); await openWindow(id);
+    }
+  }
+
   // cookies and the rest: a window that is open does it itself, a window that is not has its folder taken away
   async function clearData(id) {
     const o = open.get(id);
@@ -73,6 +94,7 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
     else if (cmd === 'close') closeWindow(id);
     else if (cmd === 'toggle') (open.has(id) ? closeWindow(id) : openWindow(id));
     else if (cmd === 'clear') clearData(id);
+    else if (cmd === 'mode') switchMode(id);
   });
   listen('web-close', e => { const hit = [...open].find(([, o]) => o.label === (e.payload || {}).label); if (hit) closeWindow(hit[0]); });
   listen('web-hello', publish);

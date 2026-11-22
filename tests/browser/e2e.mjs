@@ -77,6 +77,7 @@ async function invoke(cmd, a = {}) {
     case 'web_allow': webCalls.push(['allow', a.allow]); return null;
     case 'web_info': return { exists: true, visible: true, position: [100, 50], size: [360, 640] };
     case 'web_cmd': webCalls.push(['cmd', a.label, a.cmd, a.url]); return null;
+    case 'web_ua': webCalls.push(['ua', a.label, a.ua, a.hints]); return null;
     case 'address_show': webCalls.push(['addr', a]); return null;
     case 'address_hide': webCalls.push(['addrhide']); return null;
     case 'center_title': return null;
@@ -986,11 +987,27 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await cm.evaluate(() => window.__TAURI__.event.emit('web-nav', { label: 'web_b1', url: 'https://a.b/c' }));            // (a third page tells it: the hub and the center both hear it)
     await until(async () => (await addr.locator('.ptxt').textContent()) === 'https://a.b/c', 'the address is shown');
     await until(() => cfgFile().browser_windows[0].last_url === 'https://a.b/c', 'the address is kept as the last one', 3000);
+    // the home button, the phone / computer button, and this page in the user's own browser
+    await cp.locator('.webpane .phome').dispatchEvent('click');
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'goto' && c[3] === 'https://www.google.com/'), 'the home button goes to the first address');
+    const modeBtn = cp.locator('.webpane .pmode');
+    ok(await modeBtn.getAttribute('data-mode') === 'mobile', 'browser/mode: the button shows the phone');
+    await modeBtn.dispatchEvent('click');
+    await until(() => webCalls.some(c => c[0] === 'ua' && c[1] === 'web_b1' && !c[2].includes('Android')), 'the window is told it is a computer now');
+    await until(async () => (await modeBtn.getAttribute('data-mode')) === 'pc', 'the button shows the computer');
+    ok(webCalls.some(c => c[0] === 'cmd' && c[1] === 'web_b1' && c[2] === 'reload'), 'browser/mode: the page is loaded again');
+    ok(cfgFile().browser_windows[0].mode === 'mobile', 'browser/mode: the setting is not changed (it is only for as long as the window is open)');
+    await modeBtn.dispatchEvent('click');
+    await until(() => webCalls.some(c => c[0] === 'ua' && c[1] === 'web_b1' && c[2].includes('Android') && c[3] && c[3].mobile === true), 'and back to the phone (the headers say it too)');
+    await cp.locator('.webpane .ptab').dispatchEvent('click');
+    ok(!webCalls.some(c => c[0] === 'cmd' && c[2] === 'external'), 'browser/external: a plain click on the title does nothing');
+    await cp.locator('.webpane .ptab').dispatchEvent('click', { shiftKey: true });
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[1] === 'web_b1' && c[2] === 'external'), 'Shift + click on the title opens the page in the user\'s browser');
     // the right button on the bar: the bookmarks, adding the page, the settings
     await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 4, y: 10 } });
     await until(async () => (await cp.locator('#ctx').isVisible()), 'the menu of the bar');
     const items = await cp.locator('#ctx div:not(.sep)').allTextContents();
-    ok(items[0] === '지도' && items.includes('현재 페이지를 즐겨찾기에 추가') && items.includes('이 창의 설정…'), 'browser/menu: the bookmarks, adding the page, the settings: ' + items.join('|'));
+    ok(items[0] === '지도' && items.includes('현재 페이지를 즐겨찾기에 추가') && items.includes('현재 페이지를 내 브라우저에서 열기') && items.includes('이 창의 설정…'), 'browser/menu: the bookmarks, adding the page, the settings: ' + items.join('|'));
     await cp.locator('#ctx div', { hasText: '지도' }).click();
     await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'goto' && c[3] === 'https://map.kakao.com/'), 'a bookmark takes this window there');
     await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 4, y: 10 } });

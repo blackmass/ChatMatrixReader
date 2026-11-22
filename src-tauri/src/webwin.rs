@@ -27,6 +27,23 @@ static CLOSING: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::
 static FREE: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 fn is_free(label: &str) -> bool { FREE.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) }
 static PREV_FG: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// The secret of each web window: put into the script of ITS page when the window is made; a command (see PAGE) that does not carry it is refused. A script of the site in the page cannot read it (it is
+/// a variable inside the script of ours), and a frame of the page does not know it.
+static TOKENS: LazyLock<Mutex<std::collections::HashMap<String, String>>> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+fn new_token() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let part = || { let mut h = std::collections::hash_map::RandomState::new().build_hasher(); h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)); h.finish() };
+    format!("{:016x}{:016x}", part(), part())
+}
+/// A command of a page: `raw` = "<secret>/<command>?<query>". Only the one that carries the secret of this window is carried out.
+fn dispatch(app: &AppHandle, label: &str, raw: &str) {
+    let Some((token, rest)) = raw.split_once('/') else { event("command refused: no secret".into()); return };
+    let ok = TOKENS.lock().ok().and_then(|m| m.get(label).cloned()).map_or(false, |t| t.len() == token.len() && t == token);
+    if !ok { event(format!("command refused: wrong secret ({label})")); return; }
+    let (cmd, query) = match rest.split_once('?') { Some((c, q)) => (c, Some(q)), None => (rest, None) };
+    command(app, label, cmd, query);
+}
+
 /// What the plugin's log should tell about the windows (addresses that were refused): taken by web_events
 static EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 fn event(text: String) { if let Ok(mut e) = EVENTS.lock() { if e.len() < 60 { e.push(text); } } }
@@ -65,7 +82,9 @@ const PAGE: &str = r#"(() => {
   if (window.top !== window.self) return;                       // (only the page itself, not the frames in it: video players, advertisements ...)
   if (window.__cmrPage) return; window.__cmrPage = 1;
   // (Windows: the message channel of the web view: it is no navigation, so it never cuts a page that is loading short, as an address that is gone to does. Elsewhere: the address)
-  const go = c => { try { if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(String(c)); else location.href = 'cmr-cmd://' + c; } catch (e) {} };
+  const T = '__TOKEN__';                                        // (the secret of this window: every command carries it, the program refuses the rest)
+  const post = window.chrome && window.chrome.webview && window.chrome.webview.postMessage ? window.chrome.webview.postMessage.bind(window.chrome.webview) : null;
+  const go = c => { try { if (post) post(T + '/' + c); else location.href = 'cmr-cmd://' + T + '/' + c; } catch (e) {} };
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
   const external = u => { try { const a = new URL(u, location.href); if (a.protocol === 'https:') go('open?u=' + encodeURIComponent(a.href)); } catch (e) {} };
@@ -130,6 +149,7 @@ fn forget(w: &WebviewWindow) {
     if let Ok(mut l) = FREE.lock() { l.retain(|x| x != &label); }
     if let Ok(mut m) = OPEN_ALLOW.lock() { m.remove(&label); }
     if let Ok(mut m) = PREV_FG.lock() { m.remove(&label); }
+    if let Ok(mut m) = TOKENS.lock() { m.remove(&label); }
 }
 /// (called when the system asks the window to close, e.g. the window's own close)
 pub fn on_close_requested(label: &str) {
@@ -200,7 +220,7 @@ pub(crate) fn set_outer(w: &WebviewWindow, x: Option<i32>, y: Option<i32>, width
     Ok(())
 }
 
-/// What the page tells by the message channel of the web view (Windows): the same words as the address "cmr-cmd://<command>?<query>".
+/// What the page tells by the message channel of the web view (Windows): "<secret>/<command>?<query>" (the same words as the address "cmr-cmd://<secret>/<command>?<query>").
 #[cfg(windows)]
 fn listen_messages(win: &WebviewWindow, app: AppHandle, label: String) {
     let _ = win.with_webview(move |wv| unsafe {
@@ -213,7 +233,7 @@ fn listen_messages(win: &WebviewWindow, app: AppHandle, label: String) {
                 if args.TryGetWebMessageAsString(&mut p).is_ok() && !p.is_null() {
                     let text = webview2_com::take_pwstr(p);
                     if text.len() <= 2000 {
-                        if let Ok(u) = tauri::Url::parse(&format!("cmr-cmd://{text}")) { command(&app, &label, u.host_str().unwrap_or(""), u.query()); }
+                        dispatch(&app, &label, &text);
                     }
                 }
             }
@@ -221,6 +241,14 @@ fn listen_messages(win: &WebviewWindow, app: AppHandle, label: String) {
         }));
         let mut token = Default::default();
         let _ = core.add_WebMessageReceived(&handler, &mut token);
+        // a page that asks for the camera, the microphone, the place, notifications ...: always no
+        use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_PERMISSION_STATE_DENY;
+        let deny = webview2_com::PermissionRequestedEventHandler::create(Box::new(|_, args| {
+            if let Some(args) = args { let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY); }
+            Ok(())
+        }));
+        let mut token2 = Default::default();
+        let _ = core.add_PermissionRequested(&deny, &mut token2);
     });
 }
 
@@ -244,7 +272,8 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     if !label_ok(&label) { return Err("bad label".into()); }
     let url = tauri::Url::parse(args.get("url").and_then(|v| v.as_str()).unwrap_or("")).map_err(|e| e.to_string())?;
     let allow = strs(&args, "allow");
-    let free = args.get("free").and_then(|v| v.as_bool()).unwrap_or(false);
+    // (only a window of the mini browser, made by the user, may go anywhere: web_b<number>; a plugin's window never)
+    let free = args.get("free").and_then(|v| v.as_bool()).unwrap_or(false) && label.strip_prefix("web_b").map_or(false, |n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()));
     let host_ok = if free { (url.scheme() == "https" || url.scheme() == "http") && url.host_str().map_or(false, |h| !h.is_empty()) }
                   else { url.scheme() == "https" && url.host_str().map_or(false, |h| weblib::host_allowed(h, &allow)) };
     if !host_ok { return Err("this address is not allowed".into()); }
@@ -279,7 +308,9 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     };
     #[cfg(target_os = "macos")]
     let b = if persist { b.data_store_identifier(weblib::store_id(&key)) } else { b.incognito(true) };
-    let b = b.initialization_script(PAGE).initialization_script(KEYS).initialization_script_for_all_frames(KEYS);
+    let token = new_token();
+    if let Ok(mut m) = TOKENS.lock() { m.insert(label.clone(), token.clone()); }
+    let b = b.initialization_script(PAGE.replace("__TOKEN__", &token)).initialization_script(KEYS).initialization_script_for_all_frames(KEYS);
     let mut b = b
         .title("CMR Web")
         .decorations(false)
@@ -293,8 +324,9 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         .inner_size(args.get("w").and_then(|v| v.as_f64()).unwrap_or(360.0).max(MIN_W), args.get("h").and_then(|v| v.as_f64()).unwrap_or(640.0).max(MIN_H))
         .min_inner_size(MIN_W, MIN_H)
         .on_new_window(|_, _| NewWindowResponse::Deny)
+        .on_download(|_, _| { event("download refused".into()); false })          // (nothing is saved to the computer by a page of the mini browser)
         .on_navigation(move |u| {
-            if weblib::is_command_url(u.scheme()) { command(&app2, &lbl, u.host_str().unwrap_or(""), u.query()); return false; }
+            if weblib::is_command_url(u.scheme()) { dispatch(&app2, &lbl, u.as_str().strip_prefix("cmr-cmd://").unwrap_or("")); return false; }
             let allowed = ALLOW.lock().ok().and_then(|m| m.get(&lbl).cloned()).unwrap_or_default();
             let ok = if is_free(&lbl) { u.scheme() == "https" || u.scheme() == "http" } else { u.scheme() == "https" && u.host_str().map_or(false, |h| weblib::host_allowed(h, &allowed)) };
             if !ok {
@@ -339,6 +371,12 @@ pub async fn web_cmd(app: AppHandle, label: String, cmd: String, url: Option<Str
     match cmd.as_str() {
         "back" => { let _ = w.eval("history.back()"); }
         "forward" => { let _ = w.eval("history.forward()"); }
+        "external" => {                                                                // (the page as it is now, in the user's own browser: only where the window itself may open links: the same rule)
+            if let Ok(u) = w.url() {
+                let allow = OPEN_ALLOW.lock().ok().and_then(|m| m.get(&label).cloned()).unwrap_or_default();
+                let _ = crate::plugin_open_url(u.to_string(), allow);
+            }
+        }
         "reload" => { let _ = w.eval("location.reload()"); }
         "goto" => {                                                                    // (the address bar of the center: only a window the user opened may be sent anywhere)
             if is_free(&label) {
@@ -364,6 +402,24 @@ pub async fn web_forget(key: String) -> Result<(), String> {
     #[cfg(not(windows))]
     let _ = k;
     Ok(())
+}
+
+/// A window of the mini browser says to the web view what it is (the phone or the computer): a user agent and the headers of the browser that say the same. Windows only (elsewhere the window is opened again).
+#[tauri::command]
+pub async fn web_ua(app: AppHandle, label: String, ua: String, hints: Option<Value>) -> Result<(), String> {
+    if is_closing(&label) { return Ok(()); }
+    if !is_free(&label) { return Err("not a window of the mini browser".into()); }
+    if ua.is_empty() || ua.len() > 600 { return Err("bad user agent".into()); }
+    #[cfg(windows)]
+    {
+        let w = get(&app, &label)?;
+        let mut p = json!({ "userAgent": ua });
+        if let Some(h) = hints.filter(|h| h.is_object()) { p["userAgentMetadata"] = h; }
+        cdp(&w, "Emulation.setUserAgentOverride", p.to_string());
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    { let _ = (app, hints); Err("only on Windows".into()) }
 }
 
 #[tauri::command]

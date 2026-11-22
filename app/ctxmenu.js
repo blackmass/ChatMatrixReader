@@ -66,6 +66,7 @@ function browserMenu(cfg, pane, add, list) {
     if (!B.isWebUrl(pane.url)) return;
     emit('cfg-patch', { patch: { bookmarks: [...(cfg.bookmarks || []), { name: pane.title || '', url: pane.url }] } });
   }, B.isWebUrl(pane.url) && !marks.some(m => m.url === pane.url) ? '' : 'off');
+  add(tr('현재 페이지를 내 브라우저에서 열기'), () => invoke('web_cmd', { label: pane.label, cmd: 'external' }).catch(() => {}), B.isWebUrl(pane.url) ? '' : 'off');
   add(tr('이 창의 설정…'), () => {
     try { localStorage.setItem('cmr-browser-sel', 'b' + pane.win); localStorage.setItem('cmr-options-tab', 'browser'); } catch { /* the options open as they were */ }
     invoke('open_options').catch(() => {});

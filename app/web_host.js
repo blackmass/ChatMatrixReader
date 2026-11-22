@@ -17,6 +17,16 @@ export function mobileProfile(nav = navigator) {
     hints: { brands, fullVersionList: brands.map(b => ({ brand: b.brand, version: b.version === '99' ? '99.0.0.0' : major + '.0.0.0' })), platform: 'Android', platformVersion: '13.0.0', architecture: '', model: 'Pixel 7', mobile: true },
   };
 }
+// The page's own: what this web view says it is (for a window that goes back from the phone to the computer).
+export async function desktopProfile(nav = navigator) {
+  const ua = String(nav.userAgent || ''), d = nav.userAgentData;
+  if (!d || !d.getHighEntropyValues) return { ua };
+  try {
+    const v = await d.getHighEntropyValues(['architecture', 'bitness', 'model', 'platformVersion', 'fullVersionList', 'wow64']);
+    const pick = l => (l || []).map(b => ({ brand: b.brand, version: b.version }));
+    return { ua, hints: { brands: pick(d.brands), fullVersionList: pick(v.fullVersionList), platform: d.platform || 'Windows', platformVersion: v.platformVersion || '', architecture: v.architecture || '', model: v.model || '', mobile: false, bitness: v.bitness || '', wow64: !!v.wow64 } };
+  } catch { return { ua }; }
+}
 export const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const INFO_MS = 500, SAVE_MS = 600, DEFAULT_W = 360, DEFAULT_H = 640;
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };

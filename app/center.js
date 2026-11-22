@@ -71,6 +71,7 @@ function sync() {
   let added = false;
   for (const [l, w] of wantWeb) if (!webs.has(l)) { webs.set(l, new WebPane(w, center)); added = true; }
   for (const [l, p] of [...webs]) if (!wantWeb.has(l)) { p.destroy(); webs.delete(l); }
+  for (const [l, w] of wantWeb) { const p = webs.get(l); if (p && p.setMode) p.setMode(w.mode); }
   if (added) fit();                                                    // (a new window that is out of every screen comes back to the main one)
   report();
 }
