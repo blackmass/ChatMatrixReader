@@ -218,7 +218,17 @@ pub fn set_not_rude(hwnd: isize) {
 
 /// (macOS only: a window that never becomes the key window unless allowed; on Windows the "no activate" style does it)
 pub fn make_no_key(_hwnd: isize) {}
-pub fn set_noactivate_light(hwnd: isize, on: bool) { set_noactivate(hwnd, on); }
+/// Only the "may it be activated" bit, nothing else is redrawn (a text box of a page or of the bar is used: the big center must not be redone by the system: the pictures of the other screens
+/// went black for a moment). The first time (no tool window style yet) it is the whole thing.
+pub fn set_noactivate_light(hwnd: isize, on: bool) {
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if on && style & 0x80 == 0 { set_noactivate(hwnd, true); return; }
+        if let Ok(mut l) = KEEP.lock() { l.retain(|&h| h != hwnd); if on { l.push(hwnd); } }
+        let new = if on { style | WS_EX_NOACTIVATE } else { style & !WS_EX_NOACTIVATE };
+        if new != style { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new); }
+    }
+}
 pub fn allow_key(_hwnd: isize, _on: bool) {}
 pub fn forget(_hwnd: isize) {}
 

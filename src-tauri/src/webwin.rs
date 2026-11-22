@@ -86,16 +86,14 @@ const PAGE: &str = r#"(() => {
   // lifts that for the window ("prep": nothing moves, the game keeps the keyboard); a click on the box then activates the window like any window, by the system, and the keys go to the page.
   // When the mouse leaves a box that was not used the program puts it back ("unprep"); a window that was used keeps the keyboard until the user clicks the game (the window then loses it: "unprep" again).
   const editable = x => !!x && (x.isContentEditable || (/^(INPUT|TEXTAREA|SELECT)$/.test(x.tagName) && !/^(button|checkbox|radio|submit|reset|image|range|color|file)$/i.test(x.type || '')));
-  // The state lives in the program (the window: may it be activated?); this page only tells it. A page that is loaded again (a search sent, a link) starts with nothing in mind while the window may still be
-  // prepared from the page before: the program puts a window that is not active back whenever a page is going to load (see on_navigation); a window that loses the keyboard is always put back.
-  let prepared = false, leaveT = 0;
-  const prep = on => { if (on !== prepared) { prepared = on; go(on ? 'prep' : 'unprep'); } };
+  // The state lives in the program (the window: may it be activated?); this page only tells it, and never believes what it told before (the page is made again at every address, the window is not;
+  // `document.hasFocus()` is true in a window that is not active, too). The program puts a window that is not active back whenever a page is going to load (see on_navigation).
+  let leaveT = 0;
   const later = (fn, ms) => { clearTimeout(leaveT); leaveT = setTimeout(fn, ms); };
-  if (document.hasFocus()) prepared = true;
-  document.addEventListener('mouseover', e => { if (editable(e.target)) { clearTimeout(leaveT); prep(true); } }, true);
+  document.addEventListener('mouseover', e => { if (editable(e.target)) { clearTimeout(leaveT); go('prep'); } }, true);
   document.addEventListener('mousedown', e => { if (e.button === 0 && editable(e.target)) go('inputclick'); }, true);      // (macOS: asked to make sure the program is active, see the program)
-  document.addEventListener('mouseout', e => { if (editable(e.target)) later(() => { if (!document.hasFocus()) prep(false); }, 300); }, true);      // (the mouse left a text box that was not used: not while the window is active; then it is the user's click on the game that ends it)
-  window.addEventListener('blur', () => later(() => { if (!document.hasFocus()) { prepared = false; go('unprep'); } }, 400));      // (the user went to the game or another window: whatever the page thinks, the window takes nothing again; a moment later: a click on a text box moves the focus inside the window for a moment)
+  document.addEventListener('mouseout', e => { if (editable(e.target)) later(() => go('unprep'), 300); }, true);      // (the program does nothing when the window is the active one: the user is typing, and it is the click on the game that ends it)
+  window.addEventListener('blur', () => later(() => go('unprep'), 400));      // (the user went to the game or another window; a moment later: a click on a text box moves the focus inside the window for a moment)
   // How far the page has scrolled, told to the program (which tells the center: it draws the thin line at the edge while the page scrolls; nothing of ours is drawn in the page). Only the
   // scroll of the page itself, a few times a second.
   let lastScroll = 0, lastText = '';
@@ -174,6 +172,7 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
         "unprep" | "release" => {                     // the text box is left: back to a window that takes nothing; "release": it was used, the keyboard goes back to where it was
             if let Ok(h) = hwnd_of(&win) {
                 let was_front = win::foreground() == h || (cfg!(target_os = "macos") && win::self_front());       // (macOS: `foreground` does not find this window)
+                if cmd == "unprep" && was_front { return; }            // (the window is in use: it takes nothing again when it loses the keyboard)
                 win::allow_key(h, false);
                 win::set_noactivate_light(h, true);
                 if cmd == "release" && was_front {
