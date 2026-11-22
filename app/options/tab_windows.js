@@ -11,8 +11,6 @@ import { widgetsRow } from './widget_row.js';
 const { emit, listen } = window.__TAURI__.event;
 
 import { chName, chColor } from './channels.js';
-// changing the z-order of the other windows can leave this one behind them: it takes the focus back when they are done
-const refocus = () => { window.__cmrRefocus = performance.now(); };     // the window that changes its place gives a sign when it is done (z-done): see options.js
 import { tr } from '../core/i18n.js';
 const FADE_START = 60;                    // an empty "hide old lines" box: the first arrow press gives 60 s (up or down), then one step at a time
 // the size of the upper line of a window (its own, or window 1's when it follows): where an empty "lower line size" starts from
@@ -127,10 +125,10 @@ const tab = {
       { win: true, key: 'lock_window', type: 'check', label: '창 고정', keywords: '이동 크기 조절 잠금 드래그 고정 lock',
         note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다. 탭을 누르다가 창이 밀리는 일을 막습니다.' },
       { win: true, key: 'topmost', type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시',
-        apply: (ctx, v) => { refocus(); ctx.put({ win: true, key: 'topmost' }, v); if (v) ctx.put({ win: true, key: 'topmost_wow_only' }, false); } },
+        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost' }, v); if (v) ctx.put({ win: true, key: 'topmost_wow_only' }, false); } },
       { win: true, key: 'topmost_wow_only', type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
         note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.',
-        apply: (ctx, v) => { refocus(); ctx.put({ win: true, key: 'topmost_wow_only' }, v); if (v) ctx.put({ win: true, key: 'topmost' }, false); } },
+        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost_wow_only' }, v); if (v) ctx.put({ win: true, key: 'topmost' }, false); } },
     ] },
     { title: '배경과 조작', rows: [
       { win: true, key: 'blur', type: 'select', label: '배경 흐림', options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴',
@@ -182,9 +180,9 @@ const tab = {
     };
     function refresh() {
       const kids = env.cfg().child_windows, sel = env.sel();
-      for (const c of kids) if (!known.has(c.id)) { known.add(c.id); env.select(c.id); return; }       // a window was just made: show it
+      for (const c of kids) if (!known.has(c.id)) { known.add(c.id); if (c.kind !== 'web') { env.select(c.id); return; } }       // a window was just made: show it
       pick.textContent = '';
-      const plug = kids.filter(c => c.owner);
+      const plug = kids.filter(c => c.owner && c.kind !== 'web');                       // (the web windows of the plugins are in the tab 미니 브라우저)
       for (const [id, name] of [[1, nameFor(env.cfg(), 1)], ...kids.filter(c => !c.owner).map(c => [c.id, nameFor(env.cfg(), c.id)])]) {
         const o = document.createElement('option'); o.value = id; o.textContent = `${id} · ${name}`; pick.append(o);
       }
@@ -192,11 +190,11 @@ const tab = {
         const line = document.createElement('option'); line.disabled = true; line.textContent = '── ' + tr('플러그인 창') + ' ──'; pick.append(line);
         for (const c of plug) { const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.id} · ${nameFor(env.cfg(), c.id)}`; pick.append(o); }
       }
-      pick.value = String(kids.some(c => c.id === sel) || sel === 1 ? sel : 1);
+      pick.value = String(kids.some(c => c.id === sel && c.kind !== 'web') || sel === 1 ? sel : 1);
       const dh = dockHost(kids, sel), isOpen = sel === 1 || open.has(sel), mine = kids.find(c => c.id === sel), owned = !!(mine && mine.owner);
       const off = owned && !((env.cfg().plugins || {})[mine.owner] || {}).enabled;
-      state.textContent = off ? tr('플러그인이 꺼져 있습니다') : mine && mine.kind === 'web' ? tr('플러그인이 엽니다') : dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
-      toggle.hidden = sel === 1 || !!dh || off || !!(mine && mine.kind === 'web'); toggle.textContent = isOpen ? '닫기' : '열기';
+      state.textContent = off ? tr('플러그인이 꺼져 있습니다')  : dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
+      toggle.hidden = sel === 1 || !!dh || off; toggle.textContent = isOpen ? '닫기' : '열기';
       del.hidden = sel === 1 || sel === VOICE_ID || owned;                                  // (the window of a plugin is not deleted here: it goes with its plugin) if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
     }
     return { el, refresh };
@@ -206,12 +204,9 @@ const tab = {
 // The windows of a plugin show only the basic settings (the order of the windows, the background, the mouse, the lock ...): what is inside the window is the plugin's
 const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
 const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
-// a web window (a page of the web in a window of the program) has even fewer: when it opens, the lock, the order of the windows (its title is the title of the page)
-const WEB_ROWS = new Set(['open_mode', 'topmost', 'topmost_wow_only', 'lock_window']);
-const webWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.kind === 'web'); };
 for (const card of tab.cards) for (const row of card.rows) {
   const was = row.show;
-  if (PLUGIN_ROWS.has(row.key)) { row.show = (c, x) => (!webWindow(x) || WEB_ROWS.has(row.key)) && (!was || was(c, x)); continue; }
+  if (PLUGIN_ROWS.has(row.key)) continue;
   row.show = (c, x) => !pluginWindow(x) && (!was || was(c, x));
 }
 export default tab;

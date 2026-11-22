@@ -327,3 +327,18 @@ input.colortext.follow-input { width: 150px; }
 .res-table th, .res-table td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line, #3c3f46); white-space: nowrap; }
 .res-table td:nth-child(n+3), .res-table th:nth-child(n+3) { text-align: right; }
 .res-table tr.res-main td { font-weight: 600; }
+
+/* 미니 브라우저 tab: the two pages above the picker, the bookmark lines */
+.bt { display: flex; flex-direction: column; gap: 10px; }
+.subtabs { display: flex; gap: 8px; }
+.subtabs button { height: 34px; padding: 0 18px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); color: var(--text); cursor: pointer; font-size: 14px; }
+.subtabs button:hover { background: #2b2d33; }
+.subtabs button.on { border-color: var(--accent); color: var(--accent); background: #2f2e28; font-weight: bold; }
+.bm { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.bm-row { display: flex; gap: 6px; align-items: center; }
+.bm-row input:first-child { width: 170px; flex: none; }
+.bm-row input:nth-child(2) { flex: 1; min-width: 0; }
+.bm-row button { height: 28px; min-width: 30px; }
+.bm-row input.bad { border-color: var(--bad); }
+.bm-empty { color: var(--dim); margin: 4px 0; }
+.bm-add { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }

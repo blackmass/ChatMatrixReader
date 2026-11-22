@@ -22,12 +22,12 @@ const settings = { cfg: () => cfg, set: p => { Object.assign(cfg, p); subs.forEa
 const wm = startWindows({ settings });
 const settle = () => new Promise(r => setTimeout(r, 20));
 await settle();
-check(wm.openIds().join() === '3' && calls.join() === 'open_overlay:win3', 'the program starts: only the "always" window opens');
+check(wm.openIds().join() === '3' && calls.length === 0, 'the program starts: only the "always" window opens (the exe is not asked for anything: the control centers draw the windows)');
 const modes0 = modes();
 calls.length = 0;
 
 wm.setVoice(true); await settle();
-check(wm.openIds().sort().join() === '2,3,4' && calls.sort().join() === 'open_overlay:win2,open_overlay:win4', 'the voice recognition is turned on: the "voice" windows open');
+check(wm.openIds().sort().join() === '2,3,4' && calls.length === 0, 'the voice recognition is turned on: the "voice" windows open');
 calls.length = 0; wm.setVoice(true); await settle();
 check(calls.length === 0, 'told again: nothing happens');
 

@@ -151,11 +151,11 @@ fn serve(path: &str) -> tauri::http::Response<Vec<u8>> {
     let file = if name.starts_with("fonts/") { base_dir().join(name) } else { app_dir().join(name) };
     match std::fs::read(&file) {
         Ok(bytes) => builder.status(200).header("Content-Type", mime(name)).body(bytes).unwrap(),
-        Err(_) => builder
+        Err(_) => { startup_log(&format!("not found: {}", file.display())); builder
             .status(404)
             .header("Content-Type", "text/plain; charset=utf-8")
             .body(format!("not found: {}", file.display()).into_bytes())
-            .unwrap(),
+            .unwrap() }
     }
 }
 
@@ -314,22 +314,14 @@ fn data_dir() -> PathBuf {
 fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::Result<WebviewWindow> {
     // All windows share one web view folder, so they must all be started with the same arguments. The three "disable" switches keep a page
     // that is hidden or covered (the control window) running at full speed: its timers are the capture loop and the translation queue.
-    let b = WebviewWindowBuilder::new(app, label, WebviewUrl::External(page_url(page)));
+    let b = WebviewWindowBuilder::new(app, label, WebviewUrl::External(page_url(page)))
+        .initialization_script(ERROR_SCRIPT)
+        .on_page_load(|w, p| startup_log(&format!("page {:?} {} {}", p.event(), w.label(), p.url())));
     #[cfg(windows)]
     let b = b.data_directory(data_dir()).additional_browser_args(
         "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
     );
     let b = match kind {
-        "overlay" => b
-            .title("CMR Overlay")
-            .transparent(true)
-            .decorations(false)
-            .shadow(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .visible(false)         // the page shows the window when it has drawn itself (else a black square is seen for a moment)
-            .resizable(false)       // the page resizes it by the edges it draws itself (not at the top: that is the title bar)
-            .inner_size(520.0, 260.0),
         "input" => b
             .title(INPUT_TITLE)
             .transparent(true)
@@ -340,19 +332,6 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             .resizable(false)
             .visible(false)
             .inner_size(520.0, 46.0),
-        // the popup: the menu and the tooltips of the translation windows. Made when first needed and shown/hidden/closed by the pages (popup_*).
-        // No focus (the game keeps the keyboard), always on top (not "above the game": nothing to be ordered against), the size is set by the page.
-        "popup" => b
-            .title("CMR Popup")
-            .transparent(true)
-            .decorations(false)
-            .shadow(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(false)
-            .focusable(false)
-            .visible(false)
-            .inner_size(40.0, 40.0),
         // a control center: a transparent window over all the screens (center.rs); it takes the first click of an inactive program too
         // the blur of a pane (center.rs): an empty transparent window under its center, the system blurs what is behind it
         "blur" => b.title("CMR Blur").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).inner_size(100.0, 100.0),
@@ -380,17 +359,13 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             win::raise_top(h);
         }
     }
-    if kind == "popup" {
-        let _ = w.set_ignore_cursor_events(true);
-        if let Ok(h) = hwnd_of(&w) { win::set_noactivate(h, true); }
-    }
     if kind == "options" {
         let _ = w.set_always_on_top(false);            // an ordinary window, whatever the other windows do
         if let Ok(h) = hwnd_of(&w) {
             win::style_caption(h);                     // (before the window is seen: no white title bar first)
         }
     }
-    if kind == "overlay" || kind == "options" {
+    if kind == "options" {
         // the page shows its window; when it does not (an error in the page), it is shown after a while anyway
         let again = w.clone();
         std::thread::spawn(move || {
@@ -458,39 +433,6 @@ fn capture(x: i32, y: i32, w: i32, h: i32) -> Result<tauri::ipc::Response, Strin
     win::capture(x, y, w, h).map(|bytes| tauri::ipc::Response::new(bytes))
 }
 
-/// The calling window stops (or starts again) taking the keyboard away from the game when clicked.
-#[tauri::command]
-fn set_noactivate(window: WebviewWindow, on: bool) -> Result<(), String> {
-    win::set_noactivate(hwnd_of(&window)?, on);
-    Ok(())
-}
-
-/// Blur behind the calling window. color: "#rrggbb"; alpha 0..1 = strength of that colour over the blur; state 3 blur / 4 strong blur.
-#[tauri::command]
-fn set_blur(window: WebviewWindow, on: bool, state: i32, color: String, alpha: f64) -> Result<bool, String> {
-    let hex = color.trim_start_matches('#');
-    let part = |i: usize| u8::from_str_radix(hex.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0);
-    Ok(win::set_blur(hwnd_of(&window)?, on, state, part(0), part(2), part(4), alpha))
-}
-
-#[tauri::command]
-async fn open_overlay(app: AppHandle, label: String) -> Result<(), String> {
-    if center::wanted() { return Ok(()); }                  // (3.2: a translation window is a pane of a center, not a window)
-    if let Some(w) = app.get_webview_window(&label) {
-        return w.show().map_err(|e| e.to_string());
-    }
-    make_window(&app, &label, "overlay.html", "overlay").map(|_| ()).map_err(|e| e.to_string())
-}
-
-/// The popup window (menu / tooltips): made when it is needed first. Nothing happens when it is there already.
-#[tauri::command]
-async fn popup_open(app: AppHandle) -> Result<(), String> {
-    if app.get_webview_window("popup").is_some() {
-        return Ok(());
-    }
-    make_window(&app, "popup", "popup.html", "popup").map(|_| ()).map_err(|e| e.to_string())
-}
-
 /// The usable area (without the taskbar) and the scale of the monitor that has the point; nothing known = a huge area (nothing is moved).
 fn monitor_at(win: &WebviewWindow, x: i32, y: i32) -> (placement::Area, f64) {
     let m = win.monitor_from_point(x as f64, y as f64).ok().flatten().or_else(|| win.primary_monitor().ok().flatten());
@@ -503,95 +445,6 @@ fn monitor_at(win: &WebviewWindow, x: i32, y: i32) -> (placement::Area, f64) {
     }
 }
 
-/// What a tip that follows the cursor needs to know between two moves: the size of its page (CSS pixels) and where it is.
-struct PopupFollow {
-    w: f64,
-    h: f64,
-    last: (i32, i32),
-}
-static POPUP_FOLLOW: std::sync::Mutex<Option<PopupFollow>> = std::sync::Mutex::new(None);
-
-/// Puts the popup at a place and shows it WITHOUT taking the focus. `kind`: "menu" (takes the mouse; its corner at `at`) or "tip" (the mouse goes
-/// through it). `at`: [x, y], the cursor (real screen pixels); `anchor`: [left, top, right, bottom] of what a tip is about (a widget): above it.
-/// (w, h): the size of the page in CSS pixels (times the scale of the monitor it lands on: the page does not know that monitor). Everything is put
-/// inside the usable area of the monitor the cursor / the anchor is on (placement.rs).
-#[tauri::command]
-fn popup_place(app: AppHandle, kind: String, at: Option<Vec<i32>>, anchor: Option<Vec<i32>>, w: f64, h: f64) -> Result<(), String> {
-    let win = app.get_webview_window("popup").ok_or("no popup window")?;
-    let e = |e: tauri::Error| e.to_string();
-    let menu = kind == "menu";
-    let anchor = anchor.filter(|a| a.len() == 4);
-    let at = at.filter(|p| p.len() == 2);
-    let (rx, ry) = match (&anchor, &at) {
-        (Some(a), _) => ((a[0] + a[2]) / 2, (a[1] + a[3]) / 2),
-        (None, Some(p)) => (p[0], p[1]),
-        _ => return Err("no place to show it at".into()),
-    };
-    let (area, sc) = monitor_at(&win, rx, ry);
-    let (pw, ph) = ((w * sc).ceil().max(1.0) as i32, (h * sc).ceil().max(1.0) as i32);
-    let (x, y) = match &anchor {
-        Some(a) => placement::above_anchor(area, a[0], a[1], a[2], a[3], pw, ph, (6.0 * sc) as i32),
-        None => placement::at_point(area, rx, ry, pw, ph, if menu { 0 } else { (12.0 * sc) as i32 }, if menu { 0 } else { (16.0 * sc) as i32 }),
-    };
-    if let Ok(mut f) = POPUP_FOLLOW.lock() {
-        *f = if !menu && anchor.is_none() { Some(PopupFollow { w, h, last: (x, y) }) } else { None };
-    }
-    win.set_ignore_cursor_events(!menu).map_err(e)?;
-    win.set_size(tauri::PhysicalSize::new(pw as u32, ph as u32)).map_err(e)?;
-    win.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?;
-    win.show().map_err(e)?;
-    if let Ok(h) = hwnd_of(&win) {
-        win::keep_style(h);
-        win::set_topmost(h, true, 0);                 // (the window library may think it is on top already and skip it)
-    }
-    Ok(())
-}
-
-/// A tip that follows the cursor: the page asks again and again; the exe reads the cursor itself and moves the window (nothing goes back and forth
-/// with the pages). The same rules as at the start: it goes to the other side of the cursor at the edge of the monitor the cursor is on.
-#[tauri::command]
-fn popup_follow(app: AppHandle) -> Result<(), String> {
-    let (w, h, last) = match POPUP_FOLLOW.lock() {
-        Ok(f) => match f.as_ref() { Some(s) => (s.w, s.h, s.last), None => return Ok(()) },
-        Err(_) => return Ok(()),
-    };
-    let win = match app.get_webview_window("popup") { Some(w) => w, None => return Ok(()) };
-    let e = |e: tauri::Error| e.to_string();
-    let (cx, cy) = win::cursor_pos();
-    let (area, sc) = monitor_at(&win, cx, cy);
-    let (pw, ph) = ((w * sc).ceil().max(1.0) as i32, (h * sc).ceil().max(1.0) as i32);
-    let (x, y) = placement::at_point(area, cx, cy, pw, ph, (12.0 * sc) as i32, (16.0 * sc) as i32);
-    if let Ok(cur) = win.outer_size() {
-        if cur.width != pw as u32 || cur.height != ph as u32 {
-            win.set_size(tauri::PhysicalSize::new(pw as u32, ph as u32)).map_err(e)?;      // (the cursor went to a monitor with another scale)
-        }
-    }
-    if (x, y) != last {
-        win.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?;
-        if let Ok(mut f) = POPUP_FOLLOW.lock() {
-            if let Some(s) = f.as_mut() { s.last = (x, y); }
-        }
-    }
-    Ok(())
-}
-
-/// Hides the popup (it stays there, so the next one is quick).
-#[tauri::command]
-fn popup_hide(app: AppHandle) -> Result<(), String> {
-    match app.get_webview_window("popup") {
-        Some(w) => w.hide().map_err(|e| e.to_string()),
-        None => Ok(()),
-    }
-}
-
-/// Takes the popup away (nobody needed it for a while: no web view is kept for nothing).
-#[tauri::command]
-fn popup_close(app: AppHandle) -> Result<(), String> {
-    match app.get_webview_window("popup") {
-        Some(w) => w.destroy().map_err(|e| e.to_string()),
-        None => Ok(()),
-    }
-}
 
 /// Moves / resizes the calling window (real pixels; outer rectangle). x and y may be left out: only the size changes.
 #[tauri::command]
@@ -608,15 +461,6 @@ fn set_window_rect(window: WebviewWindow, x: Option<i32>, y: Option<i32>, w: u32
         window.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?;
     }
     Ok(())
-}
-
-/// Closes a translation window by its label (the window does not exist = nothing to do).
-#[tauri::command]
-fn close_overlay(app: AppHandle, label: String) -> Result<(), String> {
-    match app.get_webview_window(&label) {
-        Some(w) if label != "main" => w.close().map_err(|e| e.to_string()),
-        _ => Ok(()),
-    }
 }
 
 /// The options window: opened, or brought to the front when it is already there.
@@ -972,26 +816,6 @@ fn make_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// The label of the window each wheel zone belongs to (macOS tells the turns to the window as they come: the event 'wheel-turn').
-static WHEEL_LABELS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<isize, String>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-
-/// A translation window asks for the wheel turns over it while the mouse goes through it; see win.rs.
-#[tauri::command]
-fn wheel_zone(window: WebviewWindow, on: bool, usable: Option<bool>, down: Option<bool>) -> Result<(), String> {
-    if on { if let Ok(mut m) = WHEEL_LABELS.lock() { m.insert(hwnd_of(&window)?, window.label().to_string()); } }       // (macOS: who gets the turns at once, see set_wheel_sink)
-    if !win::wheel_zone(hwnd_of(&window)?, on, usable.unwrap_or(false), down.unwrap_or(false)) {
-        return Err("the wheel cannot be taken yet (macOS: the permissions Accessibility / Input Monitoring)".into());
-    }
-    Ok(())
-}
-
-/// The wheel turns told to this window after number `seq` -> { seq, delta: [..] }
-#[tauri::command]
-fn wheel_since(window: WebviewWindow, seq: u64) -> Result<Value, String> {
-    let (newest, delta) = win::wheel_since(hwnd_of(&window)?, seq);
-    Ok(json!({ "seq": newest, "delta": delta }))
-}
-
 /// Asks the program to end: the hub saves what is unsaved and then calls quit_app. When the hub does not answer, the program ends anyway.
 fn request_quit(app: &AppHandle) {
     use tauri::Emitter;
@@ -1020,39 +844,11 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
-/// Window mode "just above the game, behind everything else": the game window becomes the owner of this window (0 = none).
-/// A click on a window that is neither "always on top" nor "above the game": it comes up over the other windows like any window would.
-#[tauri::command]
-fn raise_top(window: WebviewWindow) -> Result<(), String> {
-    win::raise_top(hwnd_of(&window)?);
-    Ok(())
-}
-
 /// Brings this window to the front and gives it the keyboard (the options window after it was shown: the program is not the one in front then,
 /// and a window that is shown behind the program in front stays behind it).
 #[tauri::command]
 fn raise_self(window: WebviewWindow) -> Result<(), String> {
     win::grab_focus(hwnd_of(&window)?);
-    Ok(())
-}
-
-/// Topmost on / off for this window by the system call itself (see win::set_topmost).
-#[tauri::command]
-fn set_topmost(window: WebviewWindow, on: bool, game: Option<i64>) -> Result<(), String> {
-    win::set_topmost(hwnd_of(&window)?, on, game.unwrap_or(0) as isize);
-    Ok(())
-}
-
-/// "Just above the game": this window is put directly above the game window (see win::place_above).
-#[tauri::command]
-fn place_above(window: WebviewWindow, game: i64) -> Result<(), String> {
-    win::place_above(hwnd_of(&window)?, game as isize);
-    Ok(())
-}
-
-#[tauri::command]
-fn set_owner(window: WebviewWindow, owner: i64) -> Result<(), String> {
-    win::set_owner(hwnd_of(&window)?, owner as isize);
     Ok(())
 }
 
@@ -1113,12 +909,45 @@ fn plugin_open_url(url: String, hosts: Vec<String>) -> Result<(), String> {
 /// Set by restart_app: the program was started by the previous one that is ending right now.
 const RESTART_ENV: &str = "CMR_RESTARTED";
 
+/// A line in logs/startup.log (what the program does while it starts: written by this program itself, so it is there also when the pages cannot start). The file is cut when it gets big.
+pub(crate) fn startup_log(msg: &str) {
+    use std::io::Write;
+    let dir = base_dir().join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("startup.log");
+    if std::fs::metadata(&path).map(|m| m.len() > 200_000).unwrap_or(false) { let _ = std::fs::remove_file(&path); }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let _ = writeln!(f, "{secs} {msg}");
+    }
+}
+
+/// What a page tells about its own errors (see ERROR_SCRIPT): a page that cannot start has no log of its own, so the program writes it down. At most 60 lines in a run.
+#[tauri::command]
+fn startup_js(window: WebviewWindow, text: String) {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    if N.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 60 { startup_log(&format!("js {}: {}", window.label(), text.chars().take(600).collect::<String>())); }
+}
+/// Runs in every page before the page's own scripts: an error of the page, a script file that could not be had, a promise that failed. Told to the program (startup_js).
+const ERROR_SCRIPT: &str = r#"(() => {
+  const q = []; let t = 0;
+  const send = text => { q.push(String(text)); if (!t) t = setInterval(() => { try { while (q.length) window.__TAURI__.core.invoke('startup_js', { text: q[0] }), q.shift(); clearInterval(t); t = 0; } catch (e) { /* the bridge is not there yet */ } }, 300); };
+  window.addEventListener('error', e => {
+    const x = e.target && e.target !== window ? (e.target.src || e.target.href || e.target.tagName) : '';
+    send(x ? 'could not load ' + x : (e.message || 'error') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0));
+  }, true);
+  window.addEventListener('unhandledrejection', e => send('rejected: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)));
+})();"#;
+
 fn main() {
+    startup_log(&format!("--- start (version {})", env!("CARGO_PKG_VERSION")));
+    std::panic::set_hook(Box::new(|info| startup_log(&format!("PANIC: {info}"))));
     if std::env::var_os(RESTART_ENV).is_some() {
         std::env::remove_var(RESTART_ENV);
         std::thread::sleep(Duration::from_millis(2500));           // (until the old process has ended and let go of its "already running" mark)
     }
     if !win::first_instance() {
+        startup_log("another copy is running: this one ends");
         win::message("ChatMatrix", "ChatMatrix가 이미 실행 중입니다. 화면 오른쪽 아래 알림 영역(트레이)의 아이콘에서 옵션을 열 수 있습니다.\n\nChatMatrix is already running. Use its icon in the notification area (tray).");
         return;
     }
@@ -1141,6 +970,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             plugin_token,
+            startup_js,
             plugin_forget,
             plugin_hash,
             plugin_fetch,
@@ -1149,14 +979,18 @@ fn main() {
             center::center_rects,
             center::center_wheel,
             center::center_layout,
+            center::center_title,
+            center::center_prep,
+            center::center_unprep,
+            center::center_release,
+            center::center_inputclick,
             center::center_zoom,
             center::center_raise,
             webwin::web_open,
             webwin::web_close,
+            webwin::web_cmd,
+            webwin::web_forget,
             webwin::web_allow,
-            webwin::web_tick,
-            webwin::web_lock,
-            webwin::web_rect,
             webwin::web_info,
             webwin::web_events,
             webwin::web_clear,
@@ -1169,13 +1003,9 @@ fn main() {
             screen_rect,
             find_game,
             capture,
-            set_noactivate,
-            set_blur,
-            open_overlay,
             open_options,
             open_url,
             set_window_rect,
-            close_overlay,
             show_input,
             focus_window,
             send_paste,
@@ -1199,24 +1029,13 @@ fn main() {
             fs_remove,
             fs_move,
             restart_app,
-            popup_open,
-            popup_place,
-            popup_follow,
-            popup_hide,
-            popup_close,
             app_folder,
             quit_app,
             quit_request,
             options_hotkey_ok,
-            wheel_zone,
-            wheel_since,
             system_fonts,
             set_tray_text,
-            set_owner,
-            place_above,
-            raise_self,
-            raise_top,
-            set_topmost
+            raise_self
         ])
         .on_window_event(|window, event| {
             // the window the send box belongs to was moved or got another size: the box (if it is open) goes with it
@@ -1251,6 +1070,7 @@ fn main() {
             }
         })
         .setup(|app| {
+            startup_log("setup");
             let handle = app.handle().clone();
             #[cfg(target_os = "macos")]
             {
@@ -1259,18 +1079,16 @@ fn main() {
                 let h2 = handle.clone();
                 win::set_wheel_sink(move |hwnd, units| {
                     if let Some((label, id)) = center::wheel_owner(hwnd) { let _ = h2.emit_to(label, "wheel-turn", json!({ "id": id.to_string(), "units": units })); return; }       // (a pane of a control center)
-                    let label = WHEEL_LABELS.lock().ok().and_then(|m| m.get(&hwnd).cloned());
-                    if let Some(label) = label { let _ = h2.emit_to(label.as_str(), "wheel-turn", units); }
                 });
             }
             if legacy_present() {
                 make_window(&handle, "legacy", "legacy.html", "legacy")?;
                 return Ok(());
             }
-            make_window(&handle, "control", "control.html", "control")?;
-            if !center::wanted() { make_window(&handle, "main", "overlay.html", "overlay")?; }
-            make_window(&handle, "input", "input.html", "input")?;
-            center::start(handle.clone());                              // (3.2: the control centers, with the file center_mode)
+            for (label, page, kind) in [("control", "control.html", "control"), ("input", "input.html", "input")] {
+                match make_window(&handle, label, page, kind) { Ok(_) => startup_log(&format!("window {label} made")), Err(e) => { startup_log(&format!("window {label} FAILED: {e}")); return Err(e.into()); } }
+            }
+            center::start(handle.clone());                              // (the translation windows are panes of the control centers)
             make_tray(app)?;
             let h = handle.clone();
             let open = move || {
@@ -1292,5 +1110,6 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running the application");
+        .unwrap_or_else(|e| { startup_log(&format!("run FAILED: {e}")); panic!("error while running the application: {e}") });
+    startup_log("the program ended");
 }

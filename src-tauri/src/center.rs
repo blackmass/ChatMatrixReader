@@ -1,7 +1,7 @@
 //! The control centers (3.2): THREE transparent windows over all the screens, one for each kind of order of the translation windows (0 ordinary, 1 always on top, 2 above the game
 //! only: treated like always on top while the game or a window of ours is in front, else right above the game), each drawing the translation windows that belong to it (panes) in its
 //! page (center.html). A center takes the mouse only while the pointer is over one of its panes (read here, 60 times a second, from the system); the rest of it lets the mouse go
-//! through to the game. Started by the file `center_mode` next to the program (until the centers replace the windows of 3.1.1).
+//! through to the game. The translation windows are only panes of these centers: there is no window of the system for each of them.
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -9,17 +9,15 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{base_dir, hwnd_of, make_window, win};
+use crate::{hwnd_of, make_window, win};
 
 #[derive(Clone, Debug)]
-pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, hit: bool, blur: u32 }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar; `hit`: it takes the mouse: a window that is click-through only has a place)
+pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, hit: bool, blur: u32, web: String }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar; `hit`: it takes the mouse: a window that is click-through only has a place)
 
 static RECTS: LazyLock<Mutex<HashMap<String, Vec<Pane>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static LOCK: Mutex<Option<String>> = Mutex::new(None);                    // the center that holds the mouse while a button is down
 
 const MODES: [(&str, u32); 3] = [("center0", 0), ("center1", 1), ("center2", 2)];
-
-pub fn wanted() -> bool { base_dir().join("center_mode").exists() }
 
 /// The screens now: (each one as [x, y, w, h] in pixels, the main screen first) and the rectangle of all together [l, t, r, b]. None: not known.
 fn screens(app: &AppHandle) -> Option<(Vec<[i32; 4]>, [i32; 4])> {
@@ -58,15 +56,17 @@ pub async fn center_zoom(app: AppHandle, label: String, scale: f64) -> Result<f6
 
 /// Makes the three centers (a few seconds after the start) and runs the loop that serves them.
 pub fn start(app: AppHandle) {
-    if !wanted() { return; }
     tauri::async_runtime::spawn(async move {
         let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(3000))).await;
         // the rectangle of all the screens together (physical pixels)
-        let Some((monitors, [l, t, r, b])) = screens(&app) else { return };
+        let Some((monitors, [l, t, r, b])) = screens(&app) else { crate::startup_log("centers: no screens found"); return };
+        crate::startup_log(&format!("centers: screens {:?}", monitors));
         if let Ok(mut s) = SCREENS.lock() { *s = Some((monitors, [l, t, r, b])); }
         for (label, mode) in MODES {
             let page = format!("center.html?mode={mode}&ox={l}&oy={t}");
-            if let Ok(w) = make_window(&app, label, &page, "center") {
+            let made = make_window(&app, label, &page, "center");
+            crate::startup_log(&format!("{label} {}", if made.is_ok() { "made" } else { "FAILED" }));
+            if let Ok(w) = made {
                 let _ = w.set_position(tauri::PhysicalPosition::new(l, t));
                 let _ = w.set_size(tauri::PhysicalSize::new((r - l) as u32, (b - t) as u32));
                 let _ = w.set_ignore_cursor_events(true);
@@ -88,8 +88,10 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Op
     let list: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane {
         id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(),
         x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"), bar: f(v, "bar"), hit: v.get("hit").and_then(|x| x.as_bool()).unwrap_or(true), blur: v.get("blur").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+        web: v.get("web").and_then(|x| x.as_str()).unwrap_or("").to_string(),
     }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
     sync_blur(&app, &label, &list);
+    sync_webs(&app, &label, &list);
     if let Ok(mut r) = RECTS.lock() { r.insert(label.clone(), list); }
     crate::refollow_input(&app);                                            // (the send box follows its window)
     // the places where the wheel is taken from the game (the windows that are click-through): { id, x, y, w, h } like the panes
@@ -133,6 +135,76 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
         if known.is_none() { let _ = w.show(); }
         have.insert(k, (center.to_string(), level, h, r));
     }
+}
+
+/// The web windows that follow a center: the window of the system of a web window (webwin.rs) is where its page is drawn by the center (a box with `web`), directly under the center, so
+/// that the bar and the strips of the center take the mouse and the page the rest. label -> (the center, where it is: x, y, w, h in pixels).
+static WEBS: LazyLock<Mutex<HashMap<String, (String, [i32; 4])>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn sync_webs(app: &AppHandle, center: &str, panes: &[Pane]) {
+    let now: HashMap<String, [i32; 4]> = panes.iter().filter(|p| !p.web.is_empty()).map(|p| (p.web.clone(), [p.x.round() as i32, p.y.round() as i32, p.w.round().max(1.0) as i32, p.h.round().max(1.0) as i32])).collect();
+    let Ok(mut webs) = WEBS.lock() else { return };
+    webs.retain(|k, v| v.0 != center || now.contains_key(k));
+    for (k, r) in now {
+        let changed = webs.get(&k).map_or(true, |v| v.1 != r || v.0 != center);
+        webs.insert(k.clone(), (center.to_string(), r));
+        if changed { if let Some(w) = app.get_webview_window(&k) { let _ = crate::webwin::set_outer(&w, Some(r[0]), Some(r[1]), r[2] as u32, r[3] as u32); } }
+    }
+}
+
+/// The title the window of the game has (the setting "와우 창 제목"; the program name is looked at first): told by the center page.
+static GAME_TITLE: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new("World of Warcraft".to_string()));
+#[tauri::command]
+pub async fn center_title(title: String) -> Result<(), String> {
+    if let Ok(mut t) = GAME_TITLE.lock() { *t = if title.trim().is_empty() { "World of Warcraft".to_string() } else { title }; }
+    Ok(())
+}
+
+// Typing into the page of a center (the address bar of a web window): like a text box of a web page (webwin.rs "prep"): a center never takes the keyboard of the game, but while the mouse is over
+// a text box the program lifts that for the window (nothing moves), a click on the box then activates it like any window and the keys go to the page; when the box is left the style is put back,
+// and when it was used the keyboard goes back to where it was.
+static BEFORE: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+fn center_hwnd(app: &AppHandle, label: &str) -> Result<isize, String> { app.get_webview_window(label).ok_or("no such window".to_string()).and_then(|w| hwnd_of(&w)) }
+
+#[tauri::command]
+pub async fn center_prep(app: AppHandle, label: String) -> Result<(), String> {
+    let h = center_hwnd(&app, &label)?;
+    let prev = win::foreground();
+    if prev != h { if let Ok(mut m) = BEFORE.lock() { m.insert(label, prev); } }
+    win::allow_key(h, true);
+    win::set_noactivate_light(h, false);
+    Ok(())
+}
+#[tauri::command]
+pub async fn center_unprep(app: AppHandle, label: String) -> Result<(), String> {
+    let h = center_hwnd(&app, &label)?;
+    win::allow_key(h, false);
+    win::set_noactivate_light(h, true);
+    Ok(())
+}
+#[tauri::command]
+pub async fn center_release(app: AppHandle, label: String) -> Result<(), String> {
+    let h = center_hwnd(&app, &label)?;
+    let was_front = win::foreground() == h || (cfg!(target_os = "macos") && win::self_front());
+    win::allow_key(h, false);
+    win::set_noactivate_light(h, true);
+    if was_front {
+        let prev = BEFORE.lock().ok().and_then(|m| m.get(&label).copied()).unwrap_or(0);
+        if prev != 0 && prev != h { win::set_foreground(prev); }
+    }
+    Ok(())
+}
+/// macOS: a click on a text box must make the program active; when the system has not done it a moment later, it is asked to.
+#[tauri::command]
+pub async fn center_inputclick(app: AppHandle, label: String) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        let h = center_hwnd(&app, &label)?;
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            if !win::self_front() { win::allow_key(h, true); let _ = win::grab_focus(h); }
+        });
+    }
+    Ok(())
 }
 
 /// The key of the wheel zone of a pane (negative: a window of the system has a positive handle).
@@ -234,7 +306,7 @@ fn run(app: AppHandle) {
         if z_at.elapsed() < Duration::from_millis(100) { continue; }
         z_at = Instant::now();
         if game_at.elapsed() > Duration::from_secs(2) {
-            game = win::find_game(game, "World of Warcraft").map(|g| g.hwnd).unwrap_or(0);
+            game = win::find_game(game, &GAME_TITLE.lock().map(|t| t.clone()).unwrap_or_else(|_| "World of Warcraft".to_string())).map(|g| g.hwnd).unwrap_or(0);
             game_at = Instant::now();
         }
         // the screens changed (a screen plugged in or out, another resolution): the centers cover the new area and the pages are told (they bring back what is out of sight)
@@ -263,7 +335,8 @@ fn run(app: AppHandle) {
             apply_mode(ch, mode, game, &mut last);
             // the blur windows of this center follow it: the same order (the layer of the center), and directly under it
             let blurs: Vec<(String, isize)> = BLURS.lock().map(|b| b.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (k.clone(), v.2)).collect()).unwrap_or_default();
-            for (_, bh) in blurs {
+            let webs: Vec<isize> = WEBS.lock().map(|m| m.iter().filter(|(_, v)| v.0 == label).filter_map(|(k, _)| app.get_webview_window(k).and_then(|w| hwnd_of(&w).ok())).collect()).unwrap_or_default();
+            for bh in blurs.into_iter().map(|b| b.1).chain(webs) {
                 win::keep_style(bh);
                 apply_mode(bh, mode, game, &mut last);
                 if win::z_order(&[ch, bh]).first() == Some(&bh) { win::place_below(bh, ch); }

@@ -28,7 +28,7 @@ html, body.center { margin: 0; width: 100%; height: 100%; background: transparen
 #ctx { position: fixed; z-index: 50; min-width: 150px; max-height: 96vh; overflow-y: auto; padding: 4px 0; background: #25272c; border: 1px solid #3c3f46; border-radius: 6px;
        box-shadow: 0 4px 14px rgba(0, 0, 0, .5); font: 12px "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif; color: #dcdde0; user-select: none; }
 #ctx div { padding: 5px 14px 5px 22px; white-space: nowrap; cursor: default; position: relative; }
-#ctx div:hover:not(.off):not(.sep), #ctx div.hot:not(.off):not(.sep) { background: #3a3d44; }       /* (.hot: a Mac gives no mouse-over to a window that is not active: popup.js marks the line under the cursor) */
+#ctx div:hover:not(.off):not(.sep), #ctx div.hot:not(.off):not(.sep) { background: #3a3d44; }       /* (.hot: a Mac gives no mouse-over to a window that is not active: pane.js could mark the line under the cursor) */
 #ctx div.off { color: #6c6f77; }
 #ctx div.sep { height: 1px; padding: 0; margin: 4px 0; background: #3c3f46; }
 #ctx div.on::before { content: '✔'; position: absolute; left: 6px; color: #e0b84a; }
@@ -67,3 +67,36 @@ html, body.center { margin: 0; width: 100%; height: 100%; background: transparen
 .pane .plines.page { inset: 0; overflow: hidden; padding: 0; clip-path: none !important; }
 .pl-page { display: block; width: 100%; height: 100%; border: 0; background: transparent; color-scheme: normal; }
 .pl-page-off { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9aa0a6; font-size: 13px; }
+
+/* the mouse is out of the window: the whole bar fades slowly to half (like the game's chat frames); back at once when it comes in */
+.pane .pbar { opacity: 1; transition: opacity .15s; }
+.pane.outside .pbar { opacity: .5; transition: opacity 3s ease-in; }
+
+/* the edges for resizing (pane.js): none at the top, that is the bar; only while the window takes the mouse and is not locked */
+.pane .pedge { position: absolute; z-index: 20; display: none; }
+.pane.interactive .pedge { display: block; }
+.pane.locked .pedge { display: none !important; }
+.pane .e-l { left: 0; top: 22px; bottom: 14px; width: 5px; cursor: ew-resize; }
+.pane .e-r { right: 0; top: 22px; bottom: 14px; width: 5px; cursor: ew-resize; }
+.pane .e-b { left: 14px; right: 14px; bottom: 0; height: 5px; cursor: ns-resize; }
+.pane .e-bl { left: 0; bottom: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+
+/* a web window: the bar and the strips are ours, the page is a window of the system under this one (webpane.js); nothing is drawn over it but a thin frame and the line that shows while it scrolls.
+   The bar is one band across the whole width (a tab line like a browser's can be put into it later); the frame is one pixel, the strips that take the mouse are wider than it. */
+.webpane .pbody { pointer-events: none; }
+.webpane .pbody::after { display: block; border: 1px solid #8a6a30; border-top: 0; border-radius: 0; }
+.webpane .pbar { align-items: center; box-sizing: border-box; background: linear-gradient(#364847, #2a3836); border: 1px solid #8a6a30; }
+.webpane .ptabs { flex: 1; min-width: 0; max-width: none; align-items: center; gap: 0; }
+.webpane .pspace { display: none; }
+.webpane .ptab, .webpane .ptab.on { flex: 1; min-width: 0; height: 20px; line-height: 20px; padding: 0 10px; background: none; border: 0; border-radius: 0; color: #e6c66e; text-shadow: 0 1px 1px #000; }
+.webpane .ptools { height: 20px; padding: 0; background: none; border: 0; border-radius: 0; gap: 0; }
+.webpane .ptools button { width: 24px; height: 20px; }
+.webpane .pscroll { position: absolute; right: 3px; top: 4px; width: 4px; height: 40px; border-radius: 2px; background: rgba(230, 198, 110, .75); box-shadow: 0 0 2px #000; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 4; }
+.webpane.locked .pedge, .webpane.locked .pgrip { display: none !important; }
+.webpane .pedge, .webpane .pgrip { display: block; }
+.webpane .pgrip { background: none; }
+
+/* the address bar of a window of the mini browser: one field across the bar */
+.webpane .paddr { flex: 1; min-width: 0; height: 18px; margin: 0 4px; padding: 0 8px; border: 1px solid #5b4a22; border-radius: 3px; background: rgba(0, 0, 0, .28); color: #f1d98a; font: 12px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; outline: none; user-select: text; -webkit-user-select: text; text-overflow: ellipsis; }
+.webpane .paddr:focus { background: #14181a; border-color: #e0b84a; color: #fff; }
+.webpane .paddr::placeholder { color: #8a7a4a; }

@@ -34,10 +34,10 @@ export function startWindows({ settings }) {
           if (c.kind === 'web') continue;                          // (a web window is the exe's own window, opened by the plugin: web_host.js)
           const want = !winconf.dockHost(children(), c.id) && (!c.owner || !!(pluginCheck && pluginCheck(c.owner, c.owner_win))) && layout.wantedOpen(c, manual, voiceOn, closedBy.get(c.id) === c.open_mode ? new Set([c.id]) : new Set());
           if (want && !open.has(c.id)) {
-            try { await invoke('open_overlay', { label: layout.labelOf(c.id) }); open.add(c.id); } catch (e) { log.error('번역창을 열지 못했습니다: ' + e); }
-          } else if (!want && open.has(c.id)) { open.delete(c.id); await invoke('close_overlay', { label: layout.labelOf(c.id) }).catch(() => {}); }
+            open.add(c.id);                                          // (the window is drawn by the control center of its order: center.js)
+          } else if (!want && open.has(c.id)) open.delete(c.id);
         }
-        for (const id of [...open]) if (!conf(id)) { open.delete(id); manual.delete(id); await invoke('close_overlay', { label: layout.labelOf(id) }).catch(() => {}); }   // (deleted)
+        for (const id of [...open]) if (!conf(id)) { open.delete(id); manual.delete(id); }   // (deleted)
       } while (again);
     } finally { syncing = false; publishState(); }
   }

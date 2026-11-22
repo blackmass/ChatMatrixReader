@@ -582,6 +582,9 @@ pub fn set_blur(hwnd: isize, on: bool, state: i32, _r: u8, _g: u8, _b: u8, _alph
     })
 }
 
+/// (Windows only: the client area of a window is put at an exact rectangle; a window here has no frame of its own that would be in the way)
+pub fn set_client_rect(_hwnd: isize, _x: i32, _y: i32, _w: i32, _h: i32) -> bool { false }
+
 /// `hwnd` goes directly below `above` without taking the focus.
 pub fn place_below(hwnd: isize, above: isize) {
     on_main(|| unsafe {
@@ -620,23 +623,6 @@ pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
             let _: () = msg_send![w, setLevel: LEVEL_NORMAL];
             if game > 0 { let _: () = msg_send![w, orderWindow: 1isize, relativeTo: game]; }      // NSWindowAbove
         }
-    });
-}
-
-/// Puts the window directly above the game window (the level stays ordinary: whatever covers the game stays above it). Cheap when it is there already.
-pub fn place_above(hwnd: isize, game: isize) {
-    if game <= 0 { return; }
-    on_main(|| unsafe {
-        let w = obj(hwnd);
-        let number: isize = msg_send![w, windowNumber];
-        let list = windows();
-        let ours = list.iter().position(|x| x.number as isize == number);
-        let theirs = list.iter().position(|x| x.number as isize == game);
-        let Some(t) = theirs else { return };      // (the game is not on the screen: nothing to put the window above)
-        if let Some(o) = ours { if o + 1 == t { return; } }               // already the window right above the game (the list is front to back)
-        let level: isize = msg_send![w, level];
-        if level != LEVEL_NORMAL { let _: () = msg_send![w, setLevel: LEVEL_NORMAL]; }
-        let _: () = msg_send![w, orderWindow: 1isize, relativeTo: game];
     });
 }
 
@@ -740,8 +726,8 @@ pub fn installed_fonts() -> Vec<String> {
 
 // ------------------------------------------------------------------------------------------------- the wheel over a click-through window
 // A click-through window gets no mouse events, so the wheel over it would go to the game. An event tap (its own thread) sees every wheel turn of the session: a window
-// that asked for it (wheel_zone) has the turns over it taken away from the game (the tap swallows them) and told to the window at once (the sink: main.rs emits
-// 'wheel-turn' to it; wheel_since is the other way, as on Windows). Same job as the
+// that asked for it (a pane of a control center that is click-through: set_pane_zones) has the turns over it taken away from the game (the tap swallows them) and told to its page at once (the sink: main.rs emits
+// 'wheel-turn' to it). Same job as the
 // mouse hook of win.rs. The tap can change events, so it needs the permission "Accessibility" (the one the auto-paste asks for) and may ask for "Input Monitoring":
 // it is made when the first window asks for the wheel (not at the start), and tried again every 3 s while it cannot be made.
 static ASKED_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -853,15 +839,6 @@ fn ensure_hook() -> bool {
     made
 }
 
-/// The rectangle of a window of ours in the points of the event tap's screen (top left origin, y down).
-fn zone_rect(hwnd: isize) -> [f64; 4] {
-    on_main(|| unsafe {
-        let f: objc2_foundation::NSRect = msg_send![obj(hwnd), frame];
-        let screen_h = CGDisplay::main().bounds().size.height;
-        [f.origin.x, screen_h - (f.origin.y + f.size.height), f.origin.x + f.size.width, screen_h - f.origin.y]
-    })
-}
-
 pub fn start_wheel_hook() {}
 
 /// The panes of a control center that want the wheel (in place of the earlier ones of that center): (key, rectangle in pixels). The tap works in points (top left origin).
@@ -882,33 +859,6 @@ pub fn set_pane_zones(center: isize, zones: Vec<(isize, [f64; 4])>) -> bool {
 }
 /// (the turns come one by one through the sink on macOS)
 pub fn wheel_since_panes(seq: u64) -> (u64, Vec<(isize, i16)>) { (seq, Vec::new()) }
-
-/// A window asks for the wheel turns over it (`usable` is not used here: only windows the mouse goes through ask). false = it cannot be had (no permission yet).
-pub fn wheel_zone(hwnd: isize, on: bool, _usable: bool, down: bool) -> bool {
-    if !on {
-        if let Ok(mut z) = ZONES.lock() { z.retain(|&(h, _, _)| h != hwnd); }
-        return true;
-    }
-    if !ensure_hook() { return false; }
-    let rect = zone_rect(hwnd);
-    if let Ok(mut z) = ZONES.lock() {
-        z.retain(|&(h, _, _)| h != hwnd);
-        z.push((hwnd, down, rect));
-    }
-    true
-}
-
-/// The turns told to `hwnd` after number `seq`: (the newest number, the deltas). Also keeps the rectangle of the window up to date (it may have been moved).
-pub fn wheel_since(hwnd: isize, seq: u64) -> (u64, Vec<i16>) {
-    let known = ZONES.lock().map(|z| z.iter().any(|e| e.0 == hwnd)).unwrap_or(false);
-    if known {
-        let rect = zone_rect(hwnd);
-        if let Ok(mut z) = ZONES.lock() { for e in z.iter_mut() { if e.0 == hwnd { e.2 = rect; } } }
-    }
-    let list = WHEEL.lock().map(|l| l.clone()).unwrap_or_default();
-    let newest = list.iter().map(|e| e.0).max().unwrap_or(seq).max(seq);
-    (newest, list.iter().filter(|e| e.0 > seq && e.1 == hwnd).map(|e| e.2).collect())
-}
 
 // ------------------------------------------------------------------------------------------------- the options hot key
 /// Not used on macOS: main.rs registers Ctrl+Option+O with the system's hot key service (no permission needed).

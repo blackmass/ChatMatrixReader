@@ -1,41 +1,37 @@
 // The web windows of the plugins (the hub runs this): one window per plugin that shows a page of the web (src-tauri/src/webwin.rs makes the window and keeps it to the addresses it
 // may go to). What the user chose for it is in its entry of the list of windows (child_windows, kind 'web': Options > Window: topmost, topmost_wow_only, click_through, lock_window, geometry);
 // only the cookies are a setting of the plugin (config.plugins[id].web.cookies).
-// This file keeps the order of the window (always on top / above the game only: the same two states the program's own windows have), click-through and the lock, and remembers where the window is.
+// This file keeps the list of what is open (told to the control centers, which draw the bar of each window and decide its order: center.js, webpane.js) and remembers where the window is.
 import { webPatterns } from './core/plugins.js';
 
 export const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
-const TICK_MS = 100, INFO_MS = 500, GAME_MS = 2000, SAVE_MS = 600, DEFAULT_W = 360, DEFAULT_H = 640;
+const INFO_MS = 500, SAVE_MS = 600, DEFAULT_W = 360, DEFAULT_H = 640;
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };
 export const webLabel = id => 'web_' + String(id).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
 
-export function createWebHost({ getEntry, getConf, patchConf, invoke, note, wowTitle = () => 'World of Warcraft', setTimer = setInterval, clearTimer = clearInterval }) {
-  const open = new Map();                       // id -> { label, timers, game, ignore, lock, saveAt, last }
+export function createWebHost({ getEntry, getConf, patchConf, invoke, note, getRender = () => 'auto', emit = () => {}, listen = () => {}, setTimer = setInterval, clearTimer = clearInterval }) {
+  const open = new Map();                       // id -> { label, title, timers, saveAt, last }
   // what the user chose (the window entry may not be there yet: the defaults of a new window)
   const opts = id => {
     const c = getConf(id) || {}, g = parseGeom(c.geometry);
-    return { topmost: c.topmost !== false && !c.topmost_wow_only, wow: !!c.topmost_wow_only, lock: !!c.lock_window, cookies: !!(((getEntry(id) || {}).web) || {}).cookies, ...(g || {}) };
+    return { cookies: !!(((getEntry(id) || {}).web) || {}).cookies, ...(g || {}) };
   };
+
+  // the open windows, told to the centers: { win: the number of its entry in the list of windows, label, title, lock }
+  const publish = () => emit('web-state', { source: 'plugin', windows: [...open].map(([id, o]) => ({ kind: 'web', win: (getConf(id) || {}).id || 0, label: o.label, title: o.title, lock: !!(getConf(id) || {}).lock_window })) });
+  listen('web-hello', publish);
+  listen('web-close', e => { const hit = [...open].find(([, o]) => o.label === (e.payload || {}).label); if (hit) api.close(hit[0]); });
 
   function stopLoop(id) {
     const o = open.get(id);
     if (!o) return;
     for (const t of o.timers) clearTimer(t);
     open.delete(id);
+    publish();
   }
 
   async function start(id, o) {
     const call = (name, args) => invoke(name, { label: o.label, ...args });
-    const tick = async () => {
-      const w = opts(id);
-      const mode = w.topmost ? 1 : w.wow ? 2 : 0;
-      await call('web_tick', { mode, game: o.game || null }).catch(() => {});
-      if (w.lock !== o.lock) { o.lock = w.lock; await call('web_lock', { on: w.lock }).catch(() => {}); }
-    };
-    const follow = async () => {
-      if (!opts(id).wow || opts(id).topmost) { o.game = 0; return; }
-      try { const g = await invoke('find_game', { known: o.game || null, title: wowTitle() }); o.game = g ? g.hwnd : 0; } catch { /* next round */ }
-    };
     // the program tells the place the window had when it was closed ("geometry WxH+X+Y"): kept, so a window that is opened, moved and closed at once is not forgotten
     const saveGeom = t => { const m = /^geometry (\d+x\d+\+-?\d+\+-?\d+)$/.exec(String(t)); if (m) patchConf(id, { geometry: m[1] }); return !!m; };
     const info = async () => {
@@ -49,21 +45,21 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, wowT
         if (o.pending && Date.now() >= o.saveAt) { const p = o.pending; o.pending = null; patchConf(id, { geometry: `${p.w}x${p.h}+${p.x}+${p.y}` }); }
       }
     };
-    o.timers.push(setTimer(tick, TICK_MS), setTimer(info, INFO_MS), setTimer(follow, GAME_MS));
-    await follow();
+    o.timers.push(setTimer(info, INFO_MS));
   }
 
-  return {
+  const api = {
     // url: the address (the bridge has checked it); patterns: what the window may go to
     async open(id, { url, title = '', mobile = true }, patterns, openAllow = []) {
       const w = opts(id);
-      const args = { label: webLabel(id), url, title, ua: mobile ? MOBILE_UA : '', allow: patterns, open_allow: openAllow, persist: !!w.cookies, key: id, lock: !!w.lock,
+      const args = { label: webLabel(id), url, title, ua: mobile ? MOBILE_UA : '', allow: patterns, open_allow: openAllow, persist: !!w.cookies, key: id, render: getRender(),
         w: Number.isFinite(w.w) ? w.w : null, h: Number.isFinite(w.h) ? w.h : null, x: Number.isFinite(w.x) ? w.x : null, y: Number.isFinite(w.y) ? w.y : null };
       if (args.w === null || args.h === null) { delete args.w; delete args.h; delete args.x; delete args.y; args.w = DEFAULT_W; args.h = DEFAULT_H; }
       await invoke('web_open', { args });
       if (!open.has(id)) {
-        const o = { label: webLabel(id), timers: [], game: 0, ignore: false, lock: !!w.lock, saveAt: 0, last: '', pending: null };
+        const o = { label: webLabel(id), title, timers: [], saveAt: 0, last: '', pending: null };
         open.set(id, o);
+        publish();
         await start(id, o);
         note(id, 'web window opened: ' + url);
       } else note(id, 'web window goes to: ' + url);
@@ -82,4 +78,5 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, wowT
     async clearData(id) { await invoke('web_clear', { label: webLabel(id) }); },
     patterns: (hosts, scope) => webPatterns(hosts, scope),
   };
+  return api;
 }

@@ -2,7 +2,7 @@
 // operations it returns (['insert', i, block] ['replace', i, block] ['delete', i, n] ['clear']) into DOM, and keeps the page equal to
 // `model.blocks`. Port of chatview.py: the same look settings, expressed as CSS (hanging indent, group gap, text shadow ...).
 //
-//   const view = new ChatView(scrollElement);          the element needs the classes of chatview.css (see overlay.html)
+//   const view = new ChatView(scrollElement);          the element needs the classes of chatview.css (see center.html)
 //   view.setLook({ size: 15, shadow: true, ... }, model)
 //   view.apply(feed.handle(event), feed.model)         after every change of the model
 import * as theme from './core/theme.js';
@@ -73,7 +73,7 @@ export class ChatView {
     this.list.addEventListener('mouseover', e => this.showTip(e));
     this.list.addEventListener('mousemove', e => this.moveTip(e));
     this.list.addEventListener('mouseout', () => { this.tip.style.display = 'none'; this.polled = false; this.hideSunk(); });
-    this.sink = null;                     // where the tip is drawn when not here: a window of its own (popup_host.js, set by the window page): { usable(), show(html, x, y), hide() }
+    this.sink = null;                     // where the tip is drawn when not here: a window of its own (the control center draws it on top: center.js): { usable(), show(html, x, y), hide() }
     this.polled = false;                  // the tip on the screen was put there by tipAtPoint (the pointer of a click-through window), not by the mouse events
     this.setLook({});
   }
@@ -217,7 +217,7 @@ export class ChatView {
     const last = starts.length - 1;
     let first = max > 0 && starts.length > max ? starts.length - max : 0;           // the oldest group that stays
     if (whole) {
-      const edge = this.scroll.getBoundingClientRect().top + (this.inset || 0);          // (inset: the part of the top the title bar covers, see overlay.js)
+      const edge = this.scroll.getBoundingClientRect().top + (this.inset || 0);          // (inset: the part of the top the title bar covers, see pane.js)
       for (let g = last; g >= first; g--) {                              // from the newest back: the first one that starts above the edge is cut, so are all older ones
         if (kids[starts[g]].getBoundingClientRect().top < edge - 1) { first = g === last ? last : g + 1; break; }     // (the newest stays, even when it is taller than the window)
       }

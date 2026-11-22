@@ -1,6 +1,6 @@
 // The control window is the HUB of the program: it alone owns config.json, the translation queue (so Google's spacing and pauses
 // exist once) and the pipeline. It turns what it reads into events and sends them to the translation windows ('feed'), which draw
-// them (overlay.js). Today the lines are fake (the test window's button); later the capture loop feeds the same pipeline.
+// them (center.js). Today the lines are fake (the test window's button); later the capture loop feeds the same pipeline.
 import { files } from './fs.js';
 import { transport } from './transport.js';
 import * as settings from './settings.js';
@@ -23,6 +23,7 @@ import { startTray } from './tray_host.js';
 import { startVoice } from './voice_host.js';
 import { startWidgets } from './widgets/hub.js';
 import { startPlugins } from './plugin_host.js';
+import { startBrowsers } from './browser_host.js';
 import { makeInstaller, makeBackend, makeBencher } from './voice_install.js';
 import { ExitWatch } from './core/exitwatch.js';
 import { every } from './core/timings.js';
@@ -197,7 +198,8 @@ report('hub', emit);
 
 const plugins = startPlugins({ settings, files, publish, pipeline, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen, widgets, windows });        // (the plugins folder: docs/PLUGINS.md)
 
+const browsers = startBrowsers({ settings, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen, note: hubLog });          // (the windows of the mini browser: core/browsers.js)
 windows.setPluginCheck((owner, name) => plugins.windowAllowed(owner, name));       // (a window of a plugin opens only while its plugin runs and may have it)
 
 
-window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice, plugins, widgets };
+window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice, plugins, widgets, browsers };

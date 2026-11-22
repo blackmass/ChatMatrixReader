@@ -5,6 +5,7 @@
 import { log, fmt } from './log.js';
 import { tr } from './i18n.js';
 import * as winconf from './winconf.js';
+import { defaultBrowser, normalizeBrowsers, normalizeBookmarks } from './browsers.js';
 import { pyInt, truthy } from './winconf.js';
 import { normalizeWidgets } from '../widgets/registry.js';
 import { DEFAULT_PROMPT, DEFAULT_EXTRA_PROMPT, DEFAULT_SEND_EXTRA_PROMPT, DEFAULT_SEND_PROMPT } from './prompts.js';
@@ -142,6 +143,9 @@ export const DEFAULTS = {
     plugins: {},                           // plugin id -> { enabled: bool, granted: { net: [host], 'chat.inject': bool, storage: bool }, options: { key: value } } (app/plugin_host.js)
     widgets: {},                           // the widgets of the main window: { 'owner:name': { place, anchor, dx, dy, style, show, scale, opacity, opts } } (docs/WIDGETS.md)
     wheel_through: false,                  // click-through windows: the wheel over them may scroll (reading the earlier chat); off = nothing but the tooltip gets through
+    browser_windows: [defaultBrowser(1)],  // the windows of the mini browser (core/browsers.js): window 1 is always there
+    bookmarks: [],                         // the bookmarks of the mini browser: [{ name, url }]
+    web_render: 'auto',                    // the web window of a plugin is drawn by: 'auto' (the web view decides: the graphics card when there is one) | 'cpu' (the processor) | 'gpu' (the graphics card, always)
     center_scale: 0,                       // 3.2: the size of the translation windows' contents: 0 = as the main screen has it, else a percent (100 ... 200)
     through_tips: true,                    // click-through windows: the tip of a link (item, quest ...) under the mouse is shown (the page cannot see the mouse: the window loop does)
     auto_copy: false,                      // the text selected in a window is copied when the mouse leaves the window
@@ -180,6 +184,9 @@ export function normalize(saved) {
   if (!isObj(cfg.plugins)) cfg.plugins = {};
   cfg.widgets = normalizeWidgets(cfg.widgets);
   if (!isObj(cfg.tuning)) cfg.tuning = {};
+  cfg.browser_windows = normalizeBrowsers(cfg.browser_windows);
+  cfg.bookmarks = normalizeBookmarks(cfg.bookmarks);
+  cfg.web_render = ['auto', 'cpu', 'gpu'].includes(cfg.web_render) ? cfg.web_render : 'auto';
   cfg.center_scale = Number(cfg.center_scale) >= 50 && Number(cfg.center_scale) <= 300 ? Math.round(Number(cfg.center_scale)) : 0;
   cfg.wheel_through = cfg.wheel_through === true;
   cfg.through_tips = cfg.through_tips !== false;

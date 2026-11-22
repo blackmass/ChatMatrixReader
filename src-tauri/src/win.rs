@@ -461,13 +461,12 @@ pub fn find_game(known: isize, title: &str) -> Option<GameWindow> {
 
 // ---------------------------------------------------------------------------------------------- the wheel over a click-through window
 // A click-through window gets no mouse messages, so the wheel over it would go to the game. A low-level mouse hook (its own thread) sees every
-// wheel turn: a window that asked for it (wheel_zone) has the turns over it taken away from the game (the hook swallows them) and told
-// to the window (wheel_since), which then lets the user scroll back through the chat.
+// wheel turn: a pane of a control center that is click-through has the turns over it taken away from the game (the hook swallows them) and told
+// to its page (center_wheel), which then lets the user scroll back through the chat.
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 static WHEEL: Mutex<Vec<(u64, isize, i16)>> = Mutex::new(Vec::new());      // (number, window, delta)
-static ZONES: Mutex<Vec<(isize, bool, bool)>> = Mutex::new(Vec::new());    // windows that want the wheel: (window, usable, down)  usable = the window takes the mouse itself; down = the turns DOWN too
 static WHEEL_SEQ: AtomicU64 = AtomicU64::new(0);
 static PANE_ZONES: Mutex<Vec<(isize, isize, [f64; 4])>> = Mutex::new(Vec::new());   // the panes of the control centers that want the wheel: (center, key, rectangle l, t, r, b in pixels)
 
@@ -491,11 +490,7 @@ unsafe extern "system" fn wheel_proc(code: i32, w: usize, l: isize) -> isize {
     if code == 0 && w == 0x020A {                                          // WM_MOUSEWHEEL
         let info = &*(l as *const MsllHook);
         let delta = (info.mouseData >> 16) as i16;
-        // a window the mouse goes through (usable = false): only the turns UP are taken (the game would scroll its own chat with them); the turns DOWN too
-        // while the window asks for them (`down`: it has lines that faded away and a turn down brings them back).
-        // A usable window gets the wheel from Windows itself, except while Shift / Ctrl / Alt is held (Windows then keeps the wheel for the program
-        // in front, not for the window under the mouse): those turns, both ways, are taken here.
-        let modifier = GetAsyncKeyState(0x10) < 0 || GetAsyncKeyState(0x11) < 0 || GetAsyncKeyState(0x12) < 0;
+        // the panes of the control centers that are click-through (center.rs): the wheel over them is not for the program in front
         if let Ok(zones) = PANE_ZONES.try_lock() {
             let (px, py) = (info.pt.x as f64, info.pt.y as f64);
             for &(_, key, r) in zones.iter() {
@@ -505,23 +500,6 @@ unsafe extern "system" fn wheel_proc(code: i32, w: usize, l: isize) -> isize {
                         if list.len() > 200 { list.remove(0); }
                     }
                     return 1;
-                }
-            }
-        }
-        if let Ok(zones) = ZONES.try_lock() {
-            for &(h, usable, down) in zones.iter() {
-                // (a window the mouse goes through takes the turns both ways: the wheel over it is not for the game; `down` is no longer asked)
-                let _ = down;
-                if !(if usable { modifier } else { true }) {
-                    continue;
-                }
-                let mut r = RECT::default();
-                if IsWindow(h) != 0 && GetWindowRect(h, &mut r) != 0 && info.pt.x >= r.left && info.pt.x < r.right && info.pt.y >= r.top && info.pt.y < r.bottom {
-                    if let Ok(mut list) = WHEEL.try_lock() {
-                        list.push((WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, h, delta));
-                        if list.len() > 200 { list.remove(0); }
-                    }
-                    return 1;                                              // the program in front does not get this turn
                 }
             }
         }
@@ -539,14 +517,6 @@ pub fn start_wheel_hook() {
     });
 }
 
-pub fn wheel_zone(hwnd: isize, on: bool, usable: bool, down: bool) -> bool {
-    if let Ok(mut z) = ZONES.lock() {
-        z.retain(|&(h, _, _)| h != hwnd);
-        if on { z.push((hwnd, usable, down)); }
-    }
-    true
-}
-
 /// The panes of a control center that want the wheel (all of them, in place of the earlier ones of that center): (key, rectangle l, t, r, b in pixels). Always true on Windows.
 pub fn set_pane_zones(center: isize, zones: Vec<(isize, [f64; 4])>) -> bool {
     if let Ok(mut z) = PANE_ZONES.lock() {
@@ -561,13 +531,6 @@ pub fn wheel_since_panes(seq: u64) -> (u64, Vec<(isize, i16)>) {
     let list = WHEEL.lock().map(|l| l.clone()).unwrap_or_default();
     let newest = list.iter().map(|e| e.0).max().unwrap_or(seq).max(seq);
     (newest, list.iter().filter(|e| e.0 > seq && e.1 < 0).map(|e| (e.1, e.2)).collect())
-}
-
-/// The turns told to `hwnd` after number `seq`: (the newest number, the deltas).
-pub fn wheel_since(hwnd: isize, seq: u64) -> (u64, Vec<i16>) {
-    let list = WHEEL.lock().map(|l| l.clone()).unwrap_or_default();
-    let newest = list.iter().map(|e| e.0).max().unwrap_or(seq).max(seq);
-    (newest, list.iter().filter(|e| e.0 > seq && e.1 == hwnd).map(|e| e.2).collect())
 }
 
 // ---------------------------------------------------------------------------------------------- the title bar of the options window
@@ -644,33 +607,6 @@ fn after_game(game: isize) -> isize {
     }
 }
 
-/// Puts the window directly above the game window in the stacking order (no owner, no topmost): whatever covers the game (a browser ...)
-/// stays above it, the game's own focus and the taskbar are left alone. Cheap when the place is right already, so the page can ask often.
-pub fn place_above(hwnd: isize, game: isize) {
-    unsafe {
-        if game == 0 || IsWindow(game) == 0 || IsWindow(hwnd) == 0 || IsWindowVisible(hwnd) == 0 || IsIconic(game) != 0 {
-            return;
-        }
-        let mine = std::process::id();
-        let pid_of = |h: isize| { let mut p = 0u32; GetWindowThreadProcessId(h, &mut p); p };
-        // from the game upwards: our own windows and hidden ones may stand there, anything else in between means we are not right above it
-        let mut x = game;
-        loop {
-            x = GetWindow(x, 3); // GW_HWNDPREV
-            if x == 0 {
-                break;
-            }
-            if x == hwnd {
-                return;
-            }
-            if pid_of(x) != mine && IsWindowVisible(x) != 0 {
-                break;
-            }
-        }
-        SetWindowPos(hwnd, after_game(game), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // NOMOVE | NOSIZE | NOACTIVATE
-    }
-}
-
 /// The windows of `hwnds` that exist, from the front to the back of the screen (the order the system has them in now).
 pub fn z_order(hwnds: &[isize]) -> Vec<isize> {
     let mut out = Vec::new();
@@ -693,6 +629,23 @@ pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
     unsafe {
         let after = if on { -1 } else if game != 0 && IsWindow(game) != 0 { after_game(game) } else { -2 }; // HWND_TOPMOST / above the game / HWND_NOTOPMOST
         SetWindowPos(hwnd, after, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+    }
+}
+
+/// The CLIENT area of the window (what the page fills) is put at exactly this rectangle, whatever frame the window has around it (a window of the system may have an invisible one): it is put
+/// there, measured, and moved by what was wrong. true = it fits now.
+pub fn set_client_rect(hwnd: isize, x: i32, y: i32, w: i32, h: i32) -> bool {
+    unsafe {
+        let (mut l, mut t, mut ww, mut hh) = (x, y, w, h);
+        for _ in 0..3 {
+            SetWindowPos(hwnd, 0, l, t, ww, hh, 0x0004 | 0x0010);                // NOZORDER | NOACTIVATE
+            let mut c = RECT::default(); let mut o = POINT { x: 0, y: 0 };
+            if GetClientRect(hwnd, &mut c) == 0 || ClientToScreen(hwnd, &mut o) == 0 { return false; }
+            let (dx, dy, dw, dh) = (o.x - x, o.y - y, (c.right - c.left) - w, (c.bottom - c.top) - h);
+            if dx == 0 && dy == 0 && dw == 0 && dh == 0 { return true; }
+            l -= dx; t -= dy; ww -= dw; hh -= dh;
+        }
+        false
     }
 }
 

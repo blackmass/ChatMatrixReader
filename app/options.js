@@ -129,7 +129,7 @@ function show() {
       const tb = tab.toolbar({ cfg: () => settings.cfg(), sel: () => selected, select: id => { selected = id; show(); } });
       body.append(tb.el); built.push(tb);
     }
-    built.push(...buildCards(tab.cards, ctxNow(), body, { fold: true }));
+    built.push(...buildCards(tab.visibleCards ? tab.visibleCards() : tab.cards, ctxNow(), body, { fold: true }));
   }
   $('sub').textContent = view.mode === 'tab' ? tab.subtitle || '' : '';
   $('tester').hidden = !(view.mode === 'tab' && tab.test);
@@ -245,9 +245,6 @@ $('quitBtn').onclick = () => window.__TAURI__.core.invoke('quit_request').catch(
   $('testBtn').onclick = run;
   input.onkeydown = e => { if (e.key === 'Enter') run(); };
   listen('feed', ev => noteChannelColor(ev.payload && ev.payload.event));                 // (the colours the game has for the channels: the names in the lists)
-  listen('z-done', () => {                                       // a translation window changed its stack place: the window that asked takes the focus back
-    if (performance.now() - (window.__cmrRefocus || -1e9) < 4000) { window.__cmrRefocus = 0; try { window.__TAURI__.window.getCurrentWindow().setFocus().catch(() => {}); } catch { /* no window api */ } }
-  });
   listen('rpc-test-result', ev => {
     const r = ev.payload;
     if (r.id !== testId) return;

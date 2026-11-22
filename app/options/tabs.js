@@ -2,6 +2,7 @@
 import general from './tab_general.js';
 import exceptions from './tab_exceptions.js';
 import windows from './tab_windows.js';
+import browser from './tab_browser.js';
 import translation from './tab_translation.js';
 import glossary from './tab_glossary.js';
 import send from './tab_send.js';
@@ -14,6 +15,7 @@ import log from './tab_log.js';
 export const TABS = [
   general,
   windows,
+  browser,
   translation,
   glossary,
   exceptions,

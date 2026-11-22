@@ -1,6 +1,8 @@
-//! The web windows of the plugins: a frameless window that shows a page of the web (a phone's page when asked), with a thin bar of ours drawn into the page. Opened by the
+//! The web windows: a frameless window that shows a page of the web (a phone's page when asked). Its bar, the strips that resize it and the line that shows while it scrolls are drawn by the
+//! control center it belongs to (center.js, webpane.js), which also puts the window in its place and in its order (center.rs); this file makes it and keeps it to the addresses it may go to. Opened by the
 //! hub (app/web_host.js) when a plugin that may do it asks. What the experiments with it showed (windows + macOS) is kept here:
-//!   * the bar is a script that runs in the page before the page's own scripts (top frame only); what is pressed on it goes to the program by trying to go to the address
+//!   * a small script runs in the page before the page's own scripts (top frame only: links that go to the user's browser, typing into a text box, how far the page has scrolled); what it tells
+//!     goes to the program by trying to go to the address
 //!     cmr-cmd://<command>, which is caught in on_navigation and never goes anywhere (the page cannot call the program: its address is not one the program trusts)
 //!   * a web window never takes the keyboard of the game: the "no activate" style (Windows); on macOS a window that does not become the key window. So nothing can be typed into a page of it.
 //!   * macOS: the CLASS of a window that holds a web view is never changed (the web view watches the window with key-value observing, a changed class makes the program abort
@@ -14,16 +16,16 @@ use std::sync::{LazyLock, Mutex};
 
 use serde_json::{json, Value};
 use tauri::webview::NewWindowResponse;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::{hwnd_of, weblib, win};
 
 static OPEN_ALLOW: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));       // where the user's browser may be sent to from the window
 static ALLOW: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static CLOSING: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-static LOCKED: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-static ZSTATE: LazyLock<Mutex<HashMap<String, u32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-static DRAG: LazyLock<Mutex<HashMap<String, (i32, i32)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));       // where a window was when its drag began
+/// The windows the USER opened (the mini browser): any http or https address, not only the addresses a plugin was allowed. (A window a plugin opens is never in this list.)
+static FREE: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+fn is_free(label: &str) -> bool { FREE.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) }
 static PREV_FG: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// What the plugin's log should tell about the windows (addresses that were refused): taken by web_events
 static EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
@@ -59,13 +61,10 @@ const KEYS: &str = r#"(() => {
 const MIN_W: f64 = 190.0;
 const MIN_H: f64 = 320.0;
 
-const BAR: &str = r#"(() => {
+const PAGE: &str = r#"(() => {
   if (window.top !== window.self) return;                       // (only the page itself, not the frames in it: video players, advertisements ...)
-  if (window.__cmrBar) return; window.__cmrBar = 1;
+  if (window.__cmrPage) return; window.__cmrPage = 1;
   const go = c => { try { location.href = 'cmr-cmd://' + c; } catch (e) {} };
-  const TITLE = __TITLE__;
-  const MAC = __MAC__;
-  window.__cmrLocked = __LOCK__;
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
   const external = u => { try { const a = new URL(u, location.href); if (a.protocol === 'https:') go('open?u=' + encodeURIComponent(a.href)); } catch (e) {} };
@@ -83,103 +82,34 @@ const BAR: &str = r#"(() => {
   try {
     window.open = (u) => { if (u && navigator.userActivation && navigator.userActivation.isActive) external(String(u)); return null; };
   } catch (e) {}
-  const mount = () => {
-    const host = document.createElement('div');
-    host.style.cssText = 'position:fixed;left:0;right:0;top:0;height:22px;z-index:2147483647;';
-    const sh = host.attachShadow({ mode: 'closed' });
-    sh.innerHTML = '<style>.b{display:flex;align-items:center;height:22px;background:linear-gradient(#364847,#2a3836);border-bottom:1px solid #8a6a30;color:#e6c66e;font:12px "Malgun Gothic","Apple SD Gothic Neo","Segoe UI",sans-serif;cursor:move;user-select:none}.t{flex:1;padding:0 10px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-shadow:0 1px 1px #000}button{border:0;background:none;color:#e6c66e;font-size:13px;width:26px;height:22px;cursor:pointer;padding:0}button:hover{color:#ffe08a;background:#4a3f1c}</style><div class="b"><span class="t"></span><button data-c="back" title="back">‹</button><button data-c="reload" title="reload">↻</button><button data-c="close" title="close">✕</button></div>';
-    const t = sh.querySelector('.t'), bar = sh.querySelector('.b');
-    // (a drag of the bar moves the window: the page under it must not start marking text meanwhile, which macOS did: no default action, no marked text, no marking while it lasts)
-    // macOS: the system's own drag of a window (start_dragging) takes over the events while it lasts, and the game missed the keys that were let go meanwhile (the character kept walking). So the
-    // window is moved by our own measure there: the pointer is followed, the program puts the window at the start place plus how far the pointer went.
-    if (MAC) {
-      bar.addEventListener('pointerdown', e => {
-        if (e.button !== 0 || e.target.closest('button') || window.__cmrLocked) return;
-        e.preventDefault();
-        try { getSelection().removeAllRanges(); } catch (x) {}
-        const x0 = e.screenX, y0 = e.screenY; let last = 0;
-        bar.setPointerCapture(e.pointerId);
-        go('dragstart');
-        const move = m => { const now = Date.now(); if (now - last < 16) return; last = now; go(`dragmove?dx=${m.screenX - x0}&dy=${m.screenY - y0}`); };
-        const up = m => { bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', up); go(`dragmove?dx=${m.screenX - x0}&dy=${m.screenY - y0}`); };
-        bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', up);
-      });
-    }
-    bar.addEventListener('mousedown', e => {
-      if (MAC) { e.preventDefault(); return; }
-      if (e.button !== 0 || e.target.closest('button')) return;
-      e.preventDefault(); e.stopPropagation();
-      try { getSelection().removeAllRanges(); } catch (x) {}
-      const root = document.documentElement, was = root.style.userSelect;
-      root.style.userSelect = 'none'; root.style.webkitUserSelect = 'none';
-      setTimeout(() => { root.style.userSelect = was; root.style.webkitUserSelect = was; try { getSelection().removeAllRanges(); } catch (x) {} }, 1200);
-      go('drag');
-    });
-    for (const b of sh.querySelectorAll('button')) b.addEventListener('click', () => go(b.dataset.c));
-    // (the title of the page, as it changes; what the plugin gave only until the page has one)
-    const title = () => { t.textContent = document.title || TITLE || location.host; };
-    title(); setInterval(title, 1000);
-    // Typing into a page. The window never takes the keyboard of the game (it is "no activate"), so a click on a text box gives nothing to type into. When the MOUSE COMES OVER a text box the program
-    // lifts that for the window ("prep": nothing moves, the game keeps the keyboard); a click on the box then activates the window like any window, by the system, and the keys go to the page.
-    // When the box is left (another place clicked, the mouse left without a click) the program puts it back ("unprep"), and when it was used the keyboard is given back to where it was ("release").
-    const editable = x => !!x && (x.isContentEditable || (/^(INPUT|TEXTAREA|SELECT)$/.test(x.tagName) && !/^(button|checkbox|radio|submit|reset|image|range|color|file)$/i.test(x.type || '')));
-    let prepared = false, leaveT = 0;
-    const prep = on => { if (on !== prepared) { prepared = on; go(on ? 'prep' : 'unprep'); } };
-    const later = (fn, ms) => { clearTimeout(leaveT); leaveT = setTimeout(fn, ms); };
-    document.addEventListener('mouseover', e => { if (editable(e.target)) { clearTimeout(leaveT); prep(true); } }, true);
-    document.addEventListener('mousedown', e => { if (e.button === 0 && editable(e.target)) go('inputclick'); }, true);      // (macOS: asked to make sure the program is active, see the program)
-    document.addEventListener('mouseout', e => { if (editable(e.target) && !editable(document.activeElement)) later(() => { if (!editable(document.activeElement)) prep(false); }, 300); }, true);
-    document.addEventListener('focusout', e => { if (editable(e.target)) later(() => { if (!editable(document.activeElement)) { prepared = false; go('release'); } }, 250); }, true);
-    window.addEventListener('blur', () => later(() => { if (prepared && !document.hasFocus()) prep(false); }, 400));      // (the user went to another window: nothing to give back)
-    document.documentElement.append(host);
-    // A scroll bar of ours, like a phone's: a thin line that shows while the page scrolls and goes away a moment later (the page's own scroll bars are hidden, see the style below)
-    const bar2 = document.createElement('div');
-    bar2.style.cssText = 'position:fixed;right:2px;top:26px;width:4px;height:40px;border-radius:2px;background:rgba(230,198,110,.75);box-shadow:0 0 2px #000;z-index:2147483646;opacity:0;transition:opacity .25s;pointer-events:none;';
-    let hideT = 0;
-    document.addEventListener('scroll', e => {
-      const d = e.target === document ? (document.scrollingElement || document.documentElement) : e.target;
-      if (!d || d.nodeType !== 1 || d.scrollHeight <= d.clientHeight + 1) return;
-      const full = d === (document.scrollingElement || document.documentElement) || d === document.body, track = window.innerHeight - 30;
-      const h = Math.max(24, track * d.clientHeight / d.scrollHeight), room = track - h, max = d.scrollHeight - d.clientHeight;
-      bar2.style.height = h + 'px'; bar2.style.top = (26 + room * (d.scrollTop / max)) + 'px';
-      if (!full) { bar2.style.opacity = '0'; return; }          // (only the scroll of the page itself: a list inside the page has its own look)
-      bar2.style.opacity = '1'; clearTimeout(hideT); hideT = setTimeout(() => { bar2.style.opacity = '0'; }, 900);
-    }, true);
-    document.documentElement.append(bar2);
-    // macOS: the edge of a window with no frame gets no resize cursor there; strips along the edges (inside the page) give it, and a drag on them resizes by our own measure
-    if (MAC) {
-      const dirs = { n: ['ns-resize', 'left:8px;right:8px;top:0;height:5px'], s: ['ns-resize', 'left:8px;right:8px;bottom:0;height:5px'], w: ['ew-resize', 'top:8px;bottom:8px;left:0;width:5px'], e: ['ew-resize', 'top:8px;bottom:8px;right:0;width:5px'],
-        nw: ['nwse-resize', 'left:0;top:0;width:10px;height:10px'], se: ['nwse-resize', 'right:0;bottom:0;width:10px;height:10px'], ne: ['nesw-resize', 'right:0;top:0;width:10px;height:10px'], sw: ['nesw-resize', 'left:0;bottom:0;width:10px;height:10px'] };
-      const zones = [];
-      for (const [d, [cur, pos]] of Object.entries(dirs)) {
-        const z = document.createElement('div');
-        z.style.cssText = `position:fixed;${pos};cursor:${cur};z-index:2147483647;`;
-        z.addEventListener('pointerdown', e => {
-          if (e.button !== 0 || window.__cmrLocked) return;
-          e.preventDefault(); z.setPointerCapture(e.pointerId);
-          const x0 = e.screenX, y0 = e.screenY, L = window.screenX, T = window.screenY, W = window.outerWidth, H = window.outerHeight;
-          let last = 0;
-          const move = m => {
-            const now = Date.now(); if (now - last < 16) return; last = now;
-            const dx = m.screenX - x0, dy = m.screenY - y0;
-            let l = L, t = T, w = W, h = H;
-            if (d.includes('e')) w = Math.max(190, W + dx);
-            if (d.includes('s')) h = Math.max(320, H + dy);
-            if (d.includes('w')) { w = Math.max(190, W - dx); l = L + (W - w); }
-            if (d.includes('n')) { h = Math.max(320, H - dy); t = T + (H - h); }
-            go(`rect?x=${l}&y=${t}&w=${w}&h=${h}`);
-          };
-          const up = () => { z.removeEventListener('pointermove', move); z.removeEventListener('pointerup', up); z.removeEventListener('pointercancel', up); };
-          z.addEventListener('pointermove', move); z.addEventListener('pointerup', up); z.addEventListener('pointercancel', up);
-        });
-        zones.push(z); document.documentElement.append(z);
-      }
-      setInterval(() => { for (const z of zones) z.style.display = window.__cmrLocked ? 'none' : ''; }, 500);
-    }
-    try { const st = new CSSStyleSheet(); st.replaceSync('html{margin-top:22px !important}html,body,*{scrollbar-width:none !important}*::-webkit-scrollbar{display:none !important}'); document.adoptedStyleSheets = [...document.adoptedStyleSheets, st]; } catch (e) {}
-    setInterval(() => { if (!host.isConnected) document.documentElement.append(host); }, 1000);      // (a page that draws itself again may take it away)
-  };
-  if (document.documentElement) mount(); else document.addEventListener('DOMContentLoaded', mount);
+  // Typing into a page. The window never takes the keyboard of the game (it is "no activate"), so a click on a text box gives nothing to type into. When the MOUSE COMES OVER a text box the program
+  // lifts that for the window ("prep": nothing moves, the game keeps the keyboard); a click on the box then activates the window like any window, by the system, and the keys go to the page.
+  // When the mouse leaves a box that was not used the program puts it back ("unprep"); a window that was used keeps the keyboard until the user clicks the game (the window then loses it: "unprep" again).
+  const editable = x => !!x && (x.isContentEditable || (/^(INPUT|TEXTAREA|SELECT)$/.test(x.tagName) && !/^(button|checkbox|radio|submit|reset|image|range|color|file)$/i.test(x.type || '')));
+  // The state lives in the program (the window: may it be activated?); this page only tells it. A page that is loaded again (a search sent, a link) starts with nothing in mind while the window may still be
+  // prepared from the page before: the program puts a window that is not active back whenever a page is going to load (see on_navigation); a window that loses the keyboard is always put back.
+  let prepared = false, leaveT = 0;
+  const prep = on => { if (on !== prepared) { prepared = on; go(on ? 'prep' : 'unprep'); } };
+  const later = (fn, ms) => { clearTimeout(leaveT); leaveT = setTimeout(fn, ms); };
+  if (document.hasFocus()) prepared = true;
+  document.addEventListener('mouseover', e => { if (editable(e.target)) { clearTimeout(leaveT); prep(true); } }, true);
+  document.addEventListener('mousedown', e => { if (e.button === 0 && editable(e.target)) go('inputclick'); }, true);      // (macOS: asked to make sure the program is active, see the program)
+  document.addEventListener('mouseout', e => { if (editable(e.target)) later(() => { if (!document.hasFocus()) prep(false); }, 300); }, true);      // (the mouse left a text box that was not used: not while the window is active; then it is the user's click on the game that ends it)
+  window.addEventListener('blur', () => later(() => { if (!document.hasFocus()) { prepared = false; go('unprep'); } }, 400));      // (the user went to the game or another window: whatever the page thinks, the window takes nothing again; a moment later: a click on a text box moves the focus inside the window for a moment)
+  // How far the page has scrolled, told to the program (which tells the center: it draws the thin line at the edge while the page scrolls; nothing of ours is drawn in the page). Only the
+  // scroll of the page itself, a few times a second.
+  let lastScroll = 0, lastText = '';
+  document.addEventListener('scroll', e => {
+    if (e.target !== document) return;
+    const d = document.scrollingElement || document.documentElement, now = Date.now();
+    if (!d || d.scrollHeight <= d.clientHeight + 1 || now - lastScroll < 40) return;
+    const t = 'scroll?p=' + (d.scrollTop / (d.scrollHeight - d.clientHeight)).toFixed(3) + '&s=' + (d.clientHeight / d.scrollHeight).toFixed(3);
+    if (t === lastText) return;
+    lastScroll = now; lastText = t; go(t);
+  }, true);
+  // (the page's own scroll bars are hidden: the line above is the only one)
+  const hide = () => { try { const st = new CSSStyleSheet(); st.replaceSync('html,body,*{scrollbar-width:none !important}*::-webkit-scrollbar{display:none !important}'); document.adoptedStyleSheets = [...document.adoptedStyleSheets, st]; } catch (e) {} };
+  if (document.documentElement) hide(); else document.addEventListener('DOMContentLoaded', hide);
 })();"#;
 
 fn label_ok(label: &str) -> bool {
@@ -198,10 +128,9 @@ fn forget(w: &WebviewWindow) {
     if let Ok(mut c) = CLOSING.lock() { if !c.contains(&label) { c.push(label.clone()); } }
     if let Ok(h) = hwnd_of(w) { win::forget(h); }
     if let Ok(mut m) = ALLOW.lock() { m.remove(&label); }
+    if let Ok(mut l) = FREE.lock() { l.retain(|x| x != &label); }
     if let Ok(mut m) = OPEN_ALLOW.lock() { m.remove(&label); }
-    if let Ok(mut m) = ZSTATE.lock() { m.remove(&label); }
     if let Ok(mut m) = PREV_FG.lock() { m.remove(&label); }
-    if let Ok(mut m) = DRAG.lock() { m.remove(&label); }
 }
 /// (called when the system asks the window to close, e.g. the window's own close)
 pub fn on_close_requested(label: &str) {
@@ -212,47 +141,22 @@ pub fn on_close_requested(label: &str) {
 fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
     let Some(win) = app.get_webview_window(label) else { return };
     match cmd {
-        "rect" => {                                     // (macOS: the strips along the edges resize the window by their own measure; the numbers are points, the window's outer rectangle)
-            if LOCKED.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) { return; }
-            let q = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok());
-            let n = |k: &str| q.as_ref().and_then(|u| u.query_pairs().find(|(a, _)| a == k).and_then(|(_, v)| v.parse::<f64>().ok()));
-            if let (Some(x), Some(y), Some(w), Some(h)) = (n("x"), n("y"), n("w"), n("h")) {
-                if w.is_finite() && h.is_finite() && w < 10000.0 && h < 10000.0 {
-                    let _ = win.set_size(tauri::LogicalSize::new(w.max(MIN_W), h.max(MIN_H)));
-                    let _ = win.set_position(tauri::LogicalPosition::new(x, y));
-                }
-            }
-        }
         "open" => {                                     // a link the user opened in a new place: the user's browser, only where the window itself may go (the same rule)
             let url = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "u").map(|(_, v)| v.into_owned()));
             let allow = OPEN_ALLOW.lock().ok().and_then(|m| m.get(label).cloned()).unwrap_or_default();
             if let Some(url) = url { let _ = crate::plugin_open_url(url, allow); }       // (a refused address: nothing happens)
         }
-        "drag" => { if !LOCKED.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) { let _ = win.start_dragging(); } }
-        "close" => { if let (Ok(p), Ok(s)) = (win.outer_position(), win.outer_size()) { event(format!("geometry {}x{}+{}+{}", s.width, s.height, p.x, p.y)); } forget(&win); let w2 = win.clone(); std::thread::spawn(move || { let _ = w2.close(); }); }
-        "back" => { let _ = win.eval("history.back()"); }
-        "reload" => { let _ = win.eval("location.reload()"); }
+        "scroll" => {                                   // how far the page has scrolled: the center draws the thin line (p: how far, s: how much of the page is in view)
+            let q = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok());
+            let n = |k: &str| q.as_ref().and_then(|u| u.query_pairs().find(|(a, _)| a == k).and_then(|(_, v)| v.parse::<f64>().ok()));
+            if let (Some(p), Some(sz)) = (n("p"), n("s")) { if p.is_finite() && sz.is_finite() { let _ = app.emit("web-scroll", json!({ "label": label, "p": p.clamp(0.0, 1.0), "s": sz.clamp(0.0, 1.0) })); } }
+        }
         "prep" => {                                   // the mouse is over a text box: a click may activate the window now (the system does it)
             if let Ok(h) = hwnd_of(&win) {
                 let prev = win::foreground();
                 if prev != h { if let Ok(mut p) = PREV_FG.lock() { p.insert(label.to_string(), prev); } }
                 win::allow_key(h, true);
                 win::set_noactivate_light(h, false);
-            }
-        }
-        "dragstart" => {                                // macOS: the window is moved by the page's own measure (see the bar script)
-            if let Ok(p) = win.outer_position() { if let Ok(mut d) = DRAG.lock() { d.insert(label.to_string(), (p.x, p.y)); } }
-        }
-        "dragmove" => {
-            if LOCKED.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) { return; }
-            let start = DRAG.lock().ok().and_then(|d| d.get(label).copied());
-            let q = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok());
-            let n = |k: &str| q.as_ref().and_then(|u| u.query_pairs().find(|(a, _)| a == k).and_then(|(_, v)| v.parse::<f64>().ok()));
-            if let (Some((sx, sy)), Some(dx), Some(dy)) = (start, n("dx"), n("dy")) {
-                if dx.abs() < 20000.0 && dy.abs() < 20000.0 {
-                    let scale = win.scale_factor().unwrap_or(1.0);
-                    let _ = win.set_position(tauri::PhysicalPosition::new(sx + (dx * scale).round() as i32, sy + (dy * scale).round() as i32));
-                }
             }
         }
         "inputclick" => {                              // macOS: a click on a text box must make the program active; when the system has not done it a moment later, it is asked to
@@ -283,8 +187,10 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
 }
 
 /// Sets the OUTER rectangle in screen pixels (the same numbers as the geometry the program keeps: the invisible frame of a window is part of it).
-fn set_outer(w: &WebviewWindow, x: Option<i32>, y: Option<i32>, width: u32, height: u32) -> Result<(), String> {
+pub(crate) fn set_outer(w: &WebviewWindow, x: Option<i32>, y: Option<i32>, width: u32, height: u32) -> Result<(), String> {
     let e = |e: tauri::Error| e.to_string();
+    // (Windows: what the page fills is put exactly there, whatever frame the window has around it: the center draws its frame at that place and the page must reach it)
+    if let (Some(x), Some(y), Ok(h)) = (x, y, hwnd_of(w)) { if win::set_client_rect(h, x, y, width as i32, height as i32) { return Ok(()); } }
     let (dx, dy) = match (w.inner_size(), w.outer_size()) {
         (Ok(i), Ok(o)) => (o.width.saturating_sub(i.width), o.height.saturating_sub(i.height)),
         _ => (0, 0),
@@ -302,12 +208,13 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     if !label_ok(&label) { return Err("bad label".into()); }
     let url = tauri::Url::parse(args.get("url").and_then(|v| v.as_str()).unwrap_or("")).map_err(|e| e.to_string())?;
     let allow = strs(&args, "allow");
-    let host_ok = url.scheme() == "https" && url.host_str().map_or(false, |h| weblib::host_allowed(h, &allow));
+    let free = args.get("free").and_then(|v| v.as_bool()).unwrap_or(false);
+    let host_ok = if free { (url.scheme() == "https" || url.scheme() == "http") && url.host_str().map_or(false, |h| !h.is_empty()) }
+                  else { url.scheme() == "https" && url.host_str().map_or(false, |h| weblib::host_allowed(h, &allow)) };
     if !host_ok { return Err("this address is not allowed".into()); }
+    if let Ok(mut l) = FREE.lock() { l.retain(|x| x != &label); if free { l.push(label.clone()); } }
     if let Ok(mut m) = ALLOW.lock() { m.insert(label.clone(), allow.clone()); }
     if let Ok(mut m) = OPEN_ALLOW.lock() { m.insert(label.clone(), strs(&args, "open_allow")); }
-    let lock = args.get("lock").and_then(|v| v.as_bool()).unwrap_or(false);
-    if let Ok(mut l) = LOCKED.lock() { l.retain(|x| x != &label); if lock { l.push(label.clone()); } }
     // open already: it goes to the address and comes to the front
     if let Some(w) = app.get_webview_window(&label) {
         if !is_closing(&label) {
@@ -317,27 +224,34 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         }
     }
     if let Ok(mut c) = CLOSING.lock() { c.retain(|x| x != &label); }
-    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").chars().take(80).collect::<String>();
     let key = weblib::data_key(args.get("key").and_then(|v| v.as_str()).unwrap_or(""));
     let persist = args.get("persist").and_then(|v| v.as_bool()).unwrap_or(false);
-    let script = BAR.replace("__TITLE__", &serde_json::to_string(&title).unwrap_or_else(|_| "\"\"".into())).replace("__MAC__", if cfg!(target_os = "macos") { "true" } else { "false" }).replace("__LOCK__", if lock { "true" } else { "false" });
     let (app2, lbl) = (app.clone(), label.clone());
+    let (app3, lbl3) = (app.clone(), label.clone());
     let b = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url));
     #[cfg(windows)]
     let b = {
         // a folder of their own: cookies are kept in webview-data/web/<plugin>/ only when the user chose it; else a private session in webview-data/web/_private/
-        let dir = crate::data_dir().join("web").join(if persist { key.as_str() } else { "_private" });
-        let b = b.data_directory(dir);
+        // How the page is drawn: 'cpu' = by the processor (a small page of a phone does not need the card, and on a display whose refresh rate the system does not quite know a page that
+        // moves made the game stutter: found with test windows); 'gpu' = by the card, always; else the web view decides. The folder has one set of browser arguments, so the way is in its name.
+        let render = args.get("render").and_then(|v| v.as_str()).unwrap_or("auto");
+        let (suffix, extra) = match render { "cpu" => ("_cpu", "--disable-gpu"), "gpu" => ("_gpu", "--ignore-gpu-blocklist"), _ => ("", "") };
+        let dir = crate::data_dir().join("web").join(format!("{}{}", if persist { key.as_str() } else { "_private" }, if persist { "" } else { suffix }));
+        // (the other arguments are the ones the window library puts there by itself: giving any takes those away)
+        let b = b.data_directory(dir).additional_browser_args(&format!("{extra} --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"));
         if persist { b } else { b.incognito(true) }
     };
     #[cfg(target_os = "macos")]
     let b = if persist { b.data_store_identifier(weblib::store_id(&key)) } else { b.incognito(true) };
-    let b = b.initialization_script(script).initialization_script(KEYS).initialization_script_for_all_frames(KEYS);
+    let b = b.initialization_script(PAGE).initialization_script(KEYS).initialization_script_for_all_frames(KEYS);
     let mut b = b
         .title("CMR Web")
         .decorations(false)
         .accept_first_mouse(true)          // (macOS: the click that activates the window while a text box is used is not lost)
-        .resizable(!lock)
+        .focusable(false)                  // (a window that does not take the keyboard from the first moment: not while the page loads, nor when it is shown. A text box turns it back: see "prep")
+        .shadow(false)                     // (no shadow: the shadow of a window with no frame is made with a frame around it that the page would not fill)
+        .resizable(false)                  // (the strips of the center resize it, by the program. A window that can be resized by the system has an invisible frame around it on Windows, and the page would
+                                           // not fill the place the center draws its frame around: there is no such frame when it cannot)
         .skip_taskbar(true)
         .visible(false)
         .inner_size(args.get("w").and_then(|v| v.as_f64()).unwrap_or(360.0).max(MIN_W), args.get("h").and_then(|v| v.as_f64()).unwrap_or(640.0).max(MIN_H))
@@ -346,12 +260,17 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         .on_navigation(move |u| {
             if weblib::is_command_url(u.scheme()) { command(&app2, &lbl, u.host_str().unwrap_or(""), u.query()); return false; }
             let allowed = ALLOW.lock().ok().and_then(|m| m.get(&lbl).cloned()).unwrap_or_default();
-            let ok = u.scheme() == "https" && u.host_str().map_or(false, |h| weblib::host_allowed(h, &allowed));
+            let ok = if is_free(&lbl) { u.scheme() == "https" || u.scheme() == "http" } else { u.scheme() == "https" && u.host_str().map_or(false, |h| weblib::host_allowed(h, &allowed)) };
             if !ok {
                 event(format!("address refused: {}", u.as_str().chars().take(200).collect::<String>()));
+            } else {
+                // a page is loading: the page before may have left the window prepared (a text box was used) without telling; a window that is not the active one is put back to taking nothing
+                if let Some(w) = app2.get_webview_window(&lbl) { if let Ok(h) = hwnd_of(&w) { if win::foreground() != h && !(cfg!(target_os = "macos") && win::self_front()) { win::allow_key(h, false); win::set_noactivate_light(h, true); } } }
+                let _ = app2.emit("web-nav", json!({ "label": lbl, "url": u.as_str() }));      // (the address the page is going to: the center shows it)
             }
             ok
-        });
+        })
+        .on_document_title_changed(move |_, t| { let _ = app3.emit("web-title", json!({ "label": lbl3, "title": t.chars().take(120).collect::<String>() })); });
     if let Some(ua) = args.get("ua").and_then(|v| v.as_str()) { if !ua.is_empty() { b = b.user_agent(ua); } }
     let win = b.build().map_err(|e| e.to_string())?;
     // the place the window had (outer, screen pixels); else the size that was asked for
@@ -360,8 +279,41 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         let _ = set_outer(&win, args.get("x").and_then(|v| v.as_i64()).map(|v| v as i32), args.get("y").and_then(|v| v.as_i64()).map(|v| v as i32), w as u32, h as u32);
     }
     // never the keyboard of the game: a window that cannot become the key window (macOS), the "no activate" style (Windows)
-    if let Ok(hw) = hwnd_of(&win) { win::make_no_key(hw); win::set_noactivate_light(hw, true); }
+    if let Ok(hw) = hwnd_of(&win) {
+        win::make_no_key(hw); win::set_noactivate_light(hw, true);
+        // a window that is shown without being activated goes behind the program in front (the game): it starts on top, and the poll (web_tick) puts it in its own order a moment later
+        win::set_topmost(hw, true, 0);
+    }
     let _ = win.show();
+    Ok(())
+}
+
+/// What the bar of the center asks of the page: "back", "forward", "reload", "goto" (an address: only for a window the user opened).
+#[tauri::command]
+pub async fn web_cmd(app: AppHandle, label: String, cmd: String, url: Option<String>) -> Result<(), String> {
+    if is_closing(&label) { return Ok(()); }
+    let w = get(&app, &label)?;
+    match cmd.as_str() {
+        "back" => { let _ = w.eval("history.back()"); }
+        "forward" => { let _ = w.eval("history.forward()"); }
+        "reload" => { let _ = w.eval("location.reload()"); }
+        "goto" => {                                                                    // (the address bar of the center: only a window the user opened may be sent anywhere)
+            if is_free(&label) {
+                if let Some(u) = url.and_then(|u| tauri::Url::parse(&u).ok()) { if u.scheme() == "https" || u.scheme() == "http" { let _ = w.navigate(u); } }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// What a window of the mini browser kept (cookies and the rest) is taken away when the window is not open: its folder. `key`: the name of the folder.
+#[tauri::command]
+pub async fn web_forget(key: String) -> Result<(), String> {
+    let k = weblib::data_key(&key);
+    if k.starts_with('_') || k == "plugin" { return Err("not a folder of the mini browser".into()); }
+    let dir = crate::data_dir().join("web").join(k);
+    if dir.exists() { std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?; }
     Ok(())
 }
 
@@ -377,53 +329,6 @@ pub async fn web_allow(label: String, allow: Vec<String>, open_allow: Option<Vec
     if let Ok(mut m) = OPEN_ALLOW.lock() { m.insert(label.clone(), open_allow.unwrap_or_default()); }
     if let Ok(mut m) = ALLOW.lock() { m.insert(label, allow); }
     Ok(())
-}
-
-/// What the program does every poll for a window: the style is put back (a window library call may have wiped it) and the order of the windows is kept.
-/// mode 0: an ordinary window, 1: always on top, 2: above the game only (`game`: the window of the game).
-#[tauri::command]
-pub async fn web_tick(app: AppHandle, label: String, mode: u32, game: Option<i64>) -> Result<(), String> {
-    if is_closing(&label) { return Ok(()); }
-    let w = get(&app, &label)?;
-    let h = hwnd_of(&w)?;
-    win::keep_style(h);
-    let want = match mode {
-        1 => 1,
-        2 => match game { Some(g) if g > 0 => { let fg = win::foreground(); if fg == g as isize { 21 } else if win::self_front() { 23 } else { 22 } }, _ => 1 },    // (no game found: like always on top, it must stay in view)
-        _ => 0,
-    };
-    let last = ZSTATE.lock().ok().and_then(|m| m.get(&label).copied()).unwrap_or(99);
-    if last != want {
-        if let Ok(mut m) = ZSTATE.lock() { m.insert(label.clone(), want); }
-        let g = game.unwrap_or(0) as isize;
-        match want {
-            0 => { win::set_owner(h, 0); win::set_topmost(h, false, 0); }
-            // The game in front: topmost first, then the owner goes (the window never sinks behind the game). One of OUR windows in front (the options window): the owner goes
-            // FIRST: Windows keeps an owner and its owned window in the same topmost state, so "topmost" for the owned window would make the GAME topmost and it would cover the
-            // window that was just clicked (the options window "hid"). Same as the translation windows (overlay.js zStep).
-            1 | 21 => { win::set_topmost(h, true, 0); win::set_owner(h, 0); }
-            23 => { win::set_owner(h, 0); win::set_topmost(h, true, 0); }
-            // From "one of our windows in front" (23): the window goes down to just above the game FIRST, then the owner is set. The other way round (owner first) re-ordered the
-            // windows when the owner of a topmost window changed, and the options window that stood above the game sank behind it.
-            22 if last == 23 => { win::set_topmost(h, false, g); win::set_owner(h, g); }
-            _ => { win::set_owner(h, g); win::set_topmost(h, false, g); }
-        }
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn web_lock(app: AppHandle, label: String, on: bool) -> Result<(), String> {
-    let w = get(&app, &label)?;
-    if let Ok(mut l) = LOCKED.lock() { l.retain(|x| x != &label); if on { l.push(label.clone()); } }
-    let _ = w.eval(&format!("window.__cmrLocked={}", on));
-    w.set_resizable(!on).map_err(|e| e.to_string())
-}
-
-/// Puts the window in a place (outer rectangle, screen pixels).
-#[tauri::command]
-pub async fn web_rect(app: AppHandle, label: String, x: Option<i32>, y: Option<i32>, w: u32, h: u32) -> Result<(), String> {
-    set_outer(&get(&app, &label)?, x, y, w, h)
 }
 
 /// { exists, visible, position: [x, y], size: [w, h] } (outer, screen pixels); nothing is touched while the window closes
