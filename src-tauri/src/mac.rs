@@ -480,57 +480,15 @@ pub fn make_no_key(hwnd: isize) {
 }
 // ---- LAB: the window of the web flickers when the game is clicked: what is its state, and which of these helps (bit 1: no show/hide animation, 2: ordered to the front at every
 // poll, 4: may not be hidden by the system)
-/// EXPERIMENT (macOS, the page goes black behind instead of see-through while the window fades): ways to try, chosen by the number in the file `mac_alpha_mode` next to app/ (nothing = 0):
-///  1: "opaque" is off while the window is less than solid, on again when it is solid;  2: the same, and the background of the window is clear meanwhile;
-///  3: after each fade the window and its content are drawn again;  4: the background of the window is white (not the grey of the system) all the time.
-pub fn fade_begin(hwnd: isize, mode: u8) {
-    if mode == 0 { return; }
-    on_main(|| unsafe {
-        let w = obj(hwnd);
-        match mode {
-            1 => { let _: () = msg_send![w, setOpaque: Bool::NO]; }
-            2 => { let _: () = msg_send![w, setOpaque: Bool::NO]; let c: *mut AnyObject = msg_send![class!(NSColor), clearColor]; let _: () = msg_send![w, setBackgroundColor: c]; }
-            4 => { let c: *mut AnyObject = msg_send![class!(NSColor), whiteColor]; let _: () = msg_send![w, setBackgroundColor: c]; }
-            _ => {}
-        }
-    });
+/// A window that is being faded (the web window of the mini browser): while it is less than solid it is NOT "opaque", when it is solid again it is. Left "opaque" while it is see-through, the system
+/// draws the window against black instead of what is behind it: the page darkens instead of fading (found out by trying: the other ways to draw it again did not help).
+pub fn fade_begin(hwnd: isize) {
+    on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setOpaque: Bool::NO]; });
 }
-pub fn fade_end(hwnd: isize, mode: u8, solid: bool) {
-    if mode == 0 { return; }
-    on_main(|| unsafe {
-        let w = obj(hwnd);
-        match mode {
-            1 | 2 => if solid {
-                let _: () = msg_send![w, setOpaque: Bool::YES];
-                if mode == 2 { let c: *mut AnyObject = msg_send![class!(NSColor), windowBackgroundColor]; let _: () = msg_send![w, setBackgroundColor: c]; }
-            },
-            3 => {
-                let content: *mut AnyObject = msg_send![w, contentView];
-                if !content.is_null() { let _: () = msg_send![&*content, setNeedsDisplay: Bool::YES]; }
-                let _: () = msg_send![w, displayIfNeeded];
-                let _: () = msg_send![w, invalidateShadow];
-            }
-            _ => {}
-        }
-    });
+pub fn fade_end(hwnd: isize) {
+    on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setOpaque: Bool::YES]; });
 }
 
-/// What the system says of a window that is being faded (for the log): its transparency and "opaque" flag, the colour of its background, its number, whether the content view is opaque.
-pub fn alpha_info(hwnd: isize) -> String {
-    on_main(|| unsafe {
-        let w = obj(hwnd);
-        let alpha: f64 = msg_send![w, alphaValue];
-        let opaque: Bool = msg_send![w, isOpaque];
-        let visible: Bool = msg_send![w, isVisible];
-        let level: isize = msg_send![w, level];
-        let number: isize = msg_send![w, windowNumber];
-        let bg: *mut AnyObject = msg_send![w, backgroundColor];
-        let bg_text: String = if bg.is_null() { "nil".to_string() } else { let desc: *mut AnyObject = msg_send![&*bg, description]; string_of(desc).chars().take(80).collect() };
-        let content: *mut AnyObject = msg_send![w, contentView];
-        let content_opaque = if content.is_null() { 2 } else { let o: Bool = msg_send![&*content, isOpaque]; o.as_bool() as u8 };
-        format!("alpha={:.2} opaque={} bg=[{}] number={} contentOpaque={} visible={} level={}", alpha, opaque.as_bool() as u8, bg_text, number, content_opaque, visible.as_bool() as u8, level)
-    })
-}
 pub fn lab_diag(hwnd: isize) -> String {
     on_main(|| unsafe {
         let w = obj(hwnd);

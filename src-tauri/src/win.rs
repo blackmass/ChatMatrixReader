@@ -299,12 +299,9 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     }
 }
 
-/// (macOS experiment: see mac.rs; here nothing)
-pub fn fade_begin(_hwnd: isize, _mode: u8) {}
-pub fn fade_end(_hwnd: isize, _mode: u8, _solid: bool) {}
-
-/// (macOS: what the system says of a window that is faded; here nothing)
-pub fn alpha_info(_hwnd: isize) -> String { String::new() }
+/// (macOS: see mac.rs; here nothing: a layered window fades by itself)
+pub fn fade_begin(_hwnd: isize) {}
+pub fn fade_end(_hwnd: isize) {}
 
 pub fn set_noactivate(hwnd: isize, on: bool) {
     if let Ok(mut l) = KEEP.lock() {
