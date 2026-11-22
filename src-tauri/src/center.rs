@@ -184,14 +184,10 @@ pub async fn center_unprep(app: AppHandle, label: String) -> Result<(), String> 
 }
 #[tauri::command]
 pub async fn center_release(app: AppHandle, label: String) -> Result<(), String> {
+    // the box was used and is left: the center takes nothing again. The keyboard is NOT handed back to the game: the user clicks the game (that has never worked well by itself)
     let h = center_hwnd(&app, &label)?;
-    let was_front = win::foreground() == h || (cfg!(target_os = "macos") && win::has_keyboard(h));
     win::allow_key(h, false);
     win::set_noactivate_light(h, true);
-    if was_front {
-        let prev = BEFORE.lock().ok().and_then(|m| m.get(&label).copied()).unwrap_or(0);
-        if prev != 0 && prev != h { win::set_foreground(prev); }
-    }
     Ok(())
 }
 /// macOS: a click on a text box must make the program active; when the system has not done it a moment later, it is asked to.

@@ -15,15 +15,17 @@ export class WebPane {
     this.win = info.win; this.label = info.label; this.center = center; this.lock = !!info.lock; this.title = info.title || ''; this.url = '';
     this.kind = info.kind === 'browser' ? 'browser' : 'web';                // (a window of the mini browser has an address in its bar, a window of a plugin the title of the page)
     this.el = document.createElement('div'); this.el.className = 'pane webpane'; this.el.dataset.web = this.label;
-    const head = this.kind === 'browser' ? '<span class="ptabs"><input class="paddr" spellcheck="false" autocomplete="off" placeholder="주소 또는 검색어"></span>' : '<span class="ptabs"><span class="ptab on"></span></span>';
-    this.el.innerHTML = '<div class="pbar">' + head + '<span class="pspace"></span><span class="ptools"><button class="pback" tabindex="-1" title="뒤로">‹</button><button class="preload" tabindex="-1" title="새로고침">↻</button><button class="pclose" tabindex="-1" title="닫기">✕</button></span></div><div class="pbody"><div class="pscroll"></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div>';
+    const head = '<span class="ptabs"><span class="ptab on"></span></span>';
+    const row = this.kind === 'browser' ? '<div class="paddrbar"><div class="paddr"><span class="phold">주소 또는 검색어</span><span class="ptxt"></span></div></div>' : '';       // (the second line of a window of the mini browser: the address)
+    this.head = this.kind === 'browser' ? BAR_H * 2 : BAR_H;                   // (how much of the window is above the page, css pixels)
+    this.el.innerHTML = '<div class="pbar">' + head + '<span class="pspace"></span><span class="ptools"><button class="pback" tabindex="-1" title="뒤로">‹</button><button class="preload" tabindex="-1" title="새로고침">↻</button><button class="pclose" tabindex="-1" title="닫기">✕</button></span></div>' + row + '<div class="pbody"><div class="pscroll"></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div>';
     document.body.append(this.el);
     this.el.style.zIndex = String((this.kind === 'browser' ? 600 : 500) + (Number(this.win) || 0));       // (the web windows are above the translation windows that have not been touched, below the ones that were)
     this.el.addEventListener('pointerdown', () => this.center.raise(this), true);
     this.el.addEventListener('contextmenu', e => { e.preventDefault(); this.center.menu(e, this); });
     if (this.kind === 'browser') this.address();
     this.place();
-    dragFrame(this, this.el.querySelector('.pbar'), (s, dx, dy) => { this.rect.x = s.x + dx; this.rect.y = Math.max(BAR_H, s.y + dy); }, e => !this.lock && !e.target.closest('button') && !e.target.closest('input'));
+    dragFrame(this, this.el.querySelector('.pbar'), (s, dx, dy) => { this.rect.x = s.x + dx; this.rect.y = Math.max(this.head, s.y + dy); }, e => !this.lock && !e.target.closest('button'));
     sizeEdges(this, () => !this.lock, [190, 320]);                      // (the smallest a web window can be: a window made too small by mistake is hard to get back)
     const q = s => this.el.querySelector(s);
     q('.pback').onclick = () => invoke('web_cmd', { label: this.label, cmd: 'back' }).catch(() => {});
@@ -41,32 +43,27 @@ export class WebPane {
     if (this.kind === 'browser') {                                    // (the address: not while it is typed in)
       const a = this.el.querySelector('.paddr');
       a.title = this.title;
-      if (document.activeElement !== a) a.value = this.url;
-      return;
+      a.querySelector('.ptxt').textContent = this.url;
+      a.classList.toggle('empty', !this.url);
     }
     const t = this.el.querySelector('.ptab');
     t.textContent = this.title || (this.url ? (() => { try { return new URL(this.url).host; } catch { return ''; } })() : '');
     t.title = this.url;
   }
-  // The address bar of a window of the mini browser. A center never takes the keyboard of the game, so typing goes like typing into a text box of a web page: the mouse coming over the box asks
-  // the program to lift that for the center ("prep"), a click then activates it by the system and the keys come here; when the box is left (or Enter, Esc) the keyboard goes back to the game.
+  // The address of a window of the mini browser is drawn here, but typed in a small window of the system (address.js): the center never takes the keyboard. A click on it asks the program to put that
+  // window over this place; clicking anywhere else of this window (or closing it) puts it away.
   address() {
-    const a = this.el.querySelector('.paddr'), label = this.center.label;
-    let prepared = false, leaveT = 0;
-    const prep = on => { if (on !== prepared) { prepared = on; invoke(on ? 'center_prep' : 'center_unprep', { label }).catch(() => {}); } };
-    const done = () => { clearTimeout(leaveT); if (prepared) { prepared = false; invoke('center_release', { label }).catch(() => {}); } };
-    a.addEventListener('mouseenter', () => { clearTimeout(leaveT); prep(true); });
-    a.addEventListener('mouseleave', () => { if (document.activeElement !== a) { clearTimeout(leaveT); leaveT = setTimeout(() => { if (document.activeElement !== a) prep(false); }, 300); } });
-    a.addEventListener('mousedown', e => { if (e.button === 0) invoke('center_inputclick', { label }).catch(() => {}); });       // (macOS: asked to make sure the program is active)
-    a.addEventListener('focus', () => a.select());
-    a.addEventListener('blur', () => { a.value = this.url; done(); });
-    a.addEventListener('keydown', e => {
-      if (e.key === 'Enter') {
-        const url = B.addressFrom(a.value);
-        if (url) invoke('web_cmd', { label: this.label, cmd: 'goto', url }).catch(() => {});
-        a.blur();
-      } else if (e.key === 'Escape') a.blur();
+    const a = this.el.querySelector('.paddr');
+    a.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const r = a.getBoundingClientRect(), d = this.center.dpr(), [ox, oy] = this.center.origin();
+      a.classList.add('editing');
+      invoke('address_show', { label: this.label, x: Math.round(ox + r.left * d), y: Math.round(oy + r.top * d), w: Math.round(r.width * d), h: Math.round(r.height * d), text: this.url }).catch(() => {});
     });
+    this.el.addEventListener('pointerdown', e => { if (!e.target.closest('.paddr')) { a.classList.remove('editing'); invoke('address_hide').catch(() => {}); } }, true);
+    // (the box over it says when it comes and goes: the letters behind are hidden while it is there, and the frame shows that it is the one typed in)
+    listen('address-state', ev => { const p = ev.payload || {}; a.classList.toggle('editing', !!p.open && p.label === this.label); });
   }
   setTitle(t) { this.title = String(t || ''); this.showTitle(); }
   setUrl(u) { this.url = String(u || ''); this.showTitle(); }
@@ -83,24 +80,25 @@ export class WebPane {
     const d = this.center.dpr(), [ox, oy] = this.center.origin();
     const m = this.center.mainScreen && this.center.mainScreen();                       // (no saved place: on the main screen; the area of all the screens has holes)
     const x = g.x === null ? (m ? m[0] + 120 : ox + 200) : g.x, y = g.y === null ? (m ? m[1] + 100 : oy + 160) : g.y;
-    this.rect = { x: (x - ox) / d, y: Math.max(BAR_H, (y - oy) / d), w: g.w / d, h: g.h / d };
+    this.rect = { x: (x - ox) / d, y: Math.max(this.head, (y - oy) / d), w: g.w / d, h: g.h / d };
     this.geo = this.seenGeo = this.savedGeometry() || '';
     this.layout();
   }
   layout() {
     const r = this.rect;
-    this.el.style.left = r.x + 'px'; this.el.style.top = (r.y - BAR_H) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + BAR_H) + 'px';
+    this.el.style.left = r.x + 'px'; this.el.style.top = (r.y - this.head) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + this.head) + 'px';
   }
   // the boxes for the center, in pixels of the page: the bar and the strips take the mouse (`hit`); the page itself is `web`: the window of the system is put there, and the mouse goes through
   boxes() {
     const r = this.rect, d = this.center.dpr(), id = 'w' + this.win, b = (suffix, x, y, w, h, extra) => ({ id: id + suffix, x: x * d, y: y * d, w: w * d, h: h * d, bar: 0, hit: true, ...extra });
     return [
       { id, x: r.x * d, y: r.y * d, w: r.w * d, h: r.h * d, bar: 0, hit: false, web: this.label },
-      b('b', r.x, r.y - BAR_H, r.w, BAR_H),
+      b('b', r.x, r.y - this.head, r.w, BAR_H),
+      ...(this.kind === 'browser' ? [b('a', r.x, r.y - BAR_H, r.w, BAR_H)] : []),
       ...(this.lock ? [] : [b('l', r.x, r.y, EDGE, r.h), b('r', r.x + r.w - EDGE, r.y, EDGE, r.h), b('s', r.x, r.y + r.h - EDGE, r.w, EDGE), b('g', r.x + r.w - GRIP, r.y + r.h - GRIP, GRIP, GRIP)]),
     ];
   }
-  box() { const r = this.rect, d = this.center.dpr(); return { id: 'w' + this.win, x: r.x * d, y: (r.y - BAR_H) * d, w: r.w * d, h: (r.h + BAR_H) * d, bar: BAR_H * d }; }
+  box() { const r = this.rect, d = this.center.dpr(); return { id: 'w' + this.win, x: r.x * d, y: (r.y - this.head) * d, w: r.w * d, h: (r.h + this.head) * d, bar: this.head * d }; }
   screenBox() { const b = this.box(), [ox, oy] = this.center.origin(); return { x: ox + b.x, y: oy + b.y, w: b.w, h: b.h }; }
   save() {
     const r = this.rect, d = this.center.dpr(), [ox, oy] = this.center.origin();
@@ -121,5 +119,5 @@ export class WebPane {
       if (sg !== this.geo && !near && !this.resizing) { this.place(); this.center.changed(this); }
     }
   }
-  destroy() { clearTimeout(this.scrollT); this.el.remove(); }
+  destroy() { clearTimeout(this.scrollT); if (this.kind === 'browser') invoke('address_hide').catch(() => {}); this.el.remove(); }
 }

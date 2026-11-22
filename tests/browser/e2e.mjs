@@ -77,6 +77,8 @@ async function invoke(cmd, a = {}) {
     case 'web_allow': webCalls.push(['allow', a.allow]); return null;
     case 'web_info': return { exists: true, visible: true, position: [100, 50], size: [360, 640] };
     case 'web_cmd': webCalls.push(['cmd', a.label, a.cmd, a.url]); return null;
+    case 'address_show': webCalls.push(['addr', a]); return null;
+    case 'address_hide': webCalls.push(['addrhide']); return null;
     case 'center_title': return null;
     case 'web_events': return [];
     case 'web_clear': webCalls.push(['clear', a.label]); return null;
@@ -955,15 +957,34 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await cmd('open', 1);
     await control.waitForTimeout(300);
     ok(opens().length === 1, 'browser/open: asking again for an open window does not open another');
-    // the address bar: a site gets https://, a search goes to Google
+    // the address: drawn by the center, typed in the small window (address.html): a click puts it over the place, a site gets https://, a search goes to Google
     const addr = cp.locator('.webpane .paddr');
-    await addr.fill('namu.wiki/w/x'); await addr.press('Enter');
+    await addr.dispatchEvent('mousedown', { button: 0 });                                  // (another window of the test lies over it: the event itself)
+    await until(() => webCalls.some(c => c[0] === 'addr' && c[1].label === 'web_b1' && c[1].w > 50 && c[1].h > 10), 'a click on the address asks for the box over it');
+    const ap = await open('address.html', { width: 300, height: 22 });
+    await cm.evaluate(() => window.__TAURI__.event.emit('address-open', { label: 'web_b1', text: 'https://www.google.com/' }));         // (the program tells it; from another page)
+    await until(async () => (await ap.locator('#a').inputValue()) === 'https://www.google.com/', 'the box shows the address now');
+    await until(async () => await addr.evaluate(e => e.classList.contains('editing')), 'the address in the bar shows that it is being typed (its letters are hidden)');
+    await ap.locator('#a').fill('namu.wiki/w/x'); await ap.locator('#a').press('Enter');
     await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'goto' && c[3] === 'https://namu.wiki/w/x'), 'a site is gone to');
-    await addr.fill('와우 공략'); await addr.press('Enter');
+    await cm.evaluate(() => window.__TAURI__.event.emit('address-open', { label: 'web_b1', text: '' }));
+    await ap.locator('#a').fill('와우 공략'); await ap.locator('#a').press('Enter');
     await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'goto' && c[3] === 'https://www.google.com/search?q=' + encodeURIComponent('와우 공략')), 'what is not a site is searched');
+    await until(async () => !(await addr.evaluate(e => e.classList.contains('editing'))), 'the bar shows its address again when the box is gone');
+    // Esc: what was typed is not taken: nothing is gone to
+    const gotos = webCalls.filter(c => c[0] === 'cmd' && c[2] === 'goto').length;
+    await cm.evaluate(() => window.__TAURI__.event.emit('address-open', { label: 'web_b1', text: '' }));
+    await ap.locator('#a').fill('not-finished.example'); await ap.locator('#a').press('Escape');
+    await until(async () => !(await addr.evaluate(e => e.classList.contains('editing'))), 'Esc puts the box away');
+    ok(webCalls.filter(c => c[0] === 'cmd' && c[2] === 'goto').length === gotos, 'browser/address: Esc: the unfinished address is not gone to');
+    await ap.close();
+    // a click on the bar (not the address) puts the box away
+    const hides = webCalls.filter(c => c[0] === 'addrhide').length;
+    await cp.locator('.webpane .paddrbar').dispatchEvent('pointerdown');
+    await until(() => webCalls.filter(c => c[0] === 'addrhide').length > hides, 'a click elsewhere in the window puts the box away');
     // the address the page goes to is shown, and kept as the address seen last
     await cm.evaluate(() => window.__TAURI__.event.emit('web-nav', { label: 'web_b1', url: 'https://a.b/c' }));            // (a third page tells it: the hub and the center both hear it)
-    await until(async () => (await addr.inputValue()) === 'https://a.b/c', 'the address is shown');
+    await until(async () => (await addr.locator('.ptxt').textContent()) === 'https://a.b/c', 'the address is shown');
     await until(() => cfgFile().browser_windows[0].last_url === 'https://a.b/c', 'the address is kept as the last one', 3000);
     // the right button on the bar: the bookmarks, adding the page, the settings
     await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 4, y: 10 } });

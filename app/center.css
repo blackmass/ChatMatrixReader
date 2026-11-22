@@ -97,6 +97,13 @@ html, body.center { margin: 0; width: 100%; height: 100%; background: transparen
 .webpane .pgrip { background: none; }
 
 /* the address bar of a window of the mini browser: one field across the bar */
-.webpane .paddr { flex: 1; min-width: 0; height: 18px; margin: 0 4px; padding: 0 8px; border: 1px solid #5b4a22; border-radius: 3px; background: rgba(0, 0, 0, .28); color: #f1d98a; font: 12px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; outline: none; user-select: text; -webkit-user-select: text; text-overflow: ellipsis; }
-.webpane .paddr:focus { background: #14181a; border-color: #e0b84a; color: #fff; }
-.webpane .paddr::placeholder { color: #8a7a4a; }
+.webpane .paddrbar { flex: none; height: 22px; box-sizing: border-box; display: flex; align-items: center; background: linear-gradient(#2a3836, #243130); border: 1px solid #8a6a30; border-top: 1px solid #5b4a22; border-bottom: 0; }
+.pane .paddrbar { opacity: 1; transition: opacity .15s; }
+.pane.outside .paddrbar { opacity: .5; transition: opacity 3s ease-in; }
+.webpane .paddr { flex: 1; min-width: 0; height: 18px; line-height: 16px; box-sizing: border-box; margin: 0 4px; padding: 0 8px; border: 1px solid #5b4a22; border-radius: 3px; background: rgba(0, 0, 0, .28); color: #f1d98a;
+  font: 12px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
+.webpane .paddr .phold { display: none; color: #8a7a4a; }
+.webpane .paddr.empty .phold { display: inline; }
+.webpane .paddr:hover { border-color: #8a6a30; }
+.webpane .paddr.editing { border-color: #e0b84a; background: #14181a; }
+.webpane .paddr.editing .ptxt, .webpane .paddr.editing .phold { visibility: hidden; }

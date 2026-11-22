@@ -332,6 +332,8 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             .resizable(false)
             .visible(false)
             .inner_size(520.0, 46.0),
+        // the address box of the mini browser (address.js): one small window for all the windows of it, put over the address of the one that is used
+        "address" => b.title("CMR Address").transparent(true).decorations(false).shadow(false).always_on_top(true).skip_taskbar(true).resizable(false).visible(false).min_inner_size(10.0, 10.0).inner_size(300.0, 22.0),
         // a control center: a transparent window over all the screens (center.rs); it takes the first click of an inactive program too
         // the blur of a pane (center.rs): an empty transparent window under its center, the system blurs what is behind it
         "blur" => b.title("CMR Blur").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).inner_size(100.0, 100.0),
@@ -511,6 +513,45 @@ fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<()
         let _ = app2.emit("input-focus", json!({ "ok": ok, "ms": t0.elapsed().as_millis() as u64, "front": win::self_front() }));
     });
     Ok(())
+}
+
+/// The address box of a window of the mini browser: the one small window is put over `x, y, w, h` (screen pixels: the address in the bar of the center) and takes the keyboard; `text` is
+/// the address now. The page of the box (address.js) goes to the address by itself and puts the box away.
+#[tauri::command]
+fn address_show(app: AppHandle, label: String, x: i32, y: i32, w: u32, h: u32, text: String) -> Result<(), String> {
+    use tauri::Emitter;
+    let win = app.get_webview_window("address").ok_or("no address window")?;
+    let e = |e: tauri::Error| e.to_string();
+    let hwnd = hwnd_of(&win)?;
+    let (w, h) = (w.clamp(40, 4000), h.clamp(14, 200));
+    let place = |win: &WebviewWindow| {
+        if !win::set_client_rect(hwnd, x, y, w as i32, h as i32) {
+            let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+            let _ = win.set_size(tauri::PhysicalSize::new(w, h));
+        }
+    };
+    place(&win);
+    let _ = app.emit_to("address", "address-open", json!({ "label": label, "text": text.chars().take(2000).collect::<String>() }));
+    win::set_topmost(hwnd, true, 0);
+    win.show().map_err(e)?;
+    place(&win);                                       // (a window that was never seen takes its own size when it is shown first: put again, and once more a moment later)
+    win::grab_focus(hwnd);
+    win.set_focus().map_err(e)?;
+    let (app2, hold) = (app.clone(), (x, y, w, h));
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(80));
+        if let Some(w2) = app2.get_webview_window("address") {
+            if w2.is_visible().unwrap_or(false) && !win::set_client_rect(hwnd, hold.0, hold.1, hold.2 as i32, hold.3 as i32) {
+                let _ = w2.set_size(tauri::PhysicalSize::new(hold.2, hold.3));
+            }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn address_hide(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("address") { if w.is_visible().unwrap_or(false) { let _ = w.hide(); } }
 }
 
 /// The window the open send box follows (its label) and where it goes ("auto" | "below" | "above"); None while there is no box.
@@ -1007,6 +1048,8 @@ fn main() {
             open_url,
             set_window_rect,
             show_input,
+            address_show,
+            address_hide,
             focus_window,
             send_paste,
             http_request,
@@ -1085,7 +1128,7 @@ fn main() {
                 make_window(&handle, "legacy", "legacy.html", "legacy")?;
                 return Ok(());
             }
-            for (label, page, kind) in [("control", "control.html", "control"), ("input", "input.html", "input")] {
+            for (label, page, kind) in [("control", "control.html", "control"), ("input", "input.html", "input"), ("address", "address.html", "address")] {
                 match make_window(&handle, label, page, kind) { Ok(_) => startup_log(&format!("window {label} made")), Err(e) => { startup_log(&format!("window {label} FAILED: {e}")); return Err(e.into()); } }
             }
             center::start(handle.clone());                              // (the translation windows are panes of the control centers)

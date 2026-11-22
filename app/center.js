@@ -91,6 +91,8 @@ function showMenu(ev, pane) {
   menuEl.style.top = Math.max(0, Math.min(ev.clientY, innerHeight - menuEl.offsetHeight - 2)) + 'px';
 }
 addEventListener('mousedown', ev => { if (!menuEl.contains(ev.target)) hideMenu(); }, true);
+// (the menu of the web view - back, reload, print ... - never shows over a center: a right click anywhere else, with our menu open or not, only closes ours; only a text box keeps its own cut / paste)
+addEventListener('contextmenu', ev => { if (!(ev.target.closest && ev.target.closest('input, textarea'))) ev.preventDefault(); }, true);
 addEventListener('keydown', ev => { if (ev.key === 'Escape') hideMenu(); });
 addEventListener('wheel', hideMenu, { passive: true });
 
@@ -212,7 +214,7 @@ function fit() {
     const b = p.screenBox(), seen = screens.some(m => Math.min(b.x + b.w, m[0] + m[2]) - Math.max(b.x, m[0]) >= 60 && Math.min(b.y + b.h, m[1] + m[3]) - Math.max(b.y, m[1]) >= 22);
     if (seen || !screens.length) continue;
     const m = screens[0], k = moved.length;
-    p.rect.x = (m[0] + 60 + k * 30 - ox) / d; p.rect.y = Math.max(22, (m[1] + 80 + k * 30 - oy) / d);
+    p.rect.x = (m[0] + 60 + k * 30 - ox) / d; p.rect.y = Math.max(p.head || 22, (m[1] + 80 + k * 30 - oy) / d);
     p.layout(); p.save(); moved.push(p);
   }
   if (moved.length) { report(); (moved.find(p => p instanceof Pane) || moved[0]).note('⚠ ' + tr('모니터 환경이 바뀌어 일부 창의 위치가 변경되었습니다.')); }
