@@ -1011,6 +1011,13 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, idle_alpha: 0.5 } : b)) })));
     kb.cx = 5000; kb.cy = 5000;
     await until(() => webCalls.some(c => c[0] === 'alpha' && c[1] === 'web_b1' && c[2] === 0.5), 'with the mouse away the window fades to 50 %', 8000);
+    // the menu of ANOTHER window does not make it solid (only its own does)
+    const spot0 = await cp.evaluate(() => { for (const p of document.querySelectorAll('.pane:not(.webpane) .pbody')) { const r = p.getBoundingClientRect(); for (let y = r.top + 10; y < r.bottom - 10; y += 20) for (let x = r.left + 10; x < r.right - 10; x += 20) { const e = document.elementFromPoint(x, y); if (e && e.closest('.pane:not(.webpane)') === p.closest('.pane')) return { x, y }; } } return null; });
+    await cp.mouse.click(spot0.x, spot0.y, { button: 'right' });
+    await until(async () => (await cp.locator('#ctx').isVisible()), 'the menu of a translation window is open');
+    await cp.waitForTimeout(900);
+    ok(webCalls.filter(c => c[0] === 'alpha').at(-1)[2] === 0.5, 'browser/fade: the menu of another window does not make it solid');
+    await cp.keyboard.press('Escape');
     const box1 = centerRects.at(-1).panes.find(p => p.id === 'w1');
     kb.cx = box1.x + box1.w / 2; kb.cy = box1.y + box1.h / 2;
     await until(() => webCalls.filter(c => c[0] === 'alpha').at(-1)[2] === 1, 'with the mouse over it, it is solid at once', 4000);

@@ -480,6 +480,17 @@ pub fn make_no_key(hwnd: isize) {
 }
 // ---- LAB: the window of the web flickers when the game is clicked: what is its state, and which of these helps (bit 1: no show/hide animation, 2: ordered to the front at every
 // poll, 4: may not be hidden by the system)
+/// What the system says of a window that is being faded (for the log).
+pub fn alpha_info(hwnd: isize) -> String {
+    on_main(|| unsafe {
+        let w = obj(hwnd);
+        let alpha: f64 = msg_send![w, alphaValue];
+        let opaque: Bool = msg_send![w, isOpaque];
+        let visible: Bool = msg_send![w, isVisible];
+        let level: isize = msg_send![w, level];
+        format!("alpha={:.2} opaque={} visible={} level={}", alpha, opaque.as_bool() as u8, visible.as_bool() as u8, level)
+    })
+}
 pub fn lab_diag(hwnd: isize) -> String {
     on_main(|| unsafe {
         let w = obj(hwnd);

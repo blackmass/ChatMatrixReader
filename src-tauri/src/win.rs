@@ -299,6 +299,9 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     }
 }
 
+/// (macOS: what the system says of a window that is faded; here nothing)
+pub fn alpha_info(_hwnd: isize) -> String { String::new() }
+
 pub fn set_noactivate(hwnd: isize, on: bool) {
     if let Ok(mut l) = KEEP.lock() {
         l.retain(|&h| h != hwnd);

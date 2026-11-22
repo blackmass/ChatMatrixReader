@@ -46,6 +46,7 @@ const center = {
   registry: defaultRegistry(),                 // (the widgets: the program's own, and what the plugins register comes by 'widget-defs')
   changed: () => report(),
   menu: (ev, pane) => showMenu(ev, pane),
+  menuOwner: () => (menuEl.hidden ? null : menuPane),          // (the window whose menu is open: only that one counts as used)
   // the tips: always the top layer of the page (over every pane). A pane of the ordinary center is under the panes that stay on top, so its tips are drawn by the center of the windows
   // on top (the same look); the others draw their own
   viewSink: { usable: () => true, show: (html, x, y) => tip({ html, x: ox + x * dpr(), y: oy + y * dpr() }), hide: () => tip({ hide: true }) },
@@ -79,7 +80,8 @@ function sync() {
 // the right-click menu: drawn in this page (it is over all the screens, so it is never cut off); while it is open the page takes all the mouse (see report)
 const menuEl = document.createElement('div');
 menuEl.id = 'ctx'; menuEl.hidden = true; menuEl.dataset.notr = ''; document.body.append(menuEl);
-function hideMenu() { if (menuEl.hidden) return; menuEl.hidden = true; lastKey = ''; report(); }
+let menuPane = null;
+function hideMenu() { if (menuEl.hidden) return; menuPane = null; menuEl.hidden = true; lastKey = ''; report(); }
 function showMenu(ev, pane) {
   const list = menuList({ cfg, pane, ev, open, browsersOpen: new Set(webBy.browser.map(w => w.win)) });
   menuEl.replaceChildren();
@@ -88,7 +90,7 @@ function showMenu(ev, pane) {
     if (e.cls !== 'sep') { d.textContent = e.text; if (e.fn && !(e.cls || '').includes('off')) d.onclick = () => { hideMenu(); e.fn(); }; }
     menuEl.append(d);
   }
-  menuEl.hidden = false; lastKey = ''; report();
+  menuPane = pane; menuEl.hidden = false; lastKey = ''; report();
   menuEl.style.left = Math.max(0, Math.min(ev.clientX, innerWidth - menuEl.offsetWidth - 2)) + 'px';
   menuEl.style.top = Math.max(0, Math.min(ev.clientY, innerHeight - menuEl.offsetHeight - 2)) + 'px';
 }

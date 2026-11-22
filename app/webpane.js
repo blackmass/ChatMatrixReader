@@ -77,22 +77,22 @@ export class WebPane {
     // (the box over it says when it comes and goes: the letters behind are hidden while it is there, and the frame shows that it is the one typed in)
     listen('address-state', ev => { const p = ev.payload || {}; a.classList.toggle('editing', !!p.open && p.label === this.label); });
   }
-  // every round of the center (the mouse is where the system says): the window is solid while the mouse is over it (or it is used: an address typed, a menu open), and after a moment away it goes
-  // to the solidity of its setting: slowly; back to solid at once. The page is a window of the system: its own transparency (web_alpha); the bars and the frame are the center's, they go with it.
+  // every round of the center (the mouse is where the system says): the window is solid while the mouse is over it (or it is used: an address typed, its own menu open), and after a moment away it goes
+  // to the solidity of its setting: slowly; back to solid quickly. The page is a window of the system: its own transparency (web_alpha); the bars and the frame are the center's, they go with it.
   tick(s) {
     if (this.kind !== 'browser') return;
     const idle = Math.min(1, Math.max(0.2, Number(this.opt('idle_alpha', 1)) || 1));
     const [cx, cy] = s.cursor, b = this.screenBox(), now = performance.now();
     const inside = cx >= b.x && cx < b.x + b.w && cy >= b.y && cy < b.y + b.h;
-    const menu = document.getElementById('ctx');
-    const used = inside || !!this.el.querySelector('.paddr.editing') || !!(menu && !menu.hidden);
+    const used = inside || !!this.el.querySelector('.paddr.editing') || (this.center.menuOwner && this.center.menuOwner()) === this;
     let want = 1;
     if (!used && idle < 1) { if (!this.awayAt) this.awayAt = now; if (now - this.awayAt > 600) want = idle; } else this.awayAt = 0;
-    let cur = this.alpha === undefined ? 1 : this.alpha;
-    cur = want >= cur ? want : Math.max(want, cur - 0.12);
-    if (Math.abs(cur - (this.alpha === undefined ? 1 : this.alpha)) > 0.001) {
-      this.alpha = cur; this.el.style.opacity = String(cur);
-      invoke('web_alpha', { label: this.label, alpha: cur }).catch(() => {});
+    // (the program does the fading of the page itself, from where it is now: one call for each change of the goal; the bars do the same by the style)
+    const was = this.alpha === undefined ? 1 : this.alpha;
+    if (Math.abs(want - was) > 0.001) {
+      const ms = want < was ? 450 : 120;
+      this.alpha = want; this.el.style.transition = `opacity ${ms}ms linear`; this.el.style.opacity = String(want);
+      invoke('web_alpha', { label: this.label, alpha: want, ms }).catch(() => {});
     }
   }
   // the way the page is seen now: the button shows it (the other one is what a click gives)

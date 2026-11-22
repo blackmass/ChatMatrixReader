@@ -44,6 +44,9 @@ fn dispatch(app: &AppHandle, label: &str, raw: &str) {
     command(app, label, cmd, query);
 }
 
+/// How solid the page of each window is now, and the number of the fade that is going on (a new fade takes over from where the window is: the old one stops).
+static ALPHA: LazyLock<Mutex<std::collections::HashMap<String, (u64, f64)>>> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
 /// How large the page of each window is drawn (1.0 = 100 %).
 static ZOOM: LazyLock<Mutex<std::collections::HashMap<String, f64>>> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
@@ -180,6 +183,7 @@ fn forget(w: &WebviewWindow) {
     if let Ok(mut m) = PREV_FG.lock() { m.remove(&label); }
     if let Ok(mut m) = TOKENS.lock() { m.remove(&label); }
     if let Ok(mut m) = ZOOM.lock() { m.remove(&label); }
+    if let Ok(mut m) = ALPHA.lock() { m.remove(&label); }
 }
 /// (called when the system asks the window to close, e.g. the window's own close)
 pub fn on_close_requested(label: &str) {
@@ -468,13 +472,41 @@ pub async fn web_ua(app: AppHandle, label: String, ua: String, hints: Option<Val
     { let _ = (app, hints); Err("only on Windows".into()) }
 }
 
-/// How solid a window of the mini browser is (0.2 .. 1): the center fades it while the mouse is away.
+/// How solid a window of the mini browser should be (0.2 .. 1) within `ms` milliseconds: the center says it once for each change of the goal and the window goes there by itself, from where it is now
+/// (a call that comes while it is going takes over: the commands of a page do not arrive in order, so a fade made of many small calls could end anywhere).
 #[tauri::command]
-pub async fn web_alpha(app: AppHandle, label: String, alpha: f64) -> Result<(), String> {
+pub async fn web_alpha(app: AppHandle, label: String, alpha: f64, ms: Option<u64>) -> Result<(), String> {
     if is_closing(&label) || !alpha.is_finite() { return Ok(()); }
     if !is_free(&label) { return Err("not a window of the mini browser".into()); }
-    let w = get(&app, &label)?;
-    win::set_alpha(hwnd_of(&w)?, alpha.clamp(0.2, 1.0));
+    let hwnd = hwnd_of(&get(&app, &label)?)?;
+    let target = alpha.clamp(0.2, 1.0);
+    let ms = ms.unwrap_or(0).min(3000);
+    let (gen, from) = {
+        let Ok(mut m) = ALPHA.lock() else { return Ok(()) };
+        let e = m.entry(label.clone()).or_insert((0, 1.0));
+        e.0 += 1;
+        (e.0, e.1)
+    };
+    if ms < 40 || (target - from).abs() < 0.01 {
+        win::set_alpha(hwnd, target);
+        if let Ok(mut m) = ALPHA.lock() { if let Some(e) = m.get_mut(&label) { if e.0 == gen { e.1 = target; } } }
+        return Ok(());
+    }
+    std::thread::spawn(move || {
+        let steps = (ms / 16).max(2);
+        for i in 1..=steps {
+            std::thread::sleep(std::time::Duration::from_millis(16));
+            let v = from + (target - from) * (i as f64 / steps as f64);
+            let Ok(mut m) = ALPHA.lock() else { return };
+            let Some(e) = m.get_mut(&label) else { return };
+            if e.0 != gen { return; }                      // (another fade took over, or the window is gone)
+            e.1 = v;
+            drop(m);
+            if app.get_webview_window(&label).is_none() { return; }
+            win::set_alpha(hwnd, v);
+        }
+        if cfg!(target_os = "macos") { crate::startup_log(&format!("web alpha {label}: {target:.2} reached: {}", win::alpha_info(hwnd))); }       // (a window that darkens instead of fading: what the system says of it)
+    });
     Ok(())
 }
 
