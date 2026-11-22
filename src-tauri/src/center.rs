@@ -6,13 +6,13 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::{base_dir, hwnd_of, make_window, win};
 
 #[derive(Clone, Debug)]
-pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64 }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar)
+pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, hit: bool }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar; `hit`: it takes the mouse: a window that is click-through only has a place)
 
 static RECTS: LazyLock<Mutex<HashMap<String, Vec<Pane>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static LOCK: Mutex<Option<String>> = Mutex::new(None);                    // the center that holds the mouse while a button is down
@@ -39,7 +39,7 @@ pub fn start(app: AppHandle) {
                 let _ = w.set_position(tauri::PhysicalPosition::new(l, t));
                 let _ = w.set_size(tauri::PhysicalSize::new((r - l) as u32, (b - t) as u32));
                 let _ = w.set_ignore_cursor_events(true);
-                if let Ok(h) = hwnd_of(&w) { win::make_no_key(h); win::set_noactivate_light(h, true); }
+                if let Ok(h) = hwnd_of(&w) { win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h); }
                 let _ = w.show();
             }
         }
@@ -51,16 +51,39 @@ pub fn start(app: AppHandle) {
 /// The panes of a center (its page tells them whenever they change). `panes`: [{ id, x, y, w, h }] in pixels inside the window of the center; where the window really is gets added here
 /// (on macOS it may stand lower than asked, under the menu bar).
 #[tauri::command]
-pub async fn center_rects(app: AppHandle, label: String, panes: Value) -> Result<(), String> {
+pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Option<Value>) -> Result<bool, String> {
     let (ox, oy) = app.get_webview_window(&label).and_then(|w| w.outer_position().ok()).map(|p| (p.x as f64, p.y as f64)).unwrap_or((0.0, 0.0));
     let f = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
     let list: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane {
         id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(),
-        x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"), bar: f(v, "bar"),
+        x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"), bar: f(v, "bar"), hit: v.get("hit").and_then(|x| x.as_bool()).unwrap_or(true),
     }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
-    if let Ok(mut r) = RECTS.lock() { r.insert(label, list); }
+    if let Ok(mut r) = RECTS.lock() { r.insert(label.clone(), list); }
     crate::refollow_input(&app);                                            // (the send box follows its window)
-    Ok(())
+    // the places where the wheel is taken from the game (the windows that are click-through): { id, x, y, w, h } like the panes
+    let idx = MODES.iter().position(|(l, _)| *l == label).unwrap_or(0) as isize;
+    let zones: Vec<(isize, [f64; 4])> = wheel.as_ref().and_then(|w| w.as_array()).map(|a| a.iter().filter_map(|v| {
+        let id: isize = v.get("id").and_then(|x| x.as_str())?.parse().ok()?;
+        Some((wheel_key(idx, id), [f(v, "x") + ox, f(v, "y") + oy, f(v, "x") + ox + f(v, "w"), f(v, "y") + oy + f(v, "h")]))
+    }).collect()).unwrap_or_default();
+    Ok(win::set_pane_zones(idx, zones))
+}
+
+/// The key of the wheel zone of a pane (negative: a window of the system has a positive handle).
+fn wheel_key(idx: isize, id: isize) -> isize { -((idx + 1) * 100000 + id) }
+/// The center (its label) and the window id a key belongs to.
+pub fn wheel_owner(key: isize) -> Option<(&'static str, isize)> {
+    if key >= 0 { return None; }
+    let k = -key;
+    MODES.get((k / 100000 - 1) as usize).map(|(l, _)| (*l, k % 100000))
+}
+
+/// The turns of the wheel taken for the panes of a center after number `seq` (Windows: asked for by the page; macOS tells them one by one, see main.rs) -> { seq, turns: [{ id, delta }] }
+#[tauri::command]
+pub async fn center_wheel(label: String, seq: u64) -> Result<Value, String> {
+    let (newest, list) = win::wheel_since_panes(seq);
+    let turns: Vec<Value> = list.into_iter().filter_map(|(key, d)| wheel_owner(key).filter(|(l, _)| *l == label).map(|(_, id)| json!({ "id": id.to_string(), "delta": d }))).collect();
+    Ok(json!({ "seq": newest, "turns": turns }))
 }
 
 /// A pane of the ordinary center was touched: the center goes to the top of the ordinary windows (what a window of 3.1.1 did when it was touched; ours do not take the focus).
@@ -81,7 +104,7 @@ pub fn pane_rect(label: &str) -> Option<(i32, i32, u32, u32)> {
 }
 
 fn inside(panes: &[Pane], x: i32, y: i32, margin: f64) -> bool {
-    panes.iter().any(|p| (x as f64) >= p.x - margin && (x as f64) < p.x + p.w + margin && (y as f64) >= p.y - margin && (y as f64) < p.y + p.h + margin)
+    panes.iter().filter(|p| p.hit).any(|p| (x as f64) >= p.x - margin && (x as f64) < p.x + p.w + margin && (y as f64) >= p.y - margin && (y as f64) < p.y + p.h + margin)
 }
 
 /// The order of the windows of a mode: 0 ordinary, 1 always on top, 2 above the game only (two states: the game or a window of ours in front: topmost; another program in front: right above the game).

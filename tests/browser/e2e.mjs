@@ -136,7 +136,7 @@ const { chromium } = createRequire(import.meta.url)('playwright');
 // Nothing here waits for anything outside this machine, so nothing may wait long: every step of the pages (a click, a selector, a page load) gets a few seconds, and the
 // whole run has a watchdog. A step that hangs is a failure that says where it stopped, not minutes of waiting. (The page clock is a fake one: the "waits" of the test
 // are not real time; a whole run takes about 40 seconds.)
-const watchdog = setTimeout(() => { console.log('FAIL: the run took more than 75 seconds (a normal run is about 40): something waits for something that never comes'); process.exit(3); }, 75000);
+const watchdog = setTimeout(() => { console.log('FAIL: the run took more than 100 seconds (a normal run is about 70): something waits for something that never comes'); process.exit(3); }, 100000);
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 560, height: 420 }, deviceScaleFactor: 2, locale: 'ko-KR' });
 ctx.setDefaultTimeout(5000); ctx.setDefaultNavigationTimeout(8000);
@@ -785,6 +785,47 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   ok(await z(0) > await z(1), 'center: a pane that is touched comes to the front: ' + [await z(0), await z(1)]);
   // the place of the pane is in the settings now (the place of the TEXT: what a window of 3.1.1 kept)
   ok(/^\d+x\d+\+\d+\+\d+$/.test(cfgFile().child_windows.find(c => c.id === 3).geometry), 'center: the place of the pane is kept in the settings: ' + cfgFile().child_windows.find(c => c.id === 3).geometry);
+  // widgets: drawn inside the pane of the window that has them (the settings of its host)
+  const WID = 'core:voice-level';
+  await cp.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'inside', anchor: 'bottom-right', dx: 0, dy: 0, style: 'bar', show: 'always', scale: 1, opacity: 1 } } })), WID); await control.waitForTimeout(700);
+  ok(await cp.locator(`.pane .pwidgets .wa-bottom-right .widget[data-id="${WID}"]`).count() === 1 && await cp.locator('.pane .widget').count() === 1, 'center/widgets: drawn in the pane of the window that has it: ' + await cp.locator('.pane .widget').count());
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ widgets: {} }))); await control.waitForTimeout(500);
+  ok(await cp.locator('.pane .widget').count() === 0, 'center/widgets: taken away with the settings');
+  // click-through: no place for the mouse (the clicks go to the game) until the interact key is held with the cursor over the window
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ click_through: true, hide_tools: false, wheel_through: true }))); await control.waitForTimeout(800);
+  const mainPane = cp.locator('.pane').first(), hasMain = () => centerRects.at(-1).panes.some(p => p.id === '1' && p.hit);
+  const gameOn = await cp.evaluate(() => new Promise(r => { window.__TAURI__.event.listen('game-state', e => r(e.payload.found)); window.__TAURI__.event.emit('game-hello', {}); setTimeout(() => r(null), 1500); }));
+  if (gameOn) {
+    ok(await mainPane.evaluate(e => e.classList.contains('through') && !e.classList.contains('interactive')) && !hasMain(), 'center/through: click-through: no place for the mouse, no bar');
+    ok((centerRects.at(-1).wheel || []).some(p => p.id === '1'), 'center/wheel: the wheel over a click-through window is taken from the game (its place is told)');
+    const mb = await mainPane.boundingBox(); kb.cx = Math.round(mb.x + 40); kb.cy = Math.round(mb.y + 60); kb.shift = true; await control.waitForTimeout(500);
+    ok(await mainPane.evaluate(e => e.classList.contains('interactive')) && hasMain(), 'center/through: the interact key over the window: it takes the mouse');
+    kb.shift = false; await control.waitForTimeout(500);
+    ok(!hasMain(), 'center/through: the key let go: the mouse goes through again');
+    kb.cx = 0; kb.cy = 0;
+  } else console.log('(no game in this test: the click-through check is skipped)');
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ click_through: false }))); await control.waitForTimeout(800);
+  ok(hasMain(), 'center/through: not click-through: the window takes the mouse');
+  // the right-click menu: in the page of the center; while it is open the center takes the whole mouse (a rect 'menu'), a click elsewhere closes it
+  const pb = await cp.locator('.pane .pbody').first().boundingBox();
+  await cp.mouse.click(pb.x + 30, pb.y + 30, { button: 'right' }); await control.waitForTimeout(300);
+  ok(await cp.locator('#ctx').isVisible() && (await cp.locator('#ctx div').allTextContents()).some(t => t.includes('창 비우기')), 'center/menu: the right button opens the menu: ' + (await cp.locator('#ctx').innerText()).replace(/\n/g, '|').slice(0, 80));
+  ok(centerRects.at(-1).panes.some(p => p.id === 'menu'), 'center/menu: the center takes the whole mouse while the menu is open');
+  await cp.mouse.click(pb.x + 400, pb.y + 100); await control.waitForTimeout(500);
+  ok(await cp.locator('#ctx').isHidden() && !centerRects.at(-1).panes.some(p => p.id === 'menu'), 'center/menu: a click elsewhere closes it and gives the mouse back');
+  // the tips of the ordinary center are drawn by the center of the windows on top
+  await control.evaluate(() => window.__TAURI__.event.emit('center-tip', { text: 'tip-test', rect: [100, 300, 160, 320] })); await control.waitForTimeout(300);
+  ok(await cp.locator('.w-tip', { hasText: 'tip-test' }).isVisible(), 'center/tips: a tip of another center is drawn here');
+  await control.evaluate(() => window.__TAURI__.event.emit('center-tip', { hide: true })); await control.waitForTimeout(300);
+  ok(await cp.locator('.w-tip', { hasText: 'tip-test' }).isHidden(), 'center/tips: and taken away');
+  // tabs: a window docked to another is a tab of its pane (the active tab shows its lines; a tab of another window takes over when touched)
+  const dockSet = d => cp.evaluate(d => import('./settings.js').then(m => m.set({ child_windows: m.cfg().child_windows.map(c => (c.id === 3 ? { ...c, dock_to: d } : c)) })), d);
+  await dockSet(1); await control.waitForTimeout(1800);
+  ok(await cp.locator('.pane .ptab').count() === 2 && await cp.locator('.pane').count() === 1 && await cp.locator('.pane .ptab.on').count() === 1, 'center/tabs: a docked window is a tab of the pane: ' + await cp.locator('.pane .ptab').count() + '/' + await cp.locator('.pane').count());
+  await cp.locator('.pane .ptab').nth(1).dispatchEvent('pointerdown', { button: 0 }); await control.waitForTimeout(300);
+  ok(await cp.locator('.pane .ptab').nth(1).evaluate(e => e.classList.contains('on')) && await cp.locator('.pane .plines.off').count() === 1, 'center/tabs: a touched tab becomes the active one, the other chat is hidden');
+  await dockSet(0); await control.waitForTimeout(1800);
+  ok(await cp.locator('.pane .ptab').count() === await cp.locator('.pane').count(), 'center/tabs: undocked again: a pane of its own');
   await control.evaluate(([g, g3]) => import('./settings.js').then(m => m.set({ geometry: g, child_windows: m.cfg().child_windows.map(c => (c.id === 3 ? { ...c, geometry: g3 || '' } : c)) })), geoBefore); await control.waitForTimeout(400);
   await cp.close();
 }

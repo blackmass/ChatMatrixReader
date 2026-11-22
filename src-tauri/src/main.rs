@@ -354,7 +354,7 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             .visible(false)
             .inner_size(40.0, 40.0),
         // a control center: a transparent window over all the screens (center.rs); it takes the first click of an inactive program too
-        "center" => b.title("CMR Center").transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).accept_first_mouse(true).inner_size(400.0, 300.0),
+        "center" => b.title("CMR Center").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).accept_first_mouse(true).inner_size(400.0, 300.0),
         "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),
         // the control window is the program's brain, not something to look at: it is never shown. An empty file "show_control" next to app/
@@ -1145,6 +1145,7 @@ fn main() {
             plugin_open_url,
             process_stats,
             center::center_rects,
+            center::center_wheel,
             center::center_raise,
             webwin::web_open,
             webwin::web_close,
@@ -1253,6 +1254,7 @@ fn main() {
                 use tauri::Emitter;
                 let h2 = handle.clone();
                 win::set_wheel_sink(move |hwnd, units| {
+                    if let Some((label, id)) = center::wheel_owner(hwnd) { let _ = h2.emit_to(label, "wheel-turn", json!({ "id": id.to_string(), "units": units })); return; }       // (a pane of a control center)
                     let label = WHEEL_LABELS.lock().ok().and_then(|m| m.get(&hwnd).cloned());
                     if let Some(label) = label { let _ = h2.emit_to(label.as_str(), "wheel-turn", units); }
                 });

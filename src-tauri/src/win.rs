@@ -44,6 +44,7 @@ struct CompositionData { attribute: i32, data: *mut c_void, size: usize }
 #[link(name = "user32")]
 extern "system" {
     fn GetDC(hwnd: Handle) -> Handle;
+    fn SetPropW(hwnd: Handle, name: *const u16, data: Handle) -> i32;
     fn ReleaseDC(hwnd: Handle, hdc: Handle) -> i32;
     fn GetCursorPos(p: *mut POINT) -> i32;
     fn GetAsyncKeyState(vk: i32) -> i16;
@@ -206,6 +207,13 @@ pub fn grab_focus(hwnd: isize) -> bool {
 /// Does this window have the keyboard now?
 pub fn has_keyboard(hwnd: isize) -> bool {
     unsafe { GetForegroundWindow() == hwnd }
+}
+
+/// The shell takes a window that covers a whole screen for a full-screen program and keeps the taskbar down while it is on top. The property "NonRudeHWND" tells it this one is not (the control
+/// centers cover all the screens but are transparent).
+pub fn set_not_rude(hwnd: isize) {
+    let name: Vec<u16> = "NonRudeHWND\0".encode_utf16().collect();
+    unsafe { SetPropW(hwnd, name.as_ptr(), 1); }
 }
 
 /// (macOS only: a window that never becomes the key window unless allowed; on Windows the "no activate" style does it)
@@ -461,6 +469,7 @@ use std::sync::Mutex;
 static WHEEL: Mutex<Vec<(u64, isize, i16)>> = Mutex::new(Vec::new());      // (number, window, delta)
 static ZONES: Mutex<Vec<(isize, bool, bool)>> = Mutex::new(Vec::new());    // windows that want the wheel: (window, usable, down)  usable = the window takes the mouse itself; down = the turns DOWN too
 static WHEEL_SEQ: AtomicU64 = AtomicU64::new(0);
+static PANE_ZONES: Mutex<Vec<(isize, isize, [f64; 4])>> = Mutex::new(Vec::new());   // the panes of the control centers that want the wheel: (center, key, rectangle l, t, r, b in pixels)
 
 #[repr(C)]
 struct MsllHook { pt: POINT, mouseData: u32, flags: u32, time: u32, dwExtraInfo: usize }
@@ -487,6 +496,18 @@ unsafe extern "system" fn wheel_proc(code: i32, w: usize, l: isize) -> isize {
         // A usable window gets the wheel from Windows itself, except while Shift / Ctrl / Alt is held (Windows then keeps the wheel for the program
         // in front, not for the window under the mouse): those turns, both ways, are taken here.
         let modifier = GetAsyncKeyState(0x10) < 0 || GetAsyncKeyState(0x11) < 0 || GetAsyncKeyState(0x12) < 0;
+        if let Ok(zones) = PANE_ZONES.try_lock() {
+            let (px, py) = (info.pt.x as f64, info.pt.y as f64);
+            for &(_, key, r) in zones.iter() {
+                if px >= r[0] && px < r[2] && py >= r[1] && py < r[3] {
+                    if let Ok(mut list) = WHEEL.try_lock() {
+                        list.push((WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, key, delta));
+                        if list.len() > 200 { list.remove(0); }
+                    }
+                    return 1;
+                }
+            }
+        }
         if let Ok(zones) = ZONES.try_lock() {
             for &(h, usable, down) in zones.iter() {
                 // (a window the mouse goes through takes the turns both ways: the wheel over it is not for the game; `down` is no longer asked)
@@ -524,6 +545,22 @@ pub fn wheel_zone(hwnd: isize, on: bool, usable: bool, down: bool) -> bool {
         if on { z.push((hwnd, usable, down)); }
     }
     true
+}
+
+/// The panes of a control center that want the wheel (all of them, in place of the earlier ones of that center): (key, rectangle l, t, r, b in pixels). Always true on Windows.
+pub fn set_pane_zones(center: isize, zones: Vec<(isize, [f64; 4])>) -> bool {
+    if let Ok(mut z) = PANE_ZONES.lock() {
+        z.retain(|e| e.0 != center);
+        z.extend(zones.into_iter().map(|(k, r)| (center, k, r)));
+    }
+    true
+}
+
+/// The turns told to the panes (their keys are negative) after number `seq`: (the newest number, (key, delta)).
+pub fn wheel_since_panes(seq: u64) -> (u64, Vec<(isize, i16)>) {
+    let list = WHEEL.lock().map(|l| l.clone()).unwrap_or_default();
+    let newest = list.iter().map(|e| e.0).max().unwrap_or(seq).max(seq);
+    (newest, list.iter().filter(|e| e.0 > seq && e.1 < 0).map(|e| (e.1, e.2)).collect())
 }
 
 /// The turns told to `hwnd` after number `seq`: (the newest number, the deltas).

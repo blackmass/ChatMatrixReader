@@ -460,6 +460,7 @@ extern "C" fn can_become_key(this: *mut AnyObject, cmd: Sel) -> Bool {
     Bool::YES
 }
 /// The window becomes one that does not become the key window (a click on its page does not give it the keyboard). Before set_noactivate_light.
+pub fn set_not_rude(_hwnd: isize) {}
 pub fn make_no_key(hwnd: isize) {
     on_main(|| unsafe {
         let mut cls = object_getClass(hwnd as *const AnyObject);
@@ -854,6 +855,25 @@ fn zone_rect(hwnd: isize) -> [f64; 4] {
 }
 
 pub fn start_wheel_hook() {}
+
+/// The panes of a control center that want the wheel (in place of the earlier ones of that center): (key, rectangle in pixels). The tap works in points (top left origin).
+/// false = the tap cannot be had yet (no permission).
+pub fn set_pane_zones(center: isize, zones: Vec<(isize, [f64; 4])>) -> bool {
+    let owner = |k: isize| (-k) / 100000 - 1 == center;
+    if zones.is_empty() {
+        if let Ok(mut z) = ZONES.lock() { z.retain(|e| !(e.0 < 0 && owner(e.0))); }
+        return true;
+    }
+    if !ensure_hook() { return false; }
+    let s = scale();
+    if let Ok(mut z) = ZONES.lock() {
+        z.retain(|e| !(e.0 < 0 && owner(e.0)));
+        z.extend(zones.into_iter().map(|(k, r)| (k, true, [r[0] / s, r[1] / s, r[2] / s, r[3] / s])));
+    }
+    true
+}
+/// (the turns come one by one through the sink on macOS)
+pub fn wheel_since_panes(seq: u64) -> (u64, Vec<(isize, i16)>) { (seq, Vec::new()) }
 
 /// A window asks for the wheel turns over it (`usable` is not used here: only windows the mouse goes through ask). false = it cannot be had (no permission yet).
 pub fn wheel_zone(hwnd: isize, on: bool, _usable: bool, down: bool) -> bool {
