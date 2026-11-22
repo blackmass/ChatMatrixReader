@@ -675,10 +675,9 @@ unsafe extern "system" fn z_guard(hwnd: Handle, msg: u32, wparam: usize, lparam:
     if msg == 0x0046 && lparam != 0 {                                      // WM_WINDOWPOSCHANGING
         let p = &mut *(lparam as *mut WindowPos);
         if p.flags & 0x0004 == 0 {                                         // the order is to change (not SWP_NOZORDER)
-            let topmost_now = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & 0x8 != 0;          // WS_EX_TOPMOST
-            // what a press does: HWND_TOP, or (a window that is topmost already) HWND_TOPMOST = -1. What this program does is another form: a window directly under another one, or topmost on / off
-            // (topmost on is only asked of a window that is not topmost yet).
-            let raise = p.insert_after == 0 || (p.insert_after == -1 && topmost_now);
+            // What a press does (found in the log): the system puts the window after some other window WITHOUT `SWP_NOACTIVATE` (flags 0x3), or at HWND_TOP. Everything this program asks of the order
+            // (directly under the center, topmost on / off) has SWP_NOACTIVATE (0x10), so it passes.
+            let raise = p.flags & 0x0010 == 0 || p.insert_after == 0;
             if data != 0 { crate::webwin::z_note(&*(data as *const String), p.insert_after, p.flags, raise); }
             if raise {
                 p.flags |= 0x0004;
