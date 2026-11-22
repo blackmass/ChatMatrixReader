@@ -35,7 +35,7 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
     const g = parseGeom(b.geometry), label = browserLabel(id);
     const phone = mode === 'mobile' ? mobileProfile() : {};
     const size = g || (mode === 'pc' ? { w: 960, h: 640 } : { w: 360, h: 640 });
-    const args = { label, url, title: '', ua: phone.ua || '', ua_hints: phone.hints || null, allow: [], open_allow: ['*'], free: true, persist: !!b.persist, key: browserKey(id), render: settings.cfg().web_render || 'auto', w: size.w, h: size.h };
+    const args = { label, url, title: '', ua: phone.ua || '', ua_hints: phone.hints || null, allow: [], open_allow: ['*'], free: true, persist: !!b.persist, zoom: b.zoom || 1, key: browserKey(id), render: settings.cfg().web_render || 'auto', w: size.w, h: size.h };
     if (g) { args.x = g.x; args.y = g.y; }
     try { await invoke('web_open', { args }); } catch (e) { note('mini browser: ' + e); return; }
     const o = { label, title: '', timers: [], last: '', pending: null, saveAt: 0, navAt: 0, url, mode };
@@ -98,6 +98,14 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
   });
   listen('web-close', e => { const hit = [...open].find(([, o]) => o.label === (e.payload || {}).label); if (hit) closeWindow(hit[0]); });
   listen('web-hello', publish);
+  // the page was made larger or smaller (Ctrl + the wheel, Ctrl + + / - / 0, a pinch): kept for the window
+  listen('web-zoom', e => {
+    const { label, zoom } = e.payload || {};
+    const hit = [...open].find(([, o]) => o.label === label);
+    if (!hit || !Number.isFinite(zoom)) return;
+    const [id, o] = hit; clearTimeout(o.zoomT);
+    o.zoomT = setTimeout(() => { const b = entry(id), z = Math.round(zoom * 10) / 10; if (b && b.zoom !== z) change(id, { zoom: z }); }, NAV_MS);
+  });
   listen('browser-geometry', e => { const { id, geometry } = e.payload || {}; if (Number.isInteger(id) && entry(id) && /^\d+x\d+\+-?\d+\+-?\d+$/.test(String(geometry)) && entry(id).geometry !== geometry) change(id, { geometry }); });
   // the address the page goes to: kept as "the address seen last" (a moment after the last change: pages go to several addresses while they load)
   listen('web-nav', e => {

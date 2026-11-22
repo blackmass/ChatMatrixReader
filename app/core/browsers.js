@@ -1,6 +1,7 @@
 // The browser windows of the mini browser and the bookmarks (config keys `browser_windows` and `bookmarks`): what is kept, and how what was read from the file is made right. The windows
 // of the plugins (a plugin that shows a page of the web) are not here: they are entries of the list of windows (kind 'web') with the addresses they may go to.
 //   browser window: { id, name, mode: 'mobile' | 'pc', start_kind: 'url' | 'last', start_url, last_url, persist, topmost, topmost_wow_only, lock_window, geometry }
+//   (zoom: 0.3 .. 3, 1 = 100 %)
 //   Window 1 is the default window (mobile, Google): it is always there and is not deleted. At most MAX_BROWSERS windows.
 export const MAX_BROWSERS = 10;
 export const MAX_BOOKMARKS = 200;
@@ -15,7 +16,7 @@ export const isWebUrl = text => {
 
 export const defaultBrowser = id => ({
   id, name: '', mode: 'mobile', start_kind: 'url', start_url: START_URL, last_url: '', persist: false,
-  topmost: true, topmost_wow_only: false, lock_window: false, geometry: '',
+  topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1,
 });
 
 const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -40,6 +41,7 @@ export function normalizeBrowsers(list) {
     if (d.topmost_wow_only) d.topmost = false;
     d.lock_window = flag(it.lock_window, false);
     d.geometry = /^\d+x\d+\+-?\d+\+-?\d+$/.test(text(it.geometry, 40)) ? text(it.geometry, 40) : '';
+    d.zoom = Number.isFinite(it.zoom) ? Math.min(3, Math.max(0.3, Math.round(it.zoom * 10) / 10)) : 1;             // (how large the page is drawn: 30 % .. 300 %, by steps of 10 %)
     out.push(d);
   }
   if (!seen.has(DEFAULT_ID)) out.push(defaultBrowser(DEFAULT_ID));

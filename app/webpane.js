@@ -17,12 +17,18 @@ export class WebPane {
     this.kind = info.kind === 'browser' ? 'browser' : 'web';                // (a window of the mini browser has an address in its bar, a window of a plugin the title of the page)
     this.el = document.createElement('div'); this.el.className = 'pane webpane'; this.el.dataset.web = this.label;
     const head = '<span class="ptabs"><span class="ptab on"></span></span>';
-    const row = this.kind === 'browser' ? '<div class="paddrbar"><button class="phome" tabindex="-1" title="처음 주소로">⌂</button><div class="paddr"><span class="phold">주소 또는 검색어</span><span class="ptxt"></span></div><button class="pmode" tabindex="-1"></button></div>' : '';       // (the second line of a window of the mini browser: the address)
+    const row = this.kind === 'browser' ? '<div class="paddrbar"><button class="phome" tabindex="-1" title="처음 주소로">⌂</button><div class="paddr"><span class="phold">주소 또는 검색어</span><span class="ptxt"></span></div><button class="pmode" tabindex="-1"></button><span class="pzoom"></span></div>' : '';       // (the second line of a window of the mini browser: the address)
     this.head = this.kind === 'browser' ? BAR_H * 2 : BAR_H;                   // (how much of the window is above the page, css pixels)
     this.el.innerHTML = '<div class="pbar">' + head + '<span class="pspace"></span><span class="ptools"><button class="pback" tabindex="-1" title="뒤로">‹</button><button class="preload" tabindex="-1" title="새로고침">↻</button><button class="pclose" tabindex="-1" title="닫기">✕</button></span></div>' + row + '<div class="pbody"><div class="pscroll"></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div>';
     document.body.append(this.el);
     this.el.style.zIndex = String((this.kind === 'browser' ? 600 : 500) + (Number(this.win) || 0));       // (the web windows are above the translation windows that have not been touched, below the ones that were)
     this.el.addEventListener('pointerdown', () => this.center.raise(this), true);
+    // the title with Shift or Ctrl: this page in the user's own browser. At the press (not at the click: the bar holds the pointer for dragging, and the click then goes to the bar), before the drag.
+    if (this.kind === 'browser') this.el.querySelector('.pbar').addEventListener('pointerdown', e => {
+      if (e.button !== 0 || !(e.shiftKey || e.ctrlKey || e.metaKey) || !e.target.closest('.ptab')) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      invoke('web_cmd', { label: this.label, cmd: 'external' }).catch(() => {});
+    }, true);
     this.el.addEventListener('contextmenu', e => { e.preventDefault(); this.center.menu(e, this); });
     if (this.kind === 'browser') { this.address(); this.setMode(info.mode); }
     this.place();
@@ -37,8 +43,6 @@ export class WebPane {
       q('.phome').onclick = () => { const c = this.conf() || {}; invoke('web_cmd', { label: this.label, cmd: 'goto', url: B.isWebUrl(c.start_url) ? c.start_url : B.START_URL }).catch(() => {}); };
       q('.pmode').onclick = () => emit('browser-command', { cmd: 'mode', id: this.win });                    // (the hub: it knows what the window is)
       q('.paddrbar').addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
-      // the title with Shift or Ctrl: this page in the user's own browser
-      q('.ptab').addEventListener('click', e => { if (e.shiftKey || e.ctrlKey || e.metaKey) invoke('web_cmd', { label: this.label, cmd: 'external' }).catch(() => {}); });
     }
     this.el.classList.toggle('locked', this.lock);
     this.showTitle();
@@ -82,6 +86,12 @@ export class WebPane {
     b.innerHTML = pc ? '<svg viewBox="0 0 16 14" width="14" height="12"><rect x="1" y="1" width="14" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 13h6M8 10v3" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>'
       : '<svg viewBox="0 0 12 16" width="10" height="13"><rect x="2" y="1" width="8" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="12.5" r=".9" fill="currentColor"/></svg>';
     b.title = pc ? tr('PC 화면입니다. 누르면 모바일 화면으로 바꿉니다.') : tr('모바일 화면입니다. 누르면 PC 화면으로 바꿉니다.');
+  }
+  // the page was made larger or smaller: the size shows for a moment in the address line
+  setZoom(z) {
+    const c = this.el.querySelector('.pzoom'); if (!c || !Number.isFinite(z)) return;
+    c.textContent = Math.round(z * 100) + '%'; c.style.opacity = '1';
+    clearTimeout(this.zoomT); this.zoomT = setTimeout(() => { c.style.opacity = '0'; }, 1300);
   }
   setTitle(t) { this.title = String(t || ''); this.showTitle(); }
   setUrl(u) { this.url = String(u || ''); this.showTitle(); }
@@ -137,5 +147,5 @@ export class WebPane {
       if (sg !== this.geo && !near && !this.resizing) { this.place(); this.center.changed(this); }
     }
   }
-  destroy() { clearTimeout(this.scrollT); if (this.kind === 'browser') invoke('address_hide').catch(() => {}); this.el.remove(); }
+  destroy() { clearTimeout(this.scrollT); clearTimeout(this.zoomT); if (this.kind === 'browser') invoke('address_hide').catch(() => {}); this.el.remove(); }
 }

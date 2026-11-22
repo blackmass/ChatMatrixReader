@@ -999,10 +999,13 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     ok(cfgFile().browser_windows[0].mode === 'mobile', 'browser/mode: the setting is not changed (it is only for as long as the window is open)');
     await modeBtn.dispatchEvent('click');
     await until(() => webCalls.some(c => c[0] === 'ua' && c[1] === 'web_b1' && c[2].includes('Android') && c[3] && c[3].mobile === true), 'and back to the phone (the headers say it too)');
-    await cp.locator('.webpane .ptab').dispatchEvent('click');
-    ok(!webCalls.some(c => c[0] === 'cmd' && c[2] === 'external'), 'browser/external: a plain click on the title does nothing');
-    await cp.locator('.webpane .ptab').dispatchEvent('click', { shiftKey: true });
+    await cp.locator('.webpane .ptab').dispatchEvent('pointerdown', { shiftKey: true, button: 0, bubbles: true });                // (at the press: the bar holds the pointer for dragging, the click would go to the bar)
     await until(() => webCalls.some(c => c[0] === 'cmd' && c[1] === 'web_b1' && c[2] === 'external'), 'Shift + click on the title opens the page in the user\'s browser');
+    // the size of the page: the program tells it ('web-zoom'): the line shows it a moment, the window keeps it
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-zoom', { label: 'web_b1', zoom: 1.2 }));
+    await until(async () => (await cp.locator('.webpane .pzoom').textContent()) === '120%', 'the size is shown in the address line');
+    await until(() => cfgFile().browser_windows[0].zoom === 1.2, 'the window keeps the size', 3000);
+    ok(opens().at(-1)[1].zoom === 1, 'browser/zoom: (the window was opened at 100 %)');
     // the right button on the bar: the bookmarks, adding the page, the settings
     await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 4, y: 10 } });
     await until(async () => (await cp.locator('#ctx').isVisible()), 'the menu of the bar');

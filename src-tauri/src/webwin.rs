@@ -44,6 +44,9 @@ fn dispatch(app: &AppHandle, label: &str, raw: &str) {
     command(app, label, cmd, query);
 }
 
+/// How large the page of each window is drawn (1.0 = 100 %).
+static ZOOM: LazyLock<Mutex<std::collections::HashMap<String, f64>>> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
 /// What the plugin's log should tell about the windows (addresses that were refused): taken by web_events
 static EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 fn event(text: String) { if let Ok(mut e) = EVENTS.lock() { if e.len() < 60 { e.push(text); } } }
@@ -55,6 +58,7 @@ const KEYS: &str = r#"(() => {
   if (window.__cmrKeys) return; window.__cmrKeys = 1;
   const wheel = e => {
     if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
+    if (e.ctrlKey && window.top === window.self) return;                     // (in the page itself: the zoom, see PAGE)
     e.preventDefault();
     let t = e.target;
     while (t && t !== document.documentElement && !(t.scrollHeight > t.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(t).overflowY))) t = t.parentElement;
@@ -114,6 +118,31 @@ const PAGE: &str = r#"(() => {
   document.addEventListener('mousedown', e => { if (e.button === 0 && editable(e.target)) go('inputclick'); }, true);      // (macOS: asked to make sure the program is active, see the program)
   document.addEventListener('mouseout', e => { if (editable(e.target)) later(() => go('unprep'), 300); }, true);      // (the program does nothing when the window is the active one: the user is typing, and it is the click on the game that ends it)
   window.addEventListener('blur', () => later(() => go('unprep'), 400));      // (the user went to the game or another window; a moment later: a click on a text box moves the focus inside the window for a moment)
+  // The size of the page: Ctrl + the wheel (a notch is a step; a pinch on a trackpad of Windows is a lot of small ones), Ctrl + + / - / 0, and the pinch of a Mac (its own gesture events). The program
+  // keeps the size (a step is 10 %) and tells the center.
+  const zoom = d => go('zoom?d=' + d);
+  let acc = 0;
+  document.addEventListener('wheel', e => {
+    if (!e.isTrusted || !e.ctrlKey) return;
+    e.preventDefault(); e.stopPropagation();
+    acc += e.deltaY;
+    while (acc <= -40) { acc += 40; zoom(1); }
+    while (acc >= 40) { acc -= 40; zoom(-1); }
+  }, { capture: true, passive: false });
+  document.addEventListener('keydown', e => {
+    if (!e.isTrusted || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); zoom(1); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoom(-1); }
+    else if (e.key === '0') { e.preventDefault(); zoom(0); }
+  }, true);
+  let last = 1;
+  document.addEventListener('gesturestart', e => { e.preventDefault(); last = 1; }, true);
+  document.addEventListener('gesturechange', e => {
+    e.preventDefault();
+    const r = e.scale / last;
+    if (r > 1.08) { zoom(1); last = e.scale; } else if (r < 0.92) { zoom(-1); last = e.scale; }
+  }, true);
+  document.addEventListener('gestureend', e => e.preventDefault(), true);
   // How far the page has scrolled, told to the program (which tells the center: it draws the thin line at the edge while the page scrolls; nothing of ours is drawn in the page). Only the
   // scroll of the page itself, a few times a second.
   let lastScroll = 0, lastText = '';
@@ -150,6 +179,7 @@ fn forget(w: &WebviewWindow) {
     if let Ok(mut m) = OPEN_ALLOW.lock() { m.remove(&label); }
     if let Ok(mut m) = PREV_FG.lock() { m.remove(&label); }
     if let Ok(mut m) = TOKENS.lock() { m.remove(&label); }
+    if let Ok(mut m) = ZOOM.lock() { m.remove(&label); }
 }
 /// (called when the system asks the window to close, e.g. the window's own close)
 pub fn on_close_requested(label: &str) {
@@ -164,6 +194,17 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
             let url = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "u").map(|(_, v)| v.into_owned()));
             let allow = OPEN_ALLOW.lock().ok().and_then(|m| m.get(label).cloned()).unwrap_or_default();
             if let Some(url) = url { let _ = crate::plugin_open_url(url, allow); }       // (a refused address: nothing happens)
+        }
+        "zoom" => {                                     // the page asks for a larger / smaller size (d = 1, -1; 0 = 100 %): only a window the user opened
+            if !is_free(label) { return; }
+            let d = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "d").and_then(|(_, v)| v.parse::<i32>().ok())).unwrap_or(0);
+            let cur = ZOOM.lock().ok().and_then(|m| m.get(label).copied()).unwrap_or(1.0);
+            let new = if d == 0 { 1.0 } else { ((cur + 0.1 * d.signum() as f64) * 10.0).round() / 10.0 }.clamp(0.3, 3.0);
+            if (new - cur).abs() > 0.001 || d == 0 {
+                let _ = win.set_zoom(new);
+                if let Ok(mut m) = ZOOM.lock() { m.insert(label.to_string(), new); }
+                let _ = app.emit("web-zoom", json!({ "label": label, "zoom": new }));
+            }
         }
         "scroll" => {                                   // how far the page has scrolled: the center draws the thin line (p: how far, s: how much of the page is in view)
             let q = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok());
@@ -343,6 +384,11 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     let win = b.build().map_err(|e| e.to_string())?;
     #[cfg(windows)]
     listen_messages(&win, app.clone(), label.clone());
+    {
+        let zoom = args.get("zoom").and_then(|v| v.as_f64()).filter(|z| z.is_finite()).map(|z| ((z * 10.0).round() / 10.0).clamp(0.3, 3.0)).unwrap_or(1.0);
+        if let Ok(mut m) = ZOOM.lock() { m.insert(label.clone(), zoom); }
+        if (zoom - 1.0).abs() > 0.001 { let _ = win.set_zoom(zoom); }
+    }
     // a window that visits as a phone: the browser's own headers (client hints) say it too, else they still say "Windows, a computer" next to a phone's user agent (the web view of Windows is a Chromium)
     #[cfg(windows)]
     if let (Some(ua), Some(hints)) = (args.get("ua").and_then(|v| v.as_str()).filter(|u| !u.is_empty()), args.get("ua_hints").filter(|h| h.is_object())) {

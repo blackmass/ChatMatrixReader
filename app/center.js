@@ -234,6 +234,7 @@ function layout(l) {
 await listen('center-layout', e => layout(e.payload));
 // the web windows: which are open (the hub), the title and the address of the page, how far it has scrolled (the program: webwin.rs)
 await listen('web-state', e => { webBy[e.payload.source === 'browser' ? 'browser' : 'plugin'] = e.payload.windows || []; webWins = [...webBy.plugin, ...webBy.browser]; sync(); });
+await listen('web-zoom', e => { const p = webs.get(e.payload.label); if (p && p.setZoom) p.setZoom(e.payload.zoom); });
 await listen('web-title', e => { const p = webs.get(e.payload.label); if (p) p.setTitle(e.payload.title); });
 await listen('web-nav', e => { const p = webs.get(e.payload.label); if (p) p.setUrl(e.payload.url); });
 await listen('web-scroll', e => { const p = webs.get(e.payload.label); if (p) p.setScroll(e.payload.p, e.payload.s); });

@@ -14,6 +14,7 @@ check(b.isWebUrl('https://m.dcinside.com') && b.isWebUrl('http://a.b/c?d=1') && 
   check(l.map(x => x.id).join() === '1,2,3', 'the numbers are unique and in order, window 1 is added: ' + l.map(x => x.id));
   const w3 = l.find(x => x.id === 3), w2 = l.find(x => x.id === 2);
   check(w3.name === 'PC' && w3.mode === 'pc' && w3.start_url === 'https://www.youtube.com', 'a good window is kept (the name is trimmed)');
+  check(b.normalizeBrowsers([{ id: 2, zoom: 1.26 }, { id: 3, zoom: 9 }, { id: 4, zoom: 'x' }, { id: 5, zoom: 0.01 }]).filter(x => x.id > 1).map(x => x.zoom).join() === '1.3,3,1,0.3', 'zoom: a step of 10 %, 30 % .. 300 %, a wrong value is 100 %');
   check(w2.mode === 'mobile' && w2.start_kind === 'url' && w2.start_url === b.START_URL && w2.persist === false, 'a wrong value is the default');
 }
 {
