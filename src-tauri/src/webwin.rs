@@ -64,7 +64,8 @@ const MIN_H: f64 = 320.0;
 const PAGE: &str = r#"(() => {
   if (window.top !== window.self) return;                       // (only the page itself, not the frames in it: video players, advertisements ...)
   if (window.__cmrPage) return; window.__cmrPage = 1;
-  const go = c => { try { location.href = 'cmr-cmd://' + c; } catch (e) {} };
+  // (Windows: the message channel of the web view: it is no navigation, so it never cuts a page that is loading short, as an address that is gone to does. Elsewhere: the address)
+  const go = c => { try { if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(String(c)); else location.href = 'cmr-cmd://' + c; } catch (e) {} };
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
   const external = u => { try { const a = new URL(u, location.href); if (a.protocol === 'https:') go('open?u=' + encodeURIComponent(a.href)); } catch (e) {} };
@@ -199,6 +200,30 @@ pub(crate) fn set_outer(w: &WebviewWindow, x: Option<i32>, y: Option<i32>, width
     Ok(())
 }
 
+/// What the page tells by the message channel of the web view (Windows): the same words as the address "cmr-cmd://<command>?<query>".
+#[cfg(windows)]
+fn listen_messages(win: &WebviewWindow, app: AppHandle, label: String) {
+    let _ = win.with_webview(move |wv| unsafe {
+        use webview2_com::WebMessageReceivedEventHandler;
+        use windows_core062::PWSTR;
+        let Ok(core) = wv.controller().CoreWebView2() else { return };
+        let handler = WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+            if let Some(args) = args {
+                let mut p = PWSTR::null();
+                if args.TryGetWebMessageAsString(&mut p).is_ok() && !p.is_null() {
+                    let text = webview2_com::take_pwstr(p);
+                    if text.len() <= 2000 {
+                        if let Ok(u) = tauri::Url::parse(&format!("cmr-cmd://{text}")) { command(&app, &label, u.host_str().unwrap_or(""), u.query()); }
+                    }
+                }
+            }
+            Ok(())
+        }));
+        let mut token = Default::default();
+        let _ = core.add_WebMessageReceived(&handler, &mut token);
+    });
+}
+
 /// A call of the protocol of the developer tools on the web view of a window (Windows).
 #[cfg(windows)]
 fn cdp(win: &WebviewWindow, method: &'static str, params: String) {
@@ -284,6 +309,8 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         .on_document_title_changed(move |_, t| { let _ = app3.emit("web-title", json!({ "label": lbl3, "title": t.chars().take(120).collect::<String>() })); });
     if let Some(ua) = args.get("ua").and_then(|v| v.as_str()) { if !ua.is_empty() { b = b.user_agent(ua); } }
     let win = b.build().map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    listen_messages(&win, app.clone(), label.clone());
     // a window that visits as a phone: the browser's own headers (client hints) say it too, else they still say "Windows, a computer" next to a phone's user agent (the web view of Windows is a Chromium)
     #[cfg(windows)]
     if let (Some(ua), Some(hints)) = (args.get("ua").and_then(|v| v.as_str()).filter(|u| !u.is_empty()), args.get("ua_hints").filter(|h| h.is_object())) {

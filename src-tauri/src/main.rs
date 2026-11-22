@@ -515,6 +515,22 @@ fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<()
     Ok(())
 }
 
+/// Where the address box has to be (screen pixels) and since when: for a moment after it was shown, whatever the system does to the window (a move to a screen of another scale makes it change the size
+/// and the place by itself, a moment later) is put right again: see on_window_event.
+static ADDRESS_AT: std::sync::Mutex<Option<((i32, i32, u32, u32), std::time::Instant)>> = std::sync::Mutex::new(None);
+pub(crate) fn address_refit(app: &AppHandle) {
+    let Some(((x, y, w, h), t0)) = ADDRESS_AT.lock().ok().and_then(|a| *a) else { return };
+    if t0.elapsed() > Duration::from_millis(900) { return; }
+    let Some(win) = app.get_webview_window("address") else { return };
+    if !win.is_visible().unwrap_or(false) { return; }
+    if let Ok(hwnd) = hwnd_of(&win) {
+        if !win::set_client_rect(hwnd, x, y, w as i32, h as i32) {
+            let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+            let _ = win.set_size(tauri::PhysicalSize::new(w, h));
+        }
+    }
+}
+
 /// The address box of a window of the mini browser: the one small window is put over `x, y, w, h` (screen pixels: the address in the bar of the center) and takes the keyboard; `text` is
 /// the address now. The page of the box (address.js) goes to the address by itself and puts the box away.
 #[tauri::command]
@@ -524,6 +540,7 @@ fn address_show(app: AppHandle, label: String, x: i32, y: i32, w: u32, h: u32, t
     let e = |e: tauri::Error| e.to_string();
     let hwnd = hwnd_of(&win)?;
     let (w, h) = (w.clamp(40, 4000), h.clamp(14, 200));
+    if let Ok(mut a) = ADDRESS_AT.lock() { *a = Some(((x, y, w, h), std::time::Instant::now())); }
     let place = |win: &WebviewWindow| {
         if !win::set_client_rect(hwnd, x, y, w as i32, h as i32) {
             let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
@@ -1093,6 +1110,7 @@ fn main() {
                     }
                 }
             }
+            if window.label() == "address" && matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }) { address_refit(window.app_handle()); }
             if let tauri::WindowEvent::CloseRequested { .. } = event { webwin::on_close_requested(window.label()); }          // (a web window: nothing may touch it while it closes)
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {
