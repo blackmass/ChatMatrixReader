@@ -46,7 +46,6 @@ export class WebPane {
     }
     this.el.classList.toggle('locked', this.lock);
     this.showTitle();
-    this.bornAt = performance.now();
   }
   conf() { const cfg = this.center.cfg(); return (this.kind === 'browser' ? (cfg.browser_windows || []) : cfg.child_windows).find(c => c.id === this.win) || null; }
   opt(key, dflt) { return this.kind === 'browser' ? ((this.conf() || {})[key] ?? dflt) : winconf.opt(this.conf(), this.center.cfg(), key, dflt); }
@@ -87,7 +86,7 @@ export class WebPane {
     const inside = cx >= b.x && cx < b.x + b.w && cy >= b.y && cy < b.y + b.h;
     const used = inside || !!this.el.querySelector('.paddr.editing') || (this.center.menuOwner && this.center.menuOwner()) === this;
     let want = 1;
-    if (!used && idle < 1) { if (!this.awayAt) this.awayAt = now; if (now - this.awayAt > 600 && now - this.bornAt > 2000) want = idle; } else this.awayAt = 0;      // (not in the first moments: the window is still being shown)
+    if (!used && idle < 1) { if (!this.awayAt) this.awayAt = now; if (now - this.awayAt > 600) want = idle; } else this.awayAt = 0;
     // (the program does the fading of the page itself, from where it is now: one call for each change of the goal; the bars do the same by the style)
     const was = this.alpha === undefined ? 1 : this.alpha;
     if (Math.abs(want - was) > 0.001) {

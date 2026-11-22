@@ -407,10 +407,24 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     if let Ok(hw) = hwnd_of(&win) {
         win::make_no_key(hw); win::set_noactivate_light(hw, true);
         // a window that is shown without being activated goes behind the program in front (the game): it starts on top, and the poll (web_tick) puts it in its own order a moment later
-        win::prepare_translucent(hw);
         win::set_topmost(hw, true, 0);
     }
     let _ = win.show();
+    // macOS: the first time a window is made less than solid the system changes how it draws it, and a fade that is cut short (the mouse comes while it goes) leaves the page black behind. So the first
+    // one is done at once, before the user can do anything (0.2 s: down a little and back); a fade the user starts meanwhile takes over.
+    if cfg!(target_os = "macos") && is_free(&label) {
+        if let Ok(hw) = hwnd_of(&win) {
+            let (app4, lbl4) = (app.clone(), label.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                if app4.get_webview_window(&lbl4).is_none() { return; }
+                let g = fade(&app4, &lbl4, hw, 0.9, 100);
+                std::thread::sleep(std::time::Duration::from_millis(110));
+                let same = ALPHA.lock().ok().and_then(|m| m.get(&lbl4).map(|e| e.0)) == Some(g);
+                if same && app4.get_webview_window(&lbl4).is_some() { fade(&app4, &lbl4, hw, 1.0, 100); }
+            });
+        }
+    }
     Ok(())
 }
 
@@ -473,26 +487,20 @@ pub async fn web_ua(app: AppHandle, label: String, ua: String, hints: Option<Val
     { let _ = (app, hints); Err("only on Windows".into()) }
 }
 
-/// How solid a window of the mini browser should be (0.2 .. 1) within `ms` milliseconds: the center says it once for each change of the goal and the window goes there by itself, from where it is now
-/// (a call that comes while it is going takes over: the commands of a page do not arrive in order, so a fade made of many small calls could end anywhere).
-#[tauri::command]
-pub async fn web_alpha(app: AppHandle, label: String, alpha: f64, ms: Option<u64>) -> Result<(), String> {
-    if is_closing(&label) || !alpha.is_finite() { return Ok(()); }
-    if !is_free(&label) { return Err("not a window of the mini browser".into()); }
-    let hwnd = hwnd_of(&get(&app, &label)?)?;
-    let target = alpha.clamp(0.2, 1.0);
-    let ms = ms.unwrap_or(0).min(3000);
+/// A fade of the window `label` to `target` within `ms` milliseconds, from where it is now (a new one takes over: the old one stops). Returns the number of this fade.
+fn fade(app: &AppHandle, label: &str, hwnd: isize, target: f64, ms: u64) -> u64 {
     let (gen, from) = {
-        let Ok(mut m) = ALPHA.lock() else { return Ok(()) };
-        let e = m.entry(label.clone()).or_insert((0, 1.0));
+        let Ok(mut m) = ALPHA.lock() else { return 0 };
+        let e = m.entry(label.to_string()).or_insert((0, 1.0));
         e.0 += 1;
         (e.0, e.1)
     };
     if ms < 40 || (target - from).abs() < 0.01 {
         win::set_alpha(hwnd, target);
-        if let Ok(mut m) = ALPHA.lock() { if let Some(e) = m.get_mut(&label) { if e.0 == gen { e.1 = target; } } }
-        return Ok(());
+        if let Ok(mut m) = ALPHA.lock() { if let Some(e) = m.get_mut(label) { if e.0 == gen { e.1 = target; } } }
+        return gen;
     }
+    let (app, label) = (app.clone(), label.to_string());
     std::thread::spawn(move || {
         let steps = (ms / 16).max(2);
         for i in 1..=steps {
@@ -508,6 +516,17 @@ pub async fn web_alpha(app: AppHandle, label: String, alpha: f64, ms: Option<u64
         }
         if cfg!(target_os = "macos") { crate::startup_log(&format!("web alpha {label}: {target:.2} reached: {}", win::alpha_info(hwnd))); }       // (a window that darkens instead of fading: what the system says of it)
     });
+    gen
+}
+
+/// How solid a window of the mini browser should be (0.2 .. 1) within `ms` milliseconds: the center says it once for each change of the goal and the window goes there by itself, from where it is now
+/// (a call that comes while it is going takes over: the commands of a page do not arrive in order, so a fade made of many small calls could end anywhere).
+#[tauri::command]
+pub async fn web_alpha(app: AppHandle, label: String, alpha: f64, ms: Option<u64>) -> Result<(), String> {
+    if is_closing(&label) || !alpha.is_finite() { return Ok(()); }
+    if !is_free(&label) { return Err("not a window of the mini browser".into()); }
+    let hwnd = hwnd_of(&get(&app, &label)?)?;
+    fade(&app, &label, hwnd, alpha.clamp(0.2, 1.0), ms.unwrap_or(0).min(3000));
     Ok(())
 }
 

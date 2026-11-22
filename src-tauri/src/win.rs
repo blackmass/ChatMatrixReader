@@ -299,9 +299,6 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     }
 }
 
-/// (macOS: a window that will be faded is made see-through from the start; here nothing)
-pub fn prepare_translucent(_hwnd: isize) {}
-
 /// (macOS: what the system says of a window that is faded; here nothing)
 pub fn alpha_info(_hwnd: isize) -> String { String::new() }
 

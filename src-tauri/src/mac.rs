@@ -480,18 +480,6 @@ pub fn make_no_key(hwnd: isize) {
 }
 // ---- LAB: the window of the web flickers when the game is clicked: what is its state, and which of these helps (bit 1: no show/hide animation, 2: ordered to the front at every
 // poll, 4: may not be hidden by the system)
-/// A window that will be faded (the web window of the mini browser): from the start a window that can have a see-through surface (not "opaque"), with a clear background and no animation when it
-/// is shown or hidden. Else the system changes what kind of surface the window has at the first moment it is less than solid; a fade that is cut short then may leave it black behind the page.
-pub fn prepare_translucent(hwnd: isize) {
-    on_main(|| unsafe {
-        let w = obj(hwnd);
-        let _: () = msg_send![w, setOpaque: Bool::NO];
-        let clear: *mut AnyObject = msg_send![class!(NSColor), clearColor];
-        let _: () = msg_send![w, setBackgroundColor: clear];
-        let _: () = msg_send![w, setAnimationBehavior: 2isize];                  // NSWindowAnimationBehaviorNone
-    });
-}
-
 /// What the system says of a window that is being faded (for the log).
 pub fn alpha_info(hwnd: isize) -> String {
     on_main(|| unsafe {
