@@ -674,9 +674,16 @@ extern "system" {
 unsafe extern "system" fn z_guard(hwnd: Handle, msg: u32, wparam: usize, lparam: isize, _id: usize, data: usize) -> isize {
     if msg == 0x0046 && lparam != 0 {                                      // WM_WINDOWPOSCHANGING
         let p = &mut *(lparam as *mut WindowPos);
-        if p.flags & 0x0004 == 0 && p.insert_after == 0 {                  // not SWP_NOZORDER, and HWND_TOP: what a press does. (This program puts a window under another one, or topmost / not topmost.)
-            p.flags |= 0x0004;
-            if data != 0 { crate::webwin::raise_request(&*(data as *const String)); }
+        if p.flags & 0x0004 == 0 {                                         // the order is to change (not SWP_NOZORDER)
+            let topmost_now = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & 0x8 != 0;          // WS_EX_TOPMOST
+            // what a press does: HWND_TOP, or (a window that is topmost already) HWND_TOPMOST = -1. What this program does is another form: a window directly under another one, or topmost on / off
+            // (topmost on is only asked of a window that is not topmost yet).
+            let raise = p.insert_after == 0 || (p.insert_after == -1 && topmost_now);
+            if data != 0 { crate::webwin::z_note(&*(data as *const String), p.insert_after, p.flags, raise); }
+            if raise {
+                p.flags |= 0x0004;
+                if data != 0 { crate::webwin::raise_request(&*(data as *const String)); }
+            }
         }
     }
     DefSubclassProc(hwnd, msg, wparam, lparam)
@@ -684,7 +691,8 @@ unsafe extern "system" fn z_guard(hwnd: Handle, msg: u32, wparam: usize, lparam:
 /// Call it from the thread that made the window.
 pub fn guard_z(hwnd: isize, label: &str) {
     let data = Box::into_raw(Box::new(label.to_string())) as usize;
-    unsafe { SetWindowSubclass(hwnd, z_guard, hwnd as usize, data); }
+    let ok = unsafe { SetWindowSubclass(hwnd, z_guard, hwnd as usize, data) };
+    crate::startup_log(&format!("web window {label}: the order guard is {}", if ok != 0 { "on" } else { "NOT on" }));
 }
 
 /// The CLIENT area of the window (what the page fills) is put at exactly this rectangle, whatever frame the window has around it (a window of the system may have an invisible one): it is put

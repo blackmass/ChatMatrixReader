@@ -470,6 +470,7 @@ extern "C" fn guarded_send_event(this: *mut AnyObject, cmd: Sel, event: *mut Any
         let buttons: usize = unsafe { msg_send![class!(NSEvent), pressedMouseButtons] };
         if buttons != 0 {
             unsafe { let _: () = msg_send![shared_app(), preventWindowOrdering]; }
+            crate::webwin::z_note(&label, buttons as isize, 0, true);              // (diagnosis: the first lines only)
             crate::webwin::raise_request(&label);
         }
     }
@@ -497,6 +498,9 @@ pub fn guard_z(hwnd: isize, label: &str) {
                 class_replaceMethod(cls, sel!(sendEvent:), guarded_send_event as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) as *const c_void, method_getTypeEncoding(m));
             }
         }
+        let cname = CStr::from_ptr(class_getName(cls)).to_string_lossy().into_owned();
+        let found = SEND_ORIGINALS.lock().map(|l| l.iter().any(|e| e.0 == cls as usize)).unwrap_or(false);
+        crate::startup_log(&format!("web window {label}: the order guard is {} (class {cname})", if found { "on" } else { "NOT on" }));
         if let Ok(mut l) = GUARD_Z.lock() { l.retain(|e| e.0 != hwnd); l.push((hwnd, label)); }
     });
 }

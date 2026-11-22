@@ -44,6 +44,12 @@ fn dispatch(app: &AppHandle, label: &str, raw: &str) {
     command(app, label, cmd, query);
 }
 
+/// (diagnosis) a change of the order that a web window was asked to make: what it asked for. The first lines only.
+pub fn z_note(label: &str, insert_after: isize, flags: u32, vetoed: bool) {
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 60 { crate::startup_log(&format!("web window {label}: asked to change its order: after={insert_after} flags={flags:#x}{}", if vetoed { " -> refused" } else { "" })); }
+}
+
 /// A window of the system for the events that come from its window procedure (the press of a page, see win.rs guard_z).
 static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 static LAST_RAISE: LazyLock<Mutex<HashMap<String, std::time::Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
