@@ -38,7 +38,7 @@ export class Pane {
     this.el.querySelector('.ptobottom').onclick = () => { const c = this.chats.get(this.active); c.lines.scrollTop = c.lines.scrollHeight; this.review = false; this.reviewIdle = 0; c.view.touch(); };
     this.el.addEventListener('contextmenu', e => { e.preventDefault(); this.center.menu(e, this); });
     this.syncChats();
-    this.el.style.zIndex = String(id);                                // (the first order: a window of a higher number is above)
+    this.el.style.zIndex = String(1000 + (Number(id) || 0));          // (the first order: a window of a higher number is above. A translation window is always above the web windows: their numbers are below 1000, see center.js)
     this.el.addEventListener('pointerdown', e => {
       this.center.raise(this);
       if (e.button !== 0) return;                                  // the click as the page gets it: how long after the system saw the button go down?

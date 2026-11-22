@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::{hwnd_of, make_window, win};
 
 #[derive(Clone, Debug)]
-pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, hit: bool, blur: u32, web: String }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar; `hit`: it takes the mouse: a window that is click-through only has a place)
+pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, hit: bool, blur: u32, web: String, z: i64 }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar; `hit`: it takes the mouse: a window that is click-through only has a place)
 
 static RECTS: LazyLock<Mutex<HashMap<String, Vec<Pane>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static LOCK: Mutex<Option<String>> = Mutex::new(None);                    // the center that holds the mouse while a button is down
@@ -89,6 +89,7 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Op
         id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(),
         x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"), bar: f(v, "bar"), hit: v.get("hit").and_then(|x| x.as_bool()).unwrap_or(true), blur: v.get("blur").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
         web: v.get("web").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        z: v.get("z").and_then(|x| x.as_i64()).unwrap_or(0),
     }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
     sync_blur(&app, &label, &list);
     sync_webs(&app, &label, &list);
@@ -139,15 +140,15 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
 
 /// The web windows that follow a center: the window of the system of a web window (webwin.rs) is where its page is drawn by the center (a box with `web`), directly under the center, so
 /// that the bar and the strips of the center take the mouse and the page the rest. label -> (the center, where it is: x, y, w, h in pixels).
-static WEBS: LazyLock<Mutex<HashMap<String, (String, [i32; 4])>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static WEBS: LazyLock<Mutex<HashMap<String, (String, [i32; 4], i64)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn sync_webs(app: &AppHandle, center: &str, panes: &[Pane]) {
-    let now: HashMap<String, [i32; 4]> = panes.iter().filter(|p| !p.web.is_empty()).map(|p| (p.web.clone(), [p.x.round() as i32, p.y.round() as i32, p.w.round().max(1.0) as i32, p.h.round().max(1.0) as i32])).collect();
+    let now: HashMap<String, ([i32; 4], i64)> = panes.iter().filter(|p| !p.web.is_empty()).map(|p| (p.web.clone(), ([p.x.round() as i32, p.y.round() as i32, p.w.round().max(1.0) as i32, p.h.round().max(1.0) as i32], p.z))).collect();
     let Ok(mut webs) = WEBS.lock() else { return };
     webs.retain(|k, v| v.0 != center || now.contains_key(k));
-    for (k, r) in now {
+    for (k, (r, z)) in now {
         let changed = webs.get(&k).map_or(true, |v| v.1 != r || v.0 != center);
-        webs.insert(k.clone(), (center.to_string(), r));
+        webs.insert(k.clone(), (center.to_string(), r, z));
         if changed { if let Some(w) = app.get_webview_window(&k) { let _ = crate::webwin::set_outer(&w, Some(r[0]), Some(r[1]), r[2] as u32, r[3] as u32); } }
     }
 }
@@ -331,11 +332,20 @@ fn run(app: AppHandle) {
             apply_mode(ch, mode, game, &mut last);
             // the blur windows of this center follow it: the same order (the layer of the center), and directly under it
             let blurs: Vec<(String, isize)> = BLURS.lock().map(|b| b.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (k.clone(), v.2)).collect()).unwrap_or_default();
-            let webs: Vec<isize> = WEBS.lock().map(|m| m.iter().filter(|(_, v)| v.0 == label).filter_map(|(k, _)| app.get_webview_window(k).and_then(|w| hwnd_of(&w).ok())).collect()).unwrap_or_default();
-            for bh in blurs.into_iter().map(|b| b.1).chain(webs) {
+            // the web windows: in the order the center draws their frames (the highest `z` first), so that a page and its frame are never one over and one under another window's
+            let mut webs: Vec<(i64, isize)> = WEBS.lock().map(|m| m.iter().filter(|(_, v)| v.0 == label).filter_map(|(k, v)| app.get_webview_window(k).and_then(|w| hwnd_of(&w).ok()).map(|h| (v.2, h))).collect()).unwrap_or_default();
+            webs.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+            // from the front: the center, the blurs of its windows (they blur what is under the windows: the pages too), the web windows
+            let mut want: Vec<isize> = vec![ch];
+            for bh in blurs.into_iter().map(|b| b.1).chain(webs.into_iter().map(|w| w.1)) {
                 win::keep_style(bh);
                 apply_mode(bh, mode, game, &mut last);
-                if win::z_order(&[ch, bh]).first() == Some(&bh) { win::place_below(bh, ch); }
+                want.push(bh);
+            }
+            if want.len() > 1 {
+                let seen = win::z_order(&want);
+                let expected: Vec<isize> = want.iter().copied().filter(|h| seen.contains(h)).collect();
+                if seen != expected { for pair in want.windows(2) { win::place_below(pair[1], pair[0]); } }
             }
         }
     }

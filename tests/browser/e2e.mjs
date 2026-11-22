@@ -1023,6 +1023,19 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(() => webCalls.filter(c => c[0] === 'alpha').at(-1)[2] === 1, 'with the mouse over it, it is solid at once', 4000);
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, idle_alpha: 1 } : b)) })));
     kb.cx = 0; kb.cy = 0;
+    // the order of the web windows: the center draws their frames by `z` and tells the program, which puts their pages in the same order; every translation window is above them all
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: [...m.cfg().browser_windows, { id: 2, name: '', mode: 'mobile', start_kind: 'url', start_url: 'https://www.google.com/', last_url: '', persist: false, topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1, idle_alpha: 1 }] })));
+    await cmd('open', 2);
+    await until(async () => (await cp.locator('.webpane').count()) === 2, 'a second window of the mini browser');
+    const zOf = async label => cp.evaluate(l => Number(document.querySelector(`.webpane[data-web="${l}"]`).style.zIndex), label);
+    const sentZ = label => (centerRects.at(-1).panes.find(p => p.web === label) || {}).z;
+    await until(async () => sentZ('web_b2') > sentZ('web_b1'), 'a window that is made is in front of the other: its z is higher in what the program gets');
+    ok(await zOf('web_b1') < 1000 && await zOf('web_b2') < 1000 && (await cp.evaluate(() => Math.min(...[...document.querySelectorAll('.pane:not(.webpane)')].map(e => Number(e.style.zIndex)))) >= 1000), 'browser/order: every translation window is above every web window');
+    await cp.locator('.webpane[data-web="web_b1"] .paddrbar').dispatchEvent('pointerdown');
+    await until(() => sentZ('web_b1') > sentZ('web_b2'), 'a window that is touched comes to the front: the program is told the new order');
+    await cmd('close', 2);
+    await until(async () => (await cp.locator('.webpane').count()) === 1, 'the second window is closed');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.filter(b => b.id !== 2) })));
     // the right button on the bar: the bookmarks, adding the page, the settings
     await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 4, y: 10 } });
     await until(async () => (await cp.locator('#ctx').isVisible()), 'the menu of the bar');
@@ -1569,7 +1582,7 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   // web: the page in a window of the program: only https and a host the permission covers (the domain of an allowed host when the user said so)
   const w1 = await asked('web.open', { url: 'https://m.example.com/view?no=3', title: 'x' }); const w2 = await asked('web.open', { url: 'https://evil.org/' });
   const wo = webCalls.find(c => c[0] === 'open' && !c[1].free);                    // (a window of a plugin; the mini browser's are `free`)
-  ok(w1.ok && wo && wo[1].url === 'https://m.example.com/view?no=3' && wo[1].allow.join() === '*.example.com' && wo[1].ua.includes('iPhone') && wo[1].persist === false && wo[1].label.startsWith('web_') && w2.ok === false && w2.error.code === 'denied', 'plugins/web: the address goes to the exe with the domain pattern, a mobile agent and no cookies; another host is denied');
+  ok(w1.ok && wo && wo[1].url === 'https://m.example.com/view?no=3' && wo[1].allow.join() === '*.example.com' && wo[1].ua.includes('Android') && wo[1].ua_hints && wo[1].ua_hints.mobile === true && wo[1].persist === false && wo[1].label.startsWith('web_') && w2.ok === false && w2.error.code === 'denied', 'plugins/web: the address goes to the exe with the domain pattern, a mobile agent and no cookies; another host is denied');
   const wc = await asked('web.close', {});
   ok(wc.ok && webCalls.some(c => c[0] === 'close'), 'plugins/web: close goes to the exe');
   // openUrl: an address goes to the browser of the user, only for an allowed host over https

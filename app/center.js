@@ -53,11 +53,22 @@ const center = {
   widgetSink: { usable: () => true, show: (text, r) => { const d = dpr(); return tip({ text, rect: [ox + r.left * d, oy + r.top * d, ox + r.right * d, oy + r.bottom * d] }); }, hide: () => tip({ hide: true }) },
   // a pane was touched: it goes to the front of the panes of this center (like an ordinary window); the ordinary center also goes up over the other programs' windows
   raise: p => {
-    if (Number(p.el.style.zIndex) !== top) p.el.style.zIndex = String(++top);
+    if (p instanceof WebPane) {                                   // (the web windows are one order of their own, below every translation window: their pages are windows of the system under this one)
+      if (Number(p.el.style.zIndex) !== webTop) { p.el.style.zIndex = String(nextWebZ()); report(); }
+    } else if (Number(p.el.style.zIndex) !== top) p.el.style.zIndex = String(++top);
     if (mode === 0) invoke('center_raise', { label }).catch(() => {});
   },
+  nextWebZ: () => nextWebZ(),                                     // (a web window that is made comes to the front of the web windows)
 };
-let top = 1000;
+let top = 3000;                                                    // (the translation windows: 1000 + their numbers at first, then the counter)
+let webTop = 100;                                                  // (the web windows: 100 .. 999)
+function nextWebZ() {
+  if (webTop >= 990) {                                             // (the numbers are used up: all are numbered again in the same order)
+    const order = [...webs.values()].sort((a, b) => Number(a.el.style.zIndex) - Number(b.el.style.zIndex));
+    webTop = 100; for (const w of order) w.el.style.zIndex = String(++webTop);
+  }
+  return ++webTop;
+}
 // the kind of order a window has now (settings: "항상 위", "와우 위에서만")
 const optOf = (id, key, d) => (id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? d) : winconf.opt(cfg.child_windows.find(c => c.id === id) || null, cfg, key, d));
 const browserMode = id => { const b = (cfg.browser_windows || []).find(x => x.id === id) || {}; return b.topmost_wow_only ? 2 : b.topmost === false ? 0 : 1; };          // (the order of a window of the mini browser)
@@ -129,7 +140,7 @@ let lastOs = null;                             // the last state of the system (
 let gameFound = true;                          // no game = the windows stay in view: nothing to click through to
 await listen('game-state', e => { gameFound = !!e.payload.found; });
 emit('game-hello', {});
-let lastKey = '', copyPrev = false;
+let lastKey = '', copyPrev = false, webLmb = false;
 // runs all the time: the mouse and the keys against the windows (pane.tick), and Ctrl+C (the windows never take the keyboard: the game keeps it)
 (async function loop() {
   for (;;) {
@@ -139,6 +150,14 @@ let lastKey = '', copyPrev = false;
     let changed = false;
     for (const p of panes.values()) changed = p.tick(s, { game: gameFound, cfg }) || changed;
     for (const w of webs.values()) w.tick(s);
+    // the left button goes down on the page of a web window: the page is a window of the system, this page never sees the click, so it is told here (the front-most window under the mouse is the one)
+    const lmbNow = !!(s.keys && s.keys[0]);
+    if (lmbNow && !webLmb) {
+      let best = null;
+      for (const w of webs.values()) { const b = w.screenBox(); if (s.cursor[0] >= b.x && s.cursor[0] < b.x + b.w && s.cursor[1] >= b.y && s.cursor[1] < b.y + b.h && (!best || Number(w.el.style.zIndex) > Number(best.el.style.zIndex))) best = w; }
+      if (best) center.raise(best);
+    }
+    webLmb = lmbNow;
     if (changed) report();
     // the turns of the wheel the exe took for the windows (Windows: asked for here; a Mac tells them one by one, see below)
     if (hadWheel && !isMac) {

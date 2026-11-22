@@ -21,10 +21,10 @@ export class WebPane {
     this.head = this.kind === 'browser' ? BAR_H * 2 : BAR_H;                   // (how much of the window is above the page, css pixels)
     this.el.innerHTML = '<div class="pbar">' + head + '<span class="pspace"></span><span class="ptools"><button class="pback" tabindex="-1" title="뒤로">‹</button><button class="preload" tabindex="-1" title="새로고침">↻</button><button class="pclose" tabindex="-1" title="닫기">✕</button></span></div>' + row + '<div class="pbody"><div class="pscroll"></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div>';
     document.body.append(this.el);
-    this.el.style.zIndex = String((this.kind === 'browser' ? 600 : 500) + (Number(this.win) || 0));       // (the web windows are above the translation windows that have not been touched, below the ones that were)
+    this.el.style.zIndex = String(this.center.nextWebZ());                       // (a new web window is in front of the web windows; all of them are below every translation window)
     this.el.addEventListener('pointerdown', () => this.center.raise(this), true);
     // the title with Shift or Ctrl: this page in the user's own browser. At the press (not at the click: the bar holds the pointer for dragging, and the click then goes to the bar), before the drag.
-    if (this.kind === 'browser') this.el.querySelector('.pbar').addEventListener('pointerdown', e => {
+    this.el.querySelector('.pbar').addEventListener('pointerdown', e => {
       if (e.button !== 0 || !(e.shiftKey || e.ctrlKey || e.metaKey) || !e.target.closest('.ptab')) return;
       e.preventDefault(); e.stopImmediatePropagation();
       invoke('web_cmd', { label: this.label, cmd: 'external' }).catch(() => {});
@@ -60,7 +60,7 @@ export class WebPane {
     }
     const t = this.el.querySelector('.ptab');
     t.textContent = this.title || (this.url ? (() => { try { return new URL(this.url).host; } catch { return ''; } })() : '');
-    t.title = this.url + (this.kind === 'browser' ? '\n' + tr('Shift 또는 Ctrl+클릭: 내 브라우저에서 열기') : '');
+    t.title = this.url + '\n' + tr('Shift 또는 Ctrl+클릭: 내 브라우저에서 열기');
   }
   // The address of a window of the mini browser is drawn here, but typed in a small window of the system (address.js): the center never takes the keyboard. A click on it asks the program to put that
   // window over this place; clicking anywhere else of this window (or closing it) puts it away.
@@ -138,7 +138,7 @@ export class WebPane {
   boxes() {
     const r = this.rect, d = this.center.dpr(), id = 'w' + this.win, b = (suffix, x, y, w, h, extra) => ({ id: id + suffix, x: x * d, y: y * d, w: w * d, h: h * d, bar: 0, hit: true, ...extra });
     return [
-      { id, x: r.x * d, y: r.y * d, w: r.w * d, h: r.h * d, bar: 0, hit: false, web: this.label },
+      { id, x: r.x * d, y: r.y * d, w: r.w * d, h: r.h * d, bar: 0, hit: false, web: this.label, z: Number(this.el.style.zIndex) || 0 },
       b('b', r.x, r.y - this.head, r.w, BAR_H),
       ...(this.kind === 'browser' ? [b('a', r.x, r.y - BAR_H, r.w, BAR_H)] : []),
       ...(this.lock ? [] : [b('l', r.x, r.y, EDGE, r.h), b('r', r.x + r.w - EDGE, r.y, EDGE, r.h), b('s', r.x, r.y + r.h - EDGE, r.w, EDGE), b('g', r.x + r.w - GRIP, r.y + r.h - GRIP, GRIP, GRIP)]),
