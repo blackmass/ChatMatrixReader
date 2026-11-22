@@ -162,16 +162,16 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
                 if let Ok(h) = hwnd_of(&win) {
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(150));
-                        let before = win::self_front();
+                        let before = win::has_keyboard(h);                  // (this window, not the program: another window of ours may have the keyboard: the bar of the center)
                         if !before { win::allow_key(h, true); let _ = win::grab_focus(h); }
-                        event(format!("input click: the program was {} 0.15 s later{}", if before { "active" } else { "NOT active" }, if before { "" } else { ": asked to become active" }));
+                        event(format!("input click: the window {} the keyboard 0.15 s later{}", if before { "had" } else { "did NOT have" }, if before { "" } else { ": asked for it" }));
                     });
                 }
             }
         }
         "unprep" | "release" => {                     // the text box is left: back to a window that takes nothing; "release": it was used, the keyboard goes back to where it was
             if let Ok(h) = hwnd_of(&win) {
-                let was_front = win::foreground() == h || (cfg!(target_os = "macos") && win::self_front());       // (macOS: `foreground` does not find this window)
+                let was_front = win::foreground() == h || (cfg!(target_os = "macos") && win::has_keyboard(h));       // (macOS: `foreground` does not find this window)
                 if cmd == "unprep" && was_front { return; }            // (the window is in use: it takes nothing again when it loses the keyboard)
                 win::allow_key(h, false);
                 win::set_noactivate_light(h, true);
@@ -264,7 +264,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
                 event(format!("address refused: {}", u.as_str().chars().take(200).collect::<String>()));
             } else {
                 // a page is loading: the page before may have left the window prepared (a text box was used) without telling; a window that is not the active one is put back to taking nothing
-                if let Some(w) = app2.get_webview_window(&lbl) { if let Ok(h) = hwnd_of(&w) { if win::foreground() != h && !(cfg!(target_os = "macos") && win::self_front()) { win::allow_key(h, false); win::set_noactivate_light(h, true); } } }
+                if let Some(w) = app2.get_webview_window(&lbl) { if let Ok(h) = hwnd_of(&w) { if win::foreground() != h && !(cfg!(target_os = "macos") && win::has_keyboard(h)) { win::allow_key(h, false); win::set_noactivate_light(h, true); } } }
                 let _ = app2.emit("web-nav", json!({ "label": lbl, "url": u.as_str() }));      // (the address the page is going to: the center shows it)
             }
             ok

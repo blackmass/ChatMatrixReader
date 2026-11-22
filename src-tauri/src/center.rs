@@ -185,7 +185,7 @@ pub async fn center_unprep(app: AppHandle, label: String) -> Result<(), String> 
 #[tauri::command]
 pub async fn center_release(app: AppHandle, label: String) -> Result<(), String> {
     let h = center_hwnd(&app, &label)?;
-    let was_front = win::foreground() == h || (cfg!(target_os = "macos") && win::self_front());
+    let was_front = win::foreground() == h || (cfg!(target_os = "macos") && win::has_keyboard(h));
     win::allow_key(h, false);
     win::set_noactivate_light(h, true);
     if was_front {
@@ -201,7 +201,7 @@ pub async fn center_inputclick(app: AppHandle, label: String) -> Result<(), Stri
         let h = center_hwnd(&app, &label)?;
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(150));
-            if !win::self_front() { win::allow_key(h, true); let _ = win::grab_focus(h); }
+            if !win::has_keyboard(h) { win::allow_key(h, true); let _ = win::grab_focus(h); }          // (this window: another window of ours may have the keyboard: the page of a web window)
         });
     }
     Ok(())
