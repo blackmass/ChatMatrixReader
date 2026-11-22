@@ -407,6 +407,7 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     if let Ok(hw) = hwnd_of(&win) {
         win::make_no_key(hw); win::set_noactivate_light(hw, true);
         // a window that is shown without being activated goes behind the program in front (the game): it starts on top, and the poll (web_tick) puts it in its own order a moment later
+        win::prepare_translucent(hw);
         win::set_topmost(hw, true, 0);
     }
     let _ = win.show();
