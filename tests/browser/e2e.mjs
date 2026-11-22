@@ -806,6 +806,11 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   } else console.log('(no game in this test: the click-through check is skipped)');
   await cp.evaluate(() => import('./settings.js').then(m => m.set({ click_through: false }))); await control.waitForTimeout(800);
   ok(hasMain(), 'center/through: not click-through: the window takes the mouse');
+  // blur: the level goes to the program (it makes a window of the system behind the text area); not while the mouse clears the window
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ blur: 2 }))); await control.waitForTimeout(800);
+  ok(centerRects.at(-1).panes.some(p => p.id === '1' && p.blur === 2), 'center/blur: the level of the blur is told: ' + JSON.stringify(centerRects.at(-1).panes.map(p => [p.id, p.blur])));
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ blur: 0 }))); await control.waitForTimeout(800);
+  ok(centerRects.at(-1).panes.every(p => !p.blur), 'center/blur: off: no blur is asked for');
   // the right-click menu: in the page of the center; while it is open the center takes the whole mouse (a rect 'menu'), a click elsewhere closes it
   const pb = await cp.locator('.pane .pbody').first().boundingBox();
   await cp.mouse.click(pb.x + 30, pb.y + 30, { button: 'right' }); await control.waitForTimeout(300);

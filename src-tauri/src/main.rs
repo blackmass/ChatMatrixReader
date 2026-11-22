@@ -354,6 +354,8 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             .visible(false)
             .inner_size(40.0, 40.0),
         // a control center: a transparent window over all the screens (center.rs); it takes the first click of an inactive program too
+        // the blur of a pane (center.rs): an empty transparent window under its center, the system blurs what is behind it
+        "blur" => b.title("CMR Blur").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).inner_size(100.0, 100.0),
         "center" => b.title("CMR Center").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).accept_first_mouse(true).inner_size(400.0, 300.0),
         "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),

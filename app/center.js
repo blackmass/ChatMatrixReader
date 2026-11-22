@@ -124,7 +124,7 @@ let lastKey = '', copyPrev = false;
   }
 })();
 function report() {
-  const list = [...panes.values()].map(p => ({ ...p.box(), hit: p.interactive }));          // (a window that is click-through takes no mouse: it goes through; the place is kept for the send box)
+  const list = [...panes.values()].map(p => ({ ...p.box(), hit: p.interactive, blur: p.blurLevel() }));          // (a window that is click-through takes no mouse: it goes through; the place is kept for the send box)
   const wheel = [...panes.values()].filter(p => p.zone).map(p => p.box());                    // (the wheel over these goes to the window, not to the game)
   if (!menuEl.hidden) list.push({ id: 'menu', x: 0, y: 0, w: innerWidth * center.dpr(), h: innerHeight * center.dpr(), bar: 0 });          // (while the menu is open, the center takes the whole mouse: a click anywhere else closes it)
   const key = JSON.stringify([list, wheel]);
@@ -137,6 +137,23 @@ function report() {
   }).catch(e => { lastKey = ''; if (!wheelWarned) { wheelWarned = true; emit('hub-log', { level: 'warn', msg: `${label}: ${e}` }); } });
 }
 let hadWheel = false, wheelSeq = 0, wheelWarned = false;
+
+// The page is not a browser page (the same as plainPage of a window of 3.1.1): no middle-click scrolling, no dragging of text/links, no zoom. Shift/Ctrl/Alt + wheel would zoom or scroll
+// sideways in a browser: it scrolls the lines instead. The wheel is the page's own: the pane under the pointer scrolls its shown chat.
+addEventListener('auxclick', e => e.preventDefault());
+addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
+addEventListener('dragstart', e => e.preventDefault());
+addEventListener('keydown', e => { if (e.ctrlKey && ['+', '-', '=', '0', '_'].includes(e.key)) e.preventDefault(); });
+addEventListener('blur', () => getSelection().removeAllRanges());
+addEventListener('wheel', e => {
+  e.preventDefault();
+  const el = e.target.closest ? e.target.closest('.pane') : null, p = el && [...panes.values()].find(x => x.el === el);
+  if (!p) return;
+  const c = p.chats.get(p.active);
+  c.view.touch();                                                   // (even when there is nothing to scroll)
+  const d = e.deltaY || e.deltaX;
+  c.lines.scrollTop += e.deltaMode === 1 ? d * 40 : d;
+}, { passive: false });
 
 settings.onChange(c => { cfg = c; for (const p of panes.values()) p.update(); sync(); });
 await listen('win-state', e => { open = new Set([MAIN, ...(e.payload.open || [])]); sync(); });

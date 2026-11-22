@@ -403,6 +403,7 @@ ChatMatrix 옵션 = ChatMatrix Options
 항상 맨 위에 = Always on top
 와우 창 바로 위에만 = Only just above the WoW window
 와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다. = It stays just above WoW; when another program's window covers WoW, it covers this window too. Turning it on turns off "Always on top".
+윈도우의 문제로, 흐림을 켠 창이 여러 개 있으면 컴퓨터 전체가 느려질 수 있습니다. 한두 개 창에서만 쓰는 것을 권합니다. = Because of a Windows limitation, having the blur on in several windows can slow down the whole computer. Use it in one or two windows only.
 마우스를 올리면 투명하게 = Clear while the mouse is over it
 마우스 관통일 때, 마우스가 창 위에 있는 동안 창이 완전히 투명해져 뒤의 게임이 보입니다. 아래 키를 누르고 있으면 투명해지지 않습니다. = With click-through on, the window turns fully transparent while the mouse is over it, so the game behind shows. It does not clear while the keys below are held.
 창 순서: {e} = Window order: {e}

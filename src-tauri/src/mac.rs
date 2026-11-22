@@ -582,6 +582,14 @@ pub fn set_blur(hwnd: isize, on: bool, state: i32, _r: u8, _g: u8, _b: u8, _alph
     })
 }
 
+/// `hwnd` goes directly below `above` without taking the focus.
+pub fn place_below(hwnd: isize, above: isize) {
+    on_main(|| unsafe {
+        let n: isize = msg_send![obj(above), windowNumber];
+        let _: () = msg_send![obj(hwnd), orderWindow: -1isize, relativeTo: n];             // NSWindowBelow
+    });
+}
+
 /// The window goes to the top of the ordinary windows without taking the focus.
 pub fn raise_top(hwnd: isize) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), orderFrontRegardless]; });

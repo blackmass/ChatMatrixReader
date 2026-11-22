@@ -42,7 +42,7 @@ export class Pane {
     // the bar moves the window (a tab only changes the chat when there are several: like 3.1.1)
     this.drag(this.el.querySelector('.pbar'), (s, dx, dy) => { this.rect.x = s.x + dx; this.rect.y = Math.max(BAR_H, s.y + dy); }, e => !this.opt('lock_window', false) && !e.target.closest('button') && !(this.chats.size > 1 && e.target.closest('.ptab')));
     this.tools();
-    this.drag(this.el.querySelector('.pgrip'), (s, dx, dy) => { this.rect.w = Math.max(MIN_W, s.w + dx); this.rect.h = Math.max(MIN_H, s.h + dy); }, () => !this.opt('lock_window', false));
+    this.drag(this.el.querySelector('.pgrip'), (s, dx, dy) => { this.rect.w = Math.max(MIN_W, s.w + dx); this.rect.h = Math.max(MIN_H, s.h + dy); }, () => !this.opt('lock_window', false), 'resizing');
     this.update();
   }
   confOf(id) { const cfg = this.center.cfg(); return id === MAIN ? null : cfg.child_windows.find(c => c.id === id) || winconf.newConf(id, [...winconf.KNOWN, winconf.ETC]); }
@@ -107,6 +107,8 @@ export class Pane {
     const r = this.rect;
     this.el.style.left = r.x + 'px'; this.el.style.top = (r.y - BAR_H) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + BAR_H) + 'px';
   }
+  // the blur behind the text area (0 off | 1 weak | 2 strong): the center makes a window of the system for it. While the window is cleared by the mouse or resized, the blur behind it goes too.
+  blurLevel() { return Number(this.opt('blur', 0)) && !this.hover && !this.resizing ? Number(this.opt('blur', 0)) : 0; }
   // the box (the bar included) in pixels of the page, for the center
   // where it is on the screen (pixels): the page's origin plus the box
   screenBox() { const b = this.box(), [ox, oy] = this.center.origin(); return { x: ox + b.x, y: oy + b.y, w: b.w, h: b.h }; }
@@ -117,13 +119,14 @@ export class Pane {
     emit('win-geometry', { id: this.id, geometry: layout.formatGeometry(r.w * d, r.h * d, ox + r.x * d, oy + r.y * d) });
   }
 
-  drag(target, fn, accept = () => true) {
+  drag(target, fn, accept = () => true, flag = '') {
     target.addEventListener('pointerdown', e => {
       if (e.button !== 0 || !accept(e)) return;
       target.setPointerCapture(e.pointerId);
+      if (flag) { this[flag] = true; this.center.changed(this); }
       const s = { ...this.rect, px: e.clientX, py: e.clientY };
       const move = m => { fn(s, m.clientX - s.px, m.clientY - s.py); this.layout(); this.center.changed(this); };
-      const up = () => { target.removeEventListener('pointermove', move); target.removeEventListener('pointerup', up); this.save(); };
+      const up = () => { target.removeEventListener('pointermove', move); target.removeEventListener('pointerup', up); if (flag) this[flag] = false; this.save(); this.center.changed(this); };
       target.addEventListener('pointermove', move); target.addEventListener('pointerup', up);
     });
   }
@@ -187,10 +190,10 @@ export class Pane {
     // a Mac gives no mouse-over events to a window that is not the active one, so there the cursor does it for a usable window too
     const view = this.chats.get(this.active).view, fromCursor = !now ? ctx.cfg.through_tips !== false : isMac;
     if (inside && fromCursor && !hover) view.tipAtPoint(px, py); else view.hideTip();
-    this.hover = hover;
     // the wheel over a window the mouse goes through is not for the game, both ways; a Mac keeps it while the earlier chat is read (the window is usable then)
     const zone = !!ctx.cfg.wheel_through && !this.opt('hover_clear', false) && (isMac ? !!this.opt('click_through', false) && ctx.game : !now);
-    const changed = now !== this.interactive || zone !== this.zone;
+    const changed = now !== this.interactive || zone !== this.zone || hover !== this.hover;
+    this.hover = hover;
     this.zone = zone;
     this.interactive = now; c.toggle('interactive', now);
     return changed;

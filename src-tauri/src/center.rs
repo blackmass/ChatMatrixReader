@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 use crate::{base_dir, hwnd_of, make_window, win};
 
 #[derive(Clone, Debug)]
-pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, hit: bool }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar; `hit`: it takes the mouse: a window that is click-through only has a place)
+pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, hit: bool, blur: u32 }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar; `hit`: it takes the mouse: a window that is click-through only has a place)
 
 static RECTS: LazyLock<Mutex<HashMap<String, Vec<Pane>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static LOCK: Mutex<Option<String>> = Mutex::new(None);                    // the center that holds the mouse while a button is down
@@ -56,8 +56,9 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Op
     let f = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
     let list: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane {
         id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(),
-        x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"), bar: f(v, "bar"), hit: v.get("hit").and_then(|x| x.as_bool()).unwrap_or(true),
+        x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"), bar: f(v, "bar"), hit: v.get("hit").and_then(|x| x.as_bool()).unwrap_or(true), blur: v.get("blur").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
     }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
+    sync_blur(&app, &label, &list);
     if let Ok(mut r) = RECTS.lock() { r.insert(label.clone(), list); }
     crate::refollow_input(&app);                                            // (the send box follows its window)
     // the places where the wheel is taken from the game (the windows that are click-through): { id, x, y, w, h } like the panes
@@ -67,6 +68,40 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Op
         Some((wheel_key(idx, id), [f(v, "x") + ox, f(v, "y") + oy, f(v, "x") + ox + f(v, "w"), f(v, "y") + oy + f(v, "h")]))
     }).collect()).unwrap_or_default();
     Ok(win::set_pane_zones(idx, zones))
+}
+
+/// The blur windows of the panes (the option "블러"): one empty transparent window for each pane that has it, the size of its text area, directly under its center (see `run`);
+/// the system blurs what is behind it. key: its label -> (the center's label, the level, its handle, where it is).
+static BLURS: LazyLock<Mutex<HashMap<String, (String, u32, isize, [i32; 4])>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
+    let want: HashMap<String, (u32, [i32; 4])> = panes.iter().filter(|p| p.blur > 0).map(|p| (
+        format!("blur_{}_{}", center, p.id),
+        (p.blur, [p.x.round() as i32, (p.y + p.bar).round() as i32, p.w.round().max(1.0) as i32, (p.h - p.bar).round().max(1.0) as i32]),
+    )).collect();
+    let mut have = match BLURS.lock() { Ok(h) => h, Err(_) => return };
+    // gone: the pane has no blur any more (or is not there)
+    let gone: Vec<String> = have.iter().filter(|(k, v)| v.0 == center && !want.contains_key(*k)).map(|(k, _)| k.clone()).collect();
+    for k in gone { have.remove(&k); if let Some(w) = app.get_webview_window(&k) { let _ = w.destroy(); } }
+    for (k, (level, r)) in want {
+        let known = have.get(&k).cloned();
+        let w = match app.get_webview_window(&k) {
+            Some(w) => w,
+            None => match make_window(app, &k, "blur.html", "blur") { Ok(w) => w, Err(_) => continue },
+        };
+        let Ok(h) = hwnd_of(&w) else { continue };
+        if known.as_ref().map_or(true, |v| v.3 != r) {
+            let _ = w.set_position(tauri::PhysicalPosition::new(r[0], r[1]));
+            let _ = w.set_size(tauri::PhysicalSize::new(r[2] as u32, r[3] as u32));
+        }
+        if known.is_none() {
+            let _ = w.set_ignore_cursor_events(true);
+            win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h);
+        }
+        if known.as_ref().map_or(true, |v| v.1 != level) { win::set_blur(h, true, if level == 2 { 4 } else { 3 }, 0x1e, 0x1f, 0x22, 0.004); }
+        if known.is_none() { let _ = w.show(); }
+        have.insert(k, (center.to_string(), level, h, r));
+    }
 }
 
 /// The key of the wheel zone of a pane (negative: a window of the system has a positive handle).
@@ -175,6 +210,13 @@ fn run(app: AppHandle) {
             let Ok(ch) = hwnd_of(&c) else { continue };
             win::keep_style(ch);
             apply_mode(ch, mode, game, &mut last);
+            // the blur windows of this center follow it: the same order (the layer of the center), and directly under it
+            let blurs: Vec<(String, isize)> = BLURS.lock().map(|b| b.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (k.clone(), v.2)).collect()).unwrap_or_default();
+            for (_, bh) in blurs {
+                win::keep_style(bh);
+                apply_mode(bh, mode, game, &mut last);
+                if win::z_order(&[ch, bh]).first() == Some(&bh) { win::place_below(bh, ch); }
+            }
         }
     }
 }

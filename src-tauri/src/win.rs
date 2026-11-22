@@ -696,6 +696,11 @@ pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
     }
 }
 
+/// `hwnd` goes directly below `above` (and stays in its band: topmost or not) without taking the focus.
+pub fn place_below(hwnd: isize, above: isize) {
+    unsafe { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); }          // NOMOVE | NOSIZE | NOACTIVATE
+}
+
 /// The window goes to the top of the ordinary windows without taking the focus (what a click does to a normal window; ours do not take the focus).
 pub fn raise_top(hwnd: isize) {
     unsafe {
