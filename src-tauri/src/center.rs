@@ -146,75 +146,30 @@ static ORDER: LazyLock<Mutex<HashMap<String, (Vec<isize>, Option<std::time::Inst
 /// What the system said of the order of the web windows of a center at the last look (their labels, from the front), a different order that is waiting to be believed (since when), and when the
 /// windows were last put by us. A page that is pressed is brought to the front by the system itself: that order is then what the user wants (see the loop).
 static OBSERVED: LazyLock<Mutex<HashMap<String, (Vec<String>, Option<(Vec<String>, Instant)>, Option<Instant>)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-/// (diagnosis, every system) since when a web page has been over its center: label -> since. Written to the log when it happens and when it ends (how long the border is hidden).
-static ABOVE: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-static ABOVE_LOGS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-static ORDER_LOGS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
 static WEBS: LazyLock<Mutex<HashMap<String, (String, [i32; 4], i64)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn sync_webs(app: &AppHandle, center: &str, panes: &[Pane]) {
     let now: HashMap<String, ([i32; 4], i64)> = panes.iter().filter(|p| !p.web.is_empty()).map(|p| (p.web.clone(), ([p.x.round() as i32, p.y.round() as i32, p.w.round().max(1.0) as i32, p.h.round().max(1.0) as i32], p.z))).collect();
-    let Ok(mut webs) = WEBS.lock() else { return };
-    webs.retain(|k, v| v.0 != center || now.contains_key(k));
-    for (k, (r, z)) in now {
-        let changed = webs.get(&k).map_or(true, |v| v.1 != r || v.0 != center);
-        webs.insert(k.clone(), (center.to_string(), r, z));
-        if changed { if let Some(w) = app.get_webview_window(&k) { let _ = crate::webwin::set_outer(&w, Some(r[0]), Some(r[1]), r[2] as u32, r[3] as u32); } }
+    // (the list is only read and written here: the windows of the system are asked after the lock is let go. A call to a window can wait for the main thread, and the main thread may be waiting for
+    // this list: that was a program that stopped on the Mac)
+    let mut moves: Vec<(String, [i32; 4])> = Vec::new();
+    {
+        let Ok(mut webs) = WEBS.lock() else { return };
+        webs.retain(|k, v| v.0 != center || now.contains_key(k));
+        for (k, (r, z)) in now {
+            let changed = webs.get(&k).map_or(true, |v| v.1 != r || v.0 != center);
+            webs.insert(k.clone(), (center.to_string(), r, z));
+            if changed { moves.push((k, r)); }
+        }
     }
+    for (k, r) in moves { if let Some(w) = app.get_webview_window(&k) { let _ = crate::webwin::set_outer(&w, Some(r[0]), Some(r[1]), r[2] as u32, r[3] as u32); } }
 }
-
-/// The center a web window belongs to (its label), if it is known.
-pub fn web_center(label: &str) -> Option<String> { WEBS.lock().ok().and_then(|m| m.get(label).map(|v| v.0.clone())) }
 
 /// The title the window of the game has (the setting "와우 창 제목"; the program name is looked at first): told by the center page.
 static GAME_TITLE: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new("World of Warcraft".to_string()));
 #[tauri::command]
 pub async fn center_title(title: String) -> Result<(), String> {
     if let Ok(mut t) = GAME_TITLE.lock() { *t = if title.trim().is_empty() { "World of Warcraft".to_string() } else { title }; }
-    Ok(())
-}
-
-// Typing into the page of a center (the address bar of a web window): like a text box of a web page (webwin.rs "prep"): a center never takes the keyboard of the game, but while the mouse is over
-// a text box the program lifts that for the window (nothing moves), a click on the box then activates it like any window and the keys go to the page; when the box is left the style is put back,
-// and when it was used the keyboard goes back to where it was.
-static BEFORE: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-fn center_hwnd(app: &AppHandle, label: &str) -> Result<isize, String> { app.get_webview_window(label).ok_or("no such window".to_string()).and_then(|w| hwnd_of(&w)) }
-
-#[tauri::command]
-pub async fn center_prep(app: AppHandle, label: String) -> Result<(), String> {
-    let h = center_hwnd(&app, &label)?;
-    let prev = win::foreground();
-    if prev != h { if let Ok(mut m) = BEFORE.lock() { m.insert(label, prev); } }
-    win::allow_key(h, true);
-    win::set_noactivate_light(h, false);
-    Ok(())
-}
-#[tauri::command]
-pub async fn center_unprep(app: AppHandle, label: String) -> Result<(), String> {
-    let h = center_hwnd(&app, &label)?;
-    win::allow_key(h, false);
-    win::set_noactivate_light(h, true);
-    Ok(())
-}
-#[tauri::command]
-pub async fn center_release(app: AppHandle, label: String) -> Result<(), String> {
-    // the box was used and is left: the center takes nothing again. The keyboard is NOT handed back to the game: the user clicks the game (that has never worked well by itself)
-    let h = center_hwnd(&app, &label)?;
-    win::allow_key(h, false);
-    win::set_noactivate_light(h, true);
-    Ok(())
-}
-/// macOS: a click on a text box must make the program active; when the system has not done it a moment later, it is asked to.
-#[tauri::command]
-pub async fn center_inputclick(app: AppHandle, label: String) -> Result<(), String> {
-    if cfg!(target_os = "macos") {
-        let h = center_hwnd(&app, &label)?;
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(150));
-            if !win::has_keyboard(h) { win::allow_key(h, true); let _ = win::grab_focus(h); }          // (this window: another window of ours may have the keyboard: the page of a web window)
-        });
-    }
     Ok(())
 }
 
@@ -347,18 +302,17 @@ fn run(app: AppHandle) {
             // the blur windows of this center follow it: the same order (the layer of the center), and directly under it
             let blurs: Vec<(String, isize)> = BLURS.lock().map(|b| b.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (k.clone(), v.2)).collect()).unwrap_or_default();
             // the web windows: in the order the center draws their frames (the highest `z` first), so that a page and its frame are never one over and one under another window's
-            let mut webs: Vec<(i64, isize, String)> = WEBS.lock().map(|m| m.iter().filter(|(_, v)| v.0 == label).filter_map(|(k, v)| app.get_webview_window(k).and_then(|w| hwnd_of(&w).ok()).map(|h| (v.2, h, k.clone()))).collect()).unwrap_or_default();
+            let entries: Vec<(i64, String)> = WEBS.lock().map(|m| m.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (v.2, k.clone())).collect()).unwrap_or_default();       // (the lock is let go before the windows are asked)
+            let mut webs: Vec<(i64, isize, String)> = entries.into_iter().filter_map(|(z, k)| app.get_webview_window(&k).and_then(|w| hwnd_of(&w).ok()).map(|h| (z, h, k))).collect();
             webs.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
             let web_labels: Vec<(isize, String)> = webs.iter().map(|w| (w.1, w.2.clone())).collect();
             // from the front: the center, the blurs of its windows (they blur what is under the windows: the pages too), the web windows
             let mut want: Vec<isize> = vec![ch];
-            let n_blur: usize;
             for bh in blurs.into_iter().map(|b| b.1).chain(webs.iter().map(|w| w.1)) {
                 win::keep_style(bh);
                 apply_mode(bh, mode, game, &mut last);
                 want.push(bh);
             }
-            n_blur = want.len() - 1 - web_labels.len();
             if want.len() > 1 {
                 let seen = win::z_order(&want);
                 let expected: Vec<isize> = want.iter().copied().filter(|h| seen.contains(h)).collect();
@@ -367,46 +321,6 @@ fn run(app: AppHandle) {
                     let prev = o.as_ref().and_then(|m| m.get(label).cloned());
                     (prev.as_ref().map_or(true, |p| p.0 != want), prev.and_then(|p| p.1).map_or(true, |t| t.elapsed() > std::time::Duration::from_millis(400)))
                 };
-                // A page that is over its center at all (a press that the system answered by bringing the page to the front, which it could not be kept from: the Mac) is put back at once, in this
-                // round, not after a moment: the edge that the center draws on it is hidden meanwhile. The order the system gave the pages is the user's (the pressed page is first): the center is told and
-                // the windows are numbered that way here too, so that the next round does not put them back in the old order.
-                let page_above = seen.iter().position(|h| *h == ch).map_or(false, |ci| seen[..ci].iter().any(|h| web_labels.iter().any(|w| w.0 == *h)));
-                let mut force = false;
-                if page_above {
-                    force = true;
-                    let obs_now: Vec<String> = seen.iter().filter_map(|h| web_labels.iter().find(|w| w.0 == *h).map(|w| w.1.clone())).collect();
-                    let wanted_now: Vec<String> = web_labels.iter().filter(|w| seen.contains(&w.0)).map(|w| w.1.clone()).collect();
-                    if obs_now.len() >= 2 && obs_now != wanted_now && !changed {
-                        if let Ok(mut m) = WEBS.lock() {
-                            let max_z = obs_now.iter().filter_map(|l| m.get(l).map(|v| v.2)).max().unwrap_or(0);
-                            for (i, l) in obs_now.iter().enumerate() { if let Some(v) = m.get_mut(l) { v.2 = max_z + 1 + (obs_now.len() - i) as i64; } }
-                        }
-                        let _ = app.emit_to(label, "web-order", json!({ "labels": obs_now }));
-                        let mut re: Vec<isize> = want[..=n_blur].to_vec();
-                        for l in &obs_now { if let Some(w) = web_labels.iter().find(|w| &w.1 == l) { re.push(w.0); } }
-                        for w in &web_labels { if !re.contains(&w.0) { re.push(w.0); } }
-                        want = re;
-                        if ORDER_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 120 { crate::startup_log(&format!("web order {label}: a page was over its center: put back at once, order {obs_now:?}")); }
-                    }
-                }
-                // (diagnosis: a page of a web window that is over its center hides what the center draws on its edge: when does that happen, and for how long?)
-                {
-                    let ci = seen.iter().position(|h| *h == ch);
-                    let above: Vec<String> = match ci { Some(ci) => seen[..ci].iter().filter_map(|h| web_labels.iter().find(|w| w.0 == *h).map(|w| w.1.clone())).collect(), None => Vec::new() };
-                    if let Ok(mut m) = ABOVE.lock() {
-                        let now = Instant::now();
-                        for l in &above {
-                            if !m.contains_key(l) {
-                                m.insert(l.clone(), now);
-                                if ABOVE_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 80 { crate::startup_log(&format!("web page over its center: {l} ({label}), system order {seen:?}")); }
-                            }
-                        }
-                        let back: Vec<String> = m.keys().filter(|k| !above.contains(k) && web_labels.iter().any(|w| &w.1 == *k)).cloned().collect();
-                        for k in back {
-                            if let Some(t) = m.remove(&k) { if ABOVE_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 80 { crate::startup_log(&format!("web page back under its center: {k} after {} ms", t.elapsed().as_millis())); } }
-                        }
-                    }
-                }
                 // A page that is pressed is brought to the front by the system itself, before this program has heard of the press (the center asks the mouse a few times a second and a short click
                 // can go by between two looks). When the order of the web windows has become another one that nobody here made, and stays so for a moment, that order is what the user did: the center
                 // is told and numbers the windows that way (instead of this program putting them back, which was seen as a window that is given the front and loses it again).
@@ -426,20 +340,15 @@ fn run(app: AppHandle) {
                             if cand == obs && now.duration_since(since) >= Duration::from_millis(60) {
                                 e.1 = None; e.0 = obs.clone();
                                 let _ = app.emit_to(label, "web-order", json!({ "labels": obs }));
-                                if ORDER_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 120 { crate::startup_log(&format!("web order {label}: the system's order is believed: {obs:?}")); }
                             }
                         }
                         hold = e.1.is_some();
                     }
                 }
-                if (seen != expected && (changed || due) && !hold) || force {
+                if seen != expected && (changed || due) && !hold {
                     for pair in want.windows(2) { win::place_below(pair[1], pair[0]); }
                     if let Ok(mut m) = OBSERVED.lock() { if let Some(e) = m.get_mut(label) { e.2 = Some(Instant::now()); } }
                     if let Ok(mut m) = ORDER.lock() { m.insert(label.to_string(), (want.clone(), Some(std::time::Instant::now()))); }
-                    // (macOS: what was wanted and what the system said: for the log, a few lines only)
-                    if ORDER_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 120 {
-                        crate::startup_log(&format!("web order {label}: wanted {want:?}, system said {seen:?}, changed={changed}"));
-                    }
                 } else if changed {
                     if let Ok(mut m) = ORDER.lock() { m.insert(label.to_string(), (want.clone(), None)); }
                 }

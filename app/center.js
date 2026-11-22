@@ -140,7 +140,7 @@ let lastOs = null;                             // the last state of the system (
 let gameFound = true;                          // no game = the windows stay in view: nothing to click through to
 await listen('game-state', e => { gameFound = !!e.payload.found; });
 emit('game-hello', {});
-let lastKey = '', copyPrev = false, webLmb = false, webClickLogs = 0;
+let lastKey = '', copyPrev = false, webLmb = false;
 // runs all the time: the mouse and the keys against the windows (pane.tick), and Ctrl+C (the windows never take the keyboard: the game keeps it)
 (async function loop() {
   for (;;) {
@@ -155,7 +155,7 @@ let lastKey = '', copyPrev = false, webLmb = false, webClickLogs = 0;
     if (lmbNow && !webLmb) {
       let best = null;
       for (const w of webs.values()) { const b = w.screenBox(); if (s.cursor[0] >= b.x && s.cursor[0] < b.x + b.w && s.cursor[1] >= b.y && s.cursor[1] < b.y + b.h && (!best || Number(w.el.style.zIndex) > Number(best.el.style.zIndex))) best = w; }
-      if (best) { if (webClickLogs++ < 6) invoke('startup_js', { text: `web page pressed: ${best.label} z=${best.el.style.zIndex}` }).catch(() => {}); center.raise(best); }
+      if (best) center.raise(best);
     }
     webLmb = lmbNow;
     if (changed) report();

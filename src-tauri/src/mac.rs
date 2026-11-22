@@ -460,50 +460,8 @@ extern "C" fn can_become_key(this: *mut AnyObject, cmd: Sel) -> Bool {
     Bool::YES
 }
 /// The window becomes one that does not become the key window (a click on its page does not give it the keyboard). Before set_noactivate_light.
-// A web window must not be ordered over its center when it is pressed (see win.rs guard_z): the press goes to `sendEvent:`; the program is told not to order the window (preventWindowOrdering) and
-// the center is told that the window was pressed (webwin::raise_request).
-static GUARD_Z: Mutex<Vec<(isize, String)>> = Mutex::new(Vec::new());
-static SEND_ORIGINALS: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());          // (class, the method it had)
-extern "C" fn guarded_send_event(this: *mut AnyObject, cmd: Sel, event: *mut AnyObject) {
-    let label = GUARD_Z.lock().ok().and_then(|l| l.iter().find(|e| e.0 == this as isize).map(|e| e.1.clone()));
-    if let Some(label) = label {
-        let buttons: usize = unsafe { msg_send![class!(NSEvent), pressedMouseButtons] };
-        if buttons != 0 {
-            unsafe { let _: () = msg_send![shared_app(), preventWindowOrdering]; }
-            crate::webwin::z_note(&label, buttons as isize, 0, true);              // (diagnosis: the first lines only)
-            crate::webwin::raise_request(&label);
-        }
-    }
-    let mut cls = unsafe { object_getClass(this) };
-    while !cls.is_null() {
-        let orig = SEND_ORIGINALS.lock().ok().and_then(|l| l.iter().find(|e| e.0 == cls as usize).map(|e| e.1));
-        if let Some(f) = orig {
-            let f: extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) = unsafe { std::mem::transmute(f) };
-            return f(this, cmd, event);
-        }
-        cls = unsafe { class_getSuperclass(cls) };
-    }
-}
-pub fn guard_z(hwnd: isize, label: &str) {
-    let label = label.to_string();
-    on_main(move || unsafe {
-        let mut cls = object_getClass(hwnd as *const AnyObject);
-        if CStr::from_ptr(class_getName(cls)).to_string_lossy().starts_with("NSKVONotifying_") { cls = class_getSuperclass(cls); }
-        let have = SEND_ORIGINALS.lock().map(|l| l.iter().any(|e| e.0 == cls as usize)).unwrap_or(true);
-        if !have {
-            let m = class_getInstanceMethod(cls, sel!(sendEvent:));
-            if !m.is_null() {
-                let orig = method_getImplementation(m) as usize;
-                if let Ok(mut l) = SEND_ORIGINALS.lock() { l.push((cls as usize, orig)); }
-                class_replaceMethod(cls, sel!(sendEvent:), guarded_send_event as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) as *const c_void, method_getTypeEncoding(m));
-            }
-        }
-        let cname = CStr::from_ptr(class_getName(cls)).to_string_lossy().into_owned();
-        let found = SEND_ORIGINALS.lock().map(|l| l.iter().any(|e| e.0 == cls as usize)).unwrap_or(false);
-        crate::startup_log(&format!("web window {label}: the order guard is {} (class {cname})", if found { "on" } else { "NOT on" }));
-        if let Ok(mut l) = GUARD_Z.lock() { l.retain(|e| e.0 != hwnd); l.push((hwnd, label)); }
-    });
-}
+/// (Windows: a web window is kept from being brought over its center by a press, see win.rs guard_z. The Mac cannot be kept from it: what is over its center is put back by the loop of center.rs.)
+pub fn guard_z(_hwnd: isize, _label: &str) {}
 pub fn set_not_rude(_hwnd: isize) {}
 pub fn make_no_key(hwnd: isize) {
     on_main(|| unsafe {
@@ -522,8 +480,6 @@ pub fn make_no_key(hwnd: isize) {
         if let Ok(mut l) = NO_KEY.lock() { if !l.contains(&hwnd) { l.push(hwnd); } }
     });
 }
-// ---- LAB: the window of the web flickers when the game is clicked: what is its state, and which of these helps (bit 1: no show/hide animation, 2: ordered to the front at every
-// poll, 4: may not be hidden by the system)
 /// A window that is being faded (the web window of the mini browser): while it is less than solid it is NOT "opaque", when it is solid again it is. Left "opaque" while it is see-through, the system
 /// draws the window against black instead of what is behind it: the page darkens instead of fading (found out by trying: the other ways to draw it again did not help).
 pub fn fade_begin(hwnd: isize) {
@@ -531,33 +487,6 @@ pub fn fade_begin(hwnd: isize) {
 }
 pub fn fade_end(hwnd: isize) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setOpaque: Bool::YES]; });
-}
-
-pub fn lab_diag(hwnd: isize) -> String {
-    on_main(|| unsafe {
-        let w = obj(hwnd);
-        let visible: Bool = msg_send![w, isVisible];
-        let occ: usize = msg_send![w, occlusionState];
-        let alpha: f64 = msg_send![w, alphaValue];
-        let level: isize = msg_send![w, level];
-        let space: Bool = msg_send![w, isOnActiveSpace];
-        let key: Bool = msg_send![w, isKeyWindow];
-        let active: Bool = msg_send![shared_app(), isActive];
-        let hides: Bool = msg_send![w, hidesOnDeactivate];
-        format!("visible={} occlusion={} alpha={:.2} level={} onActiveSpace={} key={} appActive={} hidesOnDeactivate={}", visible.as_bool() as u8, occ, alpha, level, space.as_bool() as u8, key.as_bool() as u8, active.as_bool() as u8, hides.as_bool() as u8)
-    })
-}
-pub fn lab_variant(hwnd: isize, v: u32) {
-    on_main(|| unsafe {
-        let w = obj(hwnd);
-        let anim: isize = if v & 1 != 0 { 2 } else { 0 };                                  // NSWindowAnimationBehaviorNone / Default
-        let _: () = msg_send![w, setAnimationBehavior: anim];
-        let hide: Bool = if v & 4 != 0 { Bool::NO } else { Bool::YES };
-        let _: () = msg_send![w, setCanHide: hide];
-    });
-}
-pub fn lab_extra(hwnd: isize, v: u32) {
-    if v & 2 != 0 { on_main(|| unsafe { let _: () = msg_send![obj(hwnd), orderFrontRegardless]; }); }
 }
 
 /// The page of the window has a text box that needs the keyboard (true), or it does not any more (false).
@@ -570,7 +499,6 @@ pub fn forget(hwnd: isize) {
     if let Ok(mut l) = PANELS.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = KEY_ALLOWED.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = NO_KEY.lock() { l.retain(|&h| h != hwnd); }
-    if let Ok(mut l) = GUARD_Z.lock() { l.retain(|e| e.0 != hwnd); }
     if let Ok(mut l) = TAGGED.lock() { l.retain(|e| e.0 != hwnd); }
 }
 

@@ -678,7 +678,6 @@ unsafe extern "system" fn z_guard(hwnd: Handle, msg: u32, wparam: usize, lparam:
             // What a press does (found in the log): the system puts the window after some other window WITHOUT `SWP_NOACTIVATE` (flags 0x3), or at HWND_TOP. Everything this program asks of the order
             // (directly under the center, topmost on / off) has SWP_NOACTIVATE (0x10), so it passes.
             let raise = p.flags & 0x0010 == 0 || p.insert_after == 0;
-            if data != 0 { crate::webwin::z_note(&*(data as *const String), p.insert_after, p.flags, raise); }
             if raise {
                 p.flags |= 0x0004;
                 if data != 0 { crate::webwin::raise_request(&*(data as *const String)); }
@@ -691,7 +690,7 @@ unsafe extern "system" fn z_guard(hwnd: Handle, msg: u32, wparam: usize, lparam:
 pub fn guard_z(hwnd: isize, label: &str) {
     let data = Box::into_raw(Box::new(label.to_string())) as usize;
     let ok = unsafe { SetWindowSubclass(hwnd, z_guard, hwnd as usize, data) };
-    crate::startup_log(&format!("web window {label}: the order guard is {}", if ok != 0 { "on" } else { "NOT on" }));
+    if ok == 0 { crate::startup_log(&format!("web window {label}: the order guard could not be put on")); }
 }
 
 /// The CLIENT area of the window (what the page fills) is put at exactly this rectangle, whatever frame the window has around it (a window of the system may have an invisible one): it is put

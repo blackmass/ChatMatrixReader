@@ -1,14 +1,19 @@
-//! The web windows: a frameless window that shows a page of the web (a phone's page when asked). Its bar, the strips that resize it and the line that shows while it scrolls are drawn by the
-//! control center it belongs to (center.js, webpane.js), which also puts the window in its place and in its order (center.rs); this file makes it and keeps it to the addresses it may go to. Opened by the
-//! hub (app/web_host.js) when a plugin that may do it asks. What the experiments with it showed (windows + macOS) is kept here:
-//!   * a small script runs in the page before the page's own scripts (top frame only: links that go to the user's browser, typing into a text box, how far the page has scrolled); what it tells
-//!     goes to the program by trying to go to the address
-//!     cmr-cmd://<command>, which is caught in on_navigation and never goes anywhere (the page cannot call the program: its address is not one the program trusts)
-//!   * a web window never takes the keyboard of the game: the "no activate" style (Windows); on macOS a window that does not become the key window. So nothing can be typed into a page of it.
+//! The web windows: a frameless window that shows a page of the web. Two kinds are made here, the same way: the windows a plugin asks for (restricted to the addresses it may go to; opened by the hub,
+//! app/web_host.js) and the windows of the mini browser the user opens (any http / https address; app/browser_host.js). Its bar, the strips that resize it and the line that shows while it
+//! scrolls are drawn by the control center it belongs to (center.js, webpane.js), which also puts the window in its place and in its order (center.rs). What the experiments with it showed
+//! (Windows + macOS) is kept here:
+//!   * a small script runs in the page before the page's own scripts (top frame only: links that go to the user's browser, typing into a text box, how far the page has scrolled, the size
+//!     of the page); what it tells goes to the program as "<secret>/<command>": by the message channel of the web view (Windows), or by trying to go to the address cmr-cmd://<secret>/<command>
+//!     which is caught in on_navigation and never goes anywhere (macOS). The secret is made for each window and is only in that window's script; a command without it is refused.
+//!   * a web window never takes the keyboard of the game: the "no activate" style (Windows); on macOS a window that does not become the key window. A text box turns that off while the mouse is
+//!     over it ("prep"); the user clicks the game to leave it (the keyboard is never handed back by the program).
+//!   * the order of the windows is the center's: a press must not bring the page over its center. Windows: the request of the system is taken out of the change of position (win.rs guard_z) and
+//!     the center brings the window to the front itself. macOS cannot be kept from it: the loop of center.rs puts a page that is over its center back and takes the order the system gave.
 //!   * macOS: the CLASS of a window that holds a web view is never changed (the web view watches the window with key-value observing, a changed class makes the program abort
 //!     when the web view leaves it); and nothing touches a window that is closing.
+//!   * no list or lock is held while a window of the system is asked for something: on macOS that can wait for the main thread, which may be waiting for the same lock.
 //!   * "above the game only" is two states (the game, or a window of ours, in front: the high level; another program in front: the normal level right above the game).
-//!   * Windows: every web window is made in a folder of its own (webview-data/web/<plugin>/ when cookies are kept, webview-data/web/_private/ in private mode), not in the folder of the
+//!   * Windows: every web window is made in a folder of its own (webview-data/web/<key>/ when cookies are kept, webview-data/web/_private/ in private mode), not in the folder of the
 //!     program's own windows (they must all be made with the same arguments).
 //!   * every command is async: a web view made from a synchronous command (the main thread) never comes back on Windows (the WebView2 issue wry#583).
 use std::collections::HashMap;
@@ -26,7 +31,6 @@ static CLOSING: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::
 /// The windows the USER opened (the mini browser): any http or https address, not only the addresses a plugin was allowed. (A window a plugin opens is never in this list.)
 static FREE: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 fn is_free(label: &str) -> bool { FREE.lock().map(|l| l.iter().any(|x| x == label)).unwrap_or(false) }
-static PREV_FG: LazyLock<Mutex<HashMap<String, isize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// The secret of each web window: put into the script of ITS page when the window is made; a command (see PAGE) that does not carry it is refused. A script of the site in the page cannot read it (it is
 /// a variable inside the script of ours), and a frame of the page does not know it.
 static TOKENS: LazyLock<Mutex<std::collections::HashMap<String, String>>> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
@@ -44,17 +48,11 @@ fn dispatch(app: &AppHandle, label: &str, raw: &str) {
     command(app, label, cmd, query);
 }
 
-/// (diagnosis) a change of the order that a web window was asked to make: what it asked for. The first lines only.
-pub fn z_note(label: &str, insert_after: isize, flags: u32, vetoed: bool) {
-    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 60 { crate::startup_log(&format!("web window {label}: asked to change its order: after={insert_after} flags={flags:#x}{}", if vetoed { " -> refused" } else { "" })); }
-}
-
 /// A window of the system for the events that come from its window procedure (the press of a page, see win.rs guard_z).
 static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 static LAST_RAISE: LazyLock<Mutex<HashMap<String, std::time::Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// The page of the web window `label` was pressed: the system wanted to bring it to the front, which is not allowed; the center it belongs to brings it to the front of the web windows (and puts
-/// its page there). Many calls in a moment (a drag) are one.
+/// its page there). Many calls in a moment are one.
 pub fn raise_request(label: &str) {
     let Some(app) = APP.get() else { return };
     {
@@ -63,8 +61,7 @@ pub fn raise_request(label: &str) {
         if m.get(label).map_or(false, |t| now.duration_since(*t) < std::time::Duration::from_millis(80)) { return; }
         m.insert(label.to_string(), now);
     }
-    let payload = json!({ "label": label });
-    match crate::center::web_center(label) { Some(c) => { let _ = app.emit_to(c, "web-raise", payload); } None => { let _ = app.emit("web-raise", payload); } }
+    let _ = app.emit("web-raise", json!({ "label": label }));          // (to every page: the center that has this window takes it. No list is looked at here: this runs in the window's own thread)
 }
 
 /// How solid the page of each window is now, and the number of the fade that is going on (a new fade takes over from where the window is: the old one stops).
@@ -203,7 +200,6 @@ fn forget(w: &WebviewWindow) {
     if let Ok(mut m) = ALLOW.lock() { m.remove(&label); }
     if let Ok(mut l) = FREE.lock() { l.retain(|x| x != &label); }
     if let Ok(mut m) = OPEN_ALLOW.lock() { m.remove(&label); }
-    if let Ok(mut m) = PREV_FG.lock() { m.remove(&label); }
     if let Ok(mut m) = TOKENS.lock() { m.remove(&label); }
     if let Ok(mut m) = ZOOM.lock() { m.remove(&label); }
     if let Ok(mut m) = ALPHA.lock() { m.remove(&label); }
@@ -240,8 +236,6 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
         }
         "prep" => {                                   // the mouse is over a text box: a click may activate the window now (the system does it)
             if let Ok(h) = hwnd_of(&win) {
-                let prev = win::foreground();
-                if prev != h { if let Ok(mut p) = PREV_FG.lock() { p.insert(label.to_string(), prev); } }
                 win::allow_key(h, true);
                 win::set_noactivate_light(h, false);
             }
@@ -258,16 +252,12 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
                 }
             }
         }
-        "unprep" | "release" => {                     // the text box is left: back to a window that takes nothing; "release": it was used, the keyboard goes back to where it was
+        "unprep" => {                                 // the text box is left: back to a window that takes nothing (not while it is in use: the user clicks the game to leave it, the window loses the keyboard)
             if let Ok(h) = hwnd_of(&win) {
                 let was_front = win::foreground() == h || (cfg!(target_os = "macos") && win::has_keyboard(h));       // (macOS: `foreground` does not find this window)
-                if cmd == "unprep" && was_front { return; }            // (the window is in use: it takes nothing again when it loses the keyboard)
+                if was_front { return; }
                 win::allow_key(h, false);
                 win::set_noactivate_light(h, true);
-                if cmd == "release" && was_front {
-                    let prev = PREV_FG.lock().ok().and_then(|p| p.get(label).copied()).unwrap_or(0);
-                    if prev != 0 && prev != h { win::set_foreground(prev); }
-                }
             }
         }
         _ => {}
