@@ -136,6 +136,7 @@ let lastKey = '', copyPrev = false;
     let s; try { s = await invoke('os_state', { keys: [0x01, 0x11, 0x43] }); } catch { continue; }
     let changed = false;
     for (const p of panes.values()) changed = p.tick(s, { game: gameFound, cfg }) || changed;
+    for (const w of webs.values()) w.tick(s);
     if (changed) report();
     // the turns of the wheel the exe took for the windows (Windows: asked for here; a Mac tells them one by one, see below)
     if (hadWheel && !isMac) {

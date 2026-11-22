@@ -16,7 +16,7 @@ export const isWebUrl = text => {
 
 export const defaultBrowser = id => ({
   id, name: '', mode: 'mobile', start_kind: 'url', start_url: START_URL, last_url: '', persist: false,
-  topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1,
+  topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1, idle_alpha: 1,
 });
 
 const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -42,6 +42,7 @@ export function normalizeBrowsers(list) {
     d.lock_window = flag(it.lock_window, false);
     d.geometry = /^\d+x\d+\+-?\d+\+-?\d+$/.test(text(it.geometry, 40)) ? text(it.geometry, 40) : '';
     d.zoom = Number.isFinite(it.zoom) ? Math.min(3, Math.max(0.3, Math.round(it.zoom * 10) / 10)) : 1;             // (how large the page is drawn: 30 % .. 300 %, by steps of 10 %)
+    d.idle_alpha = Number.isFinite(it.idle_alpha) ? Math.min(1, Math.max(0.2, Math.round(it.idle_alpha * 20) / 20)) : 1;        // (how solid the window is while the mouse is away: 20 % .. 100 %; 100 % = it stays as it is)
     out.push(d);
   }
   if (!seen.has(DEFAULT_ID)) out.push(defaultBrowser(DEFAULT_ID));

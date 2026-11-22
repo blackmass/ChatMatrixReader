@@ -468,6 +468,16 @@ pub async fn web_ua(app: AppHandle, label: String, ua: String, hints: Option<Val
     { let _ = (app, hints); Err("only on Windows".into()) }
 }
 
+/// How solid a window of the mini browser is (0.2 .. 1): the center fades it while the mouse is away.
+#[tauri::command]
+pub async fn web_alpha(app: AppHandle, label: String, alpha: f64) -> Result<(), String> {
+    if is_closing(&label) || !alpha.is_finite() { return Ok(()); }
+    if !is_free(&label) { return Err("not a window of the mini browser".into()); }
+    let w = get(&app, &label)?;
+    win::set_alpha(hwnd_of(&w)?, alpha.clamp(0.2, 1.0));
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn web_close(app: AppHandle, label: String) -> Result<(), String> {
     match get(&app, &label) { Ok(w) => { forget(&w); w.close().map_err(|e| e.to_string()) } Err(_) => Ok(()) }

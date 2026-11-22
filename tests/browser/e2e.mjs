@@ -77,6 +77,7 @@ async function invoke(cmd, a = {}) {
     case 'web_allow': webCalls.push(['allow', a.allow]); return null;
     case 'web_info': return { exists: true, visible: true, position: [100, 50], size: [360, 640] };
     case 'web_cmd': webCalls.push(['cmd', a.label, a.cmd, a.url]); return null;
+    case 'web_alpha': webCalls.push(['alpha', a.label, a.alpha]); return null;
     case 'web_ua': webCalls.push(['ua', a.label, a.ua, a.hints]); return null;
     case 'address_show': webCalls.push(['addr', a]); return null;
     case 'address_hide': webCalls.push(['addrhide']); return null;
@@ -1006,6 +1007,15 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(async () => (await cp.locator('.webpane .pzoom').textContent()) === '120%', 'the size is shown in the address line');
     await until(() => cfgFile().browser_windows[0].zoom === 1.2, 'the window keeps the size', 3000);
     ok(opens().at(-1)[1].zoom === 1, 'browser/zoom: (the window was opened at 100 %)');
+    // away from the mouse: it fades to the setting (slowly) and is solid again at once when the mouse is over it
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, idle_alpha: 0.5 } : b)) })));
+    kb.cx = 5000; kb.cy = 5000;
+    await until(() => webCalls.some(c => c[0] === 'alpha' && c[1] === 'web_b1' && c[2] === 0.5), 'with the mouse away the window fades to 50 %', 8000);
+    const box1 = centerRects.at(-1).panes.find(p => p.id === 'w1');
+    kb.cx = box1.x + box1.w / 2; kb.cy = box1.y + box1.h / 2;
+    await until(() => webCalls.filter(c => c[0] === 'alpha').at(-1)[2] === 1, 'with the mouse over it, it is solid at once', 4000);
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, idle_alpha: 1 } : b)) })));
+    kb.cx = 0; kb.cy = 0;
     // the right button on the bar: the bookmarks, adding the page, the settings
     await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 4, y: 10 } });
     await until(async () => (await cp.locator('#ctx').isVisible()), 'the menu of the bar');

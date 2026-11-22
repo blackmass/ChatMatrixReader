@@ -1050,6 +1050,7 @@ fn main() {
             webwin::web_close,
             webwin::web_cmd,
             webwin::web_ua,
+            webwin::web_alpha,
             webwin::web_forget,
             webwin::web_allow,
             webwin::web_info,

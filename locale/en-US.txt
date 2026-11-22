@@ -1092,3 +1092,5 @@ Shift 또는 Ctrl+클릭: 내 브라우저에서 열기 = Shift or Ctrl+click: o
 PC 화면입니다. 누르면 모바일 화면으로 바꿉니다. = This is the PC page. Click to change to the mobile page.
 모바일 화면입니다. 누르면 PC 화면으로 바꿉니다. = This is the mobile page. Click to change to the PC page.
 처음 주소로 = To the first address
+마우스가 벗어나면 진하기 = Solidity when the mouse is away
+마우스가 창 위에 있을 때는 늘 선명하고, 벗어나면 잠시 뒤 이 진하기로 흐려집니다. 100%는 흐려지지 않습니다. = While the mouse is over the window it is always clear; after the mouse leaves, it fades to this solidity after a moment. 100% does not fade.

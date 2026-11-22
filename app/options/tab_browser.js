@@ -59,6 +59,8 @@ const browserCard =
       { key: 'browser_topmost_wow_only', type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤', show: hasWindow, def: false,
         note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.',
         get: cfg => cur(cfg).topmost_wow_only, patch: (cfg, v) => ({ browser_windows: list(cfg).map(b => (b.id === cur(cfg).id ? { ...b, topmost_wow_only: v, topmost: v ? false : b.topmost } : b)) }) },
+      mine('idle_alpha', 1, { type: 'percent', min: 0.2, label: '마우스가 벗어나면 진하기', keywords: '투명도 불투명 흐리게 반투명 마우스 벗어나면 fade', show: hasWindow,
+        note: '마우스가 창 위에 있을 때는 늘 선명하고, 벗어나면 잠시 뒤 이 진하기로 흐려집니다. 100%는 흐려지지 않습니다.' }),
       mine('lock_window', false, { type: 'check', label: '창 고정', keywords: '이동 크기 조절 잠금 드래그 고정 lock', show: hasWindow,
         note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다.' }),
     ] };

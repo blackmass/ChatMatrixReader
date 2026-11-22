@@ -47,6 +47,7 @@ extern "system" {
     fn SetPropW(hwnd: Handle, name: *const u16, data: Handle) -> i32;
     fn ReleaseDC(hwnd: Handle, hdc: Handle) -> i32;
     fn GetCursorPos(p: *mut POINT) -> i32;
+    fn SetLayeredWindowAttributes(hwnd: Handle, key: u32, alpha: u8, flags: u32) -> i32;
     fn GetAsyncKeyState(vk: i32) -> i16;
     fn GetForegroundWindow() -> Handle;
     fn SetForegroundWindow(hwnd: Handle) -> i32;
@@ -287,6 +288,15 @@ pub fn keep_style(hwnd: isize) {
 /// The extended style of a window (for the diagnosis in the options).
 pub fn ex_style(hwnd: isize) -> isize {
     unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) }
+}
+
+/// The transparency of a window (0 = invisible, 1 = opaque): the "layered" style and one number for the whole window (what is drawn in it, too).
+pub fn set_alpha(hwnd: isize, alpha: f64) {
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if style & 0x8_0000 == 0 { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | 0x8_0000); }           // WS_EX_LAYERED
+        SetLayeredWindowAttributes(hwnd, 0, (alpha.clamp(0.0, 1.0) * 255.0).round() as u8, 0x2);         // LWA_ALPHA
+    }
 }
 
 pub fn set_noactivate(hwnd: isize, on: bool) {
