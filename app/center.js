@@ -13,6 +13,7 @@ import { menuList } from './ctxmenu.js';
 import { T } from './core/timings.js';
 import { add as perfAdd, report as perfReport } from './core/perf.js';
 import { isMac } from './platform.js';
+if (isMac) document.body.classList.add('mac');
 import { defaultRegistry } from './widgets/defaults.js';
 import { syncPluginDefs } from './widgets/registry.js';
 

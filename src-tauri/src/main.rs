@@ -532,8 +532,9 @@ fn address_show(app: AppHandle, label: String, x: i32, y: i32, w: u32, h: u32, t
     };
     place(&win);
     let _ = app.emit_to("address", "address-open", json!({ "label": label, "text": text.chars().take(2000).collect::<String>() }));
-    win::set_topmost(hwnd, true, 0);
+    win::raise_above_all(hwnd);
     win.show().map_err(e)?;
+    win::raise_above_all(hwnd);                        // (macOS: above the level of the centers, and once more after it is shown: a window that was never shown is put by the system under the others the first time)
     place(&win);                                       // (a window that was never seen takes its own size when it is shown first: put again, and once more a moment later)
     win::grab_focus(hwnd);
     win.set_focus().map_err(e)?;
@@ -541,6 +542,7 @@ fn address_show(app: AppHandle, label: String, x: i32, y: i32, w: u32, h: u32, t
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(80));
         if let Some(w2) = app2.get_webview_window("address") {
+            if w2.is_visible().unwrap_or(false) { win::raise_above_all(hwnd); }
             if w2.is_visible().unwrap_or(false) && !win::set_client_rect(hwnd, hold.0, hold.1, hold.2 as i32, hold.3 as i32) {
                 let _ = w2.set_size(tauri::PhysicalSize::new(hold.2, hold.3));
             }

@@ -626,6 +626,15 @@ pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
     });
 }
 
+/// A small window that must be seen over everything of ours (the address box over the center): a level above the floating windows, to the front.
+pub fn raise_above_all(hwnd: isize) {
+    on_main(|| unsafe {
+        let w = obj(hwnd);
+        let _: () = msg_send![w, setLevel: LEVEL_FLOATING + 1];
+        let _: () = msg_send![w, orderFrontRegardless];
+    });
+}
+
 /// Dark title bar of the options window.
 pub fn style_caption(hwnd: isize) {
     on_main(|| unsafe {

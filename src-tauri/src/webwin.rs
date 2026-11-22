@@ -199,6 +199,18 @@ pub(crate) fn set_outer(w: &WebviewWindow, x: Option<i32>, y: Option<i32>, width
     Ok(())
 }
 
+/// A call of the protocol of the developer tools on the web view of a window (Windows).
+#[cfg(windows)]
+fn cdp(win: &WebviewWindow, method: &'static str, params: String) {
+    let _ = win.with_webview(move |wv| unsafe {
+        use windows_core062::PCWSTR;
+        let Ok(core) = wv.controller().CoreWebView2() else { return };
+        let m: Vec<u16> = method.encode_utf16().chain(std::iter::once(0)).collect();
+        let p: Vec<u16> = params.encode_utf16().chain(std::iter::once(0)).collect();
+        let _ = core.CallDevToolsProtocolMethod(PCWSTR(m.as_ptr()), PCWSTR(p.as_ptr()), None);
+    });
+}
+
 /// Opens the window of a web page (or, when it is open, takes it to the address). args: { label, url, ua?, title?, x?, y?, w?, h? (outer, screen pixels), allow: [pattern],
 /// persist, key, lock }
 #[tauri::command]
@@ -272,6 +284,11 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         .on_document_title_changed(move |_, t| { let _ = app3.emit("web-title", json!({ "label": lbl3, "title": t.chars().take(120).collect::<String>() })); });
     if let Some(ua) = args.get("ua").and_then(|v| v.as_str()) { if !ua.is_empty() { b = b.user_agent(ua); } }
     let win = b.build().map_err(|e| e.to_string())?;
+    // a window that visits as a phone: the browser's own headers (client hints) say it too, else they still say "Windows, a computer" next to a phone's user agent (the web view of Windows is a Chromium)
+    #[cfg(windows)]
+    if let (Some(ua), Some(hints)) = (args.get("ua").and_then(|v| v.as_str()).filter(|u| !u.is_empty()), args.get("ua_hints").filter(|h| h.is_object())) {
+        cdp(&win, "Emulation.setUserAgentOverride", json!({ "userAgent": ua, "userAgentMetadata": hints }).to_string());
+    }
     // the place the window had (outer, screen pixels); else the size that was asked for
     let (w, h) = (args.get("w").and_then(|v| v.as_u64()), args.get("h").and_then(|v| v.as_u64()));
     if let (Some(w), Some(h)) = (w, h) {

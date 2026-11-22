@@ -2,7 +2,7 @@
 // webwin.rs (the same as for a plugin, but it may go to any http or https address); its bar, its address and its order are the control center's (center.js, webpane.js). This file opens and closes
 // the windows (what the menus and the options ask: 'browser-command'), keeps where each window is and the address it was at, and tells the centers which are open ('web-state').
 import * as B from './core/browsers.js';
-import { MOBILE_UA } from './web_host.js';
+import { mobileProfile } from './web_host.js';
 
 const INFO_MS = 500, SAVE_MS = 600, NAV_MS = 800;
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };
@@ -29,8 +29,9 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
     if (!b || open.has(id)) return;
     const url = b.start_kind === 'last' && B.isWebUrl(b.last_url) ? b.last_url : (B.isWebUrl(b.start_url) ? b.start_url : B.START_URL);
     const g = parseGeom(b.geometry), label = browserLabel(id);
+    const phone = b.mode === 'mobile' ? mobileProfile() : {};
     const size = g || (b.mode === 'pc' ? { w: 960, h: 640 } : { w: 360, h: 640 });
-    const args = { label, url, title: '', ua: b.mode === 'pc' ? '' : MOBILE_UA, allow: [], open_allow: ['*'], free: true, persist: !!b.persist, key: browserKey(id), render: settings.cfg().web_render || 'auto', w: size.w, h: size.h };
+    const args = { label, url, title: '', ua: phone.ua || '', ua_hints: phone.hints || null, allow: [], open_allow: ['*'], free: true, persist: !!b.persist, key: browserKey(id), render: settings.cfg().web_render || 'auto', w: size.w, h: size.h };
     if (g) { args.x = g.x; args.y = g.y; }
     try { await invoke('web_open', { args }); } catch (e) { note('mini browser: ' + e); return; }
     const o = { label, title: '', timers: [], last: '', pending: null, saveAt: 0, navAt: 0, url };

@@ -4,6 +4,19 @@
 // This file keeps the list of what is open (told to the control centers, which draw the bar of each window and decide its order: center.js, webpane.js) and remembers where the window is.
 import { webPatterns } from './core/plugins.js';
 
+// The phone a window of the mini browser visits as. The web view of Windows is a Chromium: a phone's Chrome (the version of this web view: what the page's own user agent says) with the headers of the
+// browser (client hints) that say the same; an iPhone's Safari there is a user agent that nothing else about the browser agrees with, and sites that look at it ask for a check. A Mac's web view is
+// WebKit: there the iPhone's Safari is the truth.
+export function mobileProfile(nav = navigator) {
+  const ua = String(nav.userAgent || '');
+  if (/Macintosh|Mac OS X/.test(ua) || /Mac/.test(String(nav.platform || ''))) return { ua: MOBILE_UA };
+  const major = (/Chrome\/(\d+)/.exec(ua) || [])[1] || '124';
+  const brands = [{ brand: 'Chromium', version: major }, { brand: 'Google Chrome', version: major }, { brand: 'Not.A/Brand', version: '99' }];
+  return {
+    ua: `Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Mobile Safari/537.36`,
+    hints: { brands, fullVersionList: brands.map(b => ({ brand: b.brand, version: b.version === '99' ? '99.0.0.0' : major + '.0.0.0' })), platform: 'Android', platformVersion: '13.0.0', architecture: '', model: 'Pixel 7', mobile: true },
+  };
+}
 export const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 const INFO_MS = 500, SAVE_MS = 600, DEFAULT_W = 360, DEFAULT_H = 640;
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };

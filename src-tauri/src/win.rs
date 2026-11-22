@@ -635,6 +635,12 @@ pub fn z_order(hwnds: &[isize]) -> Vec<isize> {
 
 /// Topmost on / off for a window, directly (the window library remembers its own idea of it and may skip a call that looks like no change).
 /// Off with `game`: the window is put directly above the game (not at the top of the ordinary windows: that would drag the game up with it).
+/// A small window that must be seen over everything of ours (the address box over the center): topmost, to the top of the topmost ones.
+pub fn raise_above_all(hwnd: isize) {
+    set_topmost(hwnd, true, 0);
+    raise_top(hwnd);
+}
+
 pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
     unsafe {
         let after = if on { -1 } else if game != 0 && IsWindow(game) != 0 { after_game(game) } else { -2 }; // HWND_TOPMOST / above the game / HWND_NOTOPMOST

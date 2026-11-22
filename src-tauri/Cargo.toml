@@ -18,6 +18,8 @@ serde_json = "1"
 [target.'cfg(windows)'.dependencies]
 # the #[implement] macro of `windows` names this crate directly, so it must be a direct dependency (same 0.61 line as `windows`)
 windows-core = "0.61"
+# the web view of Windows: a window of the mini browser says to the web view what it is (a phone: the headers of the browser too) by the protocol of the developer tools. Same version as Tauri's own.
+windows-core062 = { package = "windows-core", version = "0.62" }
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.61"

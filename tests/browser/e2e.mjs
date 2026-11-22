@@ -952,7 +952,7 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await cmd('open', 1);
     await until(async () => (await cp.locator('.webpane .paddr').count()) === 1, 'the window of the mini browser has an address bar');
     const a1 = opens().at(-1)[1];
-    ok(a1.free === true && a1.url === 'https://www.google.com/' && a1.ua.includes('iPhone') && a1.persist === false && a1.key === 'browser1' && a1.allow.length === 0, 'browser/open: a window the user opens: any address, the phone page, no login kept: ' + JSON.stringify(a1));
+    ok(a1.free === true && a1.url === 'https://www.google.com/' && a1.ua.includes('Android') && a1.ua.includes('Mobile') && a1.ua_hints && a1.ua_hints.mobile === true && a1.ua_hints.platform === 'Android' && a1.persist === false && a1.key === 'browser1' && a1.allow.length === 0, 'browser/open: a window the user opens: any address, the phone page, no login kept: ' + JSON.stringify(a1));
     ok(centerRects.at(-1).panes.some(p => p.id === 'w1' && p.web === 'web_b1'), 'browser/open: the center tells where the page is');
     await cmd('open', 1);
     await control.waitForTimeout(300);
