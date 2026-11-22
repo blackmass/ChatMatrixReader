@@ -352,11 +352,13 @@ fn run(app: AppHandle) {
             let web_labels: Vec<(isize, String)> = webs.iter().map(|w| (w.1, w.2.clone())).collect();
             // from the front: the center, the blurs of its windows (they blur what is under the windows: the pages too), the web windows
             let mut want: Vec<isize> = vec![ch];
+            let n_blur: usize;
             for bh in blurs.into_iter().map(|b| b.1).chain(webs.iter().map(|w| w.1)) {
                 win::keep_style(bh);
                 apply_mode(bh, mode, game, &mut last);
                 want.push(bh);
             }
+            n_blur = want.len() - 1 - web_labels.len();
             if want.len() > 1 {
                 let seen = win::z_order(&want);
                 let expected: Vec<isize> = want.iter().copied().filter(|h| seen.contains(h)).collect();
@@ -365,6 +367,28 @@ fn run(app: AppHandle) {
                     let prev = o.as_ref().and_then(|m| m.get(label).cloned());
                     (prev.as_ref().map_or(true, |p| p.0 != want), prev.and_then(|p| p.1).map_or(true, |t| t.elapsed() > std::time::Duration::from_millis(400)))
                 };
+                // A page that is over its center at all (a press that the system answered by bringing the page to the front, which it could not be kept from: the Mac) is put back at once, in this
+                // round, not after a moment: the edge that the center draws on it is hidden meanwhile. The order the system gave the pages is the user's (the pressed page is first): the center is told and
+                // the windows are numbered that way here too, so that the next round does not put them back in the old order.
+                let page_above = seen.iter().position(|h| *h == ch).map_or(false, |ci| seen[..ci].iter().any(|h| web_labels.iter().any(|w| w.0 == *h)));
+                let mut force = false;
+                if page_above {
+                    force = true;
+                    let obs_now: Vec<String> = seen.iter().filter_map(|h| web_labels.iter().find(|w| w.0 == *h).map(|w| w.1.clone())).collect();
+                    let wanted_now: Vec<String> = web_labels.iter().filter(|w| seen.contains(&w.0)).map(|w| w.1.clone()).collect();
+                    if obs_now.len() >= 2 && obs_now != wanted_now && !changed {
+                        if let Ok(mut m) = WEBS.lock() {
+                            let max_z = obs_now.iter().filter_map(|l| m.get(l).map(|v| v.2)).max().unwrap_or(0);
+                            for (i, l) in obs_now.iter().enumerate() { if let Some(v) = m.get_mut(l) { v.2 = max_z + 1 + (obs_now.len() - i) as i64; } }
+                        }
+                        let _ = app.emit_to(label, "web-order", json!({ "labels": obs_now }));
+                        let mut re: Vec<isize> = want[..=n_blur].to_vec();
+                        for l in &obs_now { if let Some(w) = web_labels.iter().find(|w| &w.1 == l) { re.push(w.0); } }
+                        for w in &web_labels { if !re.contains(&w.0) { re.push(w.0); } }
+                        want = re;
+                        if ORDER_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 120 { crate::startup_log(&format!("web order {label}: a page was over its center: put back at once, order {obs_now:?}")); }
+                    }
+                }
                 // (diagnosis: a page of a web window that is over its center hides what the center draws on its edge: when does that happen, and for how long?)
                 {
                     let ci = seen.iter().position(|h| *h == ch);
@@ -408,7 +432,7 @@ fn run(app: AppHandle) {
                         hold = e.1.is_some();
                     }
                 }
-                if seen != expected && (changed || due) && !hold {
+                if (seen != expected && (changed || due) && !hold) || force {
                     for pair in want.windows(2) { win::place_below(pair[1], pair[0]); }
                     if let Ok(mut m) = OBSERVED.lock() { if let Some(e) = m.get_mut(label) { e.2 = Some(Instant::now()); } }
                     if let Ok(mut m) = ORDER.lock() { m.insert(label.to_string(), (want.clone(), Some(std::time::Instant::now()))); }
