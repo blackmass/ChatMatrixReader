@@ -662,6 +662,31 @@ pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
     }
 }
 
+/// A web window must not be brought over its center by the system when it is pressed (the center's edge and strips would be hidden for a moment, and the order of the windows is the center's to
+/// decide): the request of the system to put it at the top is taken out of the change of position, and the center is told that the window was pressed (webwin::raise_request).
+#[repr(C)]
+struct WindowPos { hwnd: isize, insert_after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32 }
+#[link(name = "comctl32")]
+extern "system" {
+    fn SetWindowSubclass(hwnd: Handle, proc_: unsafe extern "system" fn(Handle, u32, usize, isize, usize, usize) -> isize, id: usize, data: usize) -> i32;
+    fn DefSubclassProc(hwnd: Handle, msg: u32, wparam: usize, lparam: isize) -> isize;
+}
+unsafe extern "system" fn z_guard(hwnd: Handle, msg: u32, wparam: usize, lparam: isize, _id: usize, data: usize) -> isize {
+    if msg == 0x0046 && lparam != 0 {                                      // WM_WINDOWPOSCHANGING
+        let p = &mut *(lparam as *mut WindowPos);
+        if p.flags & 0x0004 == 0 && p.insert_after == 0 {                  // not SWP_NOZORDER, and HWND_TOP: what a press does. (This program puts a window under another one, or topmost / not topmost.)
+            p.flags |= 0x0004;
+            if data != 0 { crate::webwin::raise_request(&*(data as *const String)); }
+        }
+    }
+    DefSubclassProc(hwnd, msg, wparam, lparam)
+}
+/// Call it from the thread that made the window.
+pub fn guard_z(hwnd: isize, label: &str) {
+    let data = Box::into_raw(Box::new(label.to_string())) as usize;
+    unsafe { SetWindowSubclass(hwnd, z_guard, hwnd as usize, data); }
+}
+
 /// The CLIENT area of the window (what the page fills) is put at exactly this rectangle, whatever frame the window has around it (a window of the system may have an invisible one): it is put
 /// there, measured, and moved by what was wrong. true = it fits now.
 pub fn set_client_rect(hwnd: isize, x: i32, y: i32, w: i32, h: i32) -> bool {

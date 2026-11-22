@@ -164,6 +164,9 @@ fn sync_webs(app: &AppHandle, center: &str, panes: &[Pane]) {
     }
 }
 
+/// The center a web window belongs to (its label), if it is known.
+pub fn web_center(label: &str) -> Option<String> { WEBS.lock().ok().and_then(|m| m.get(label).map(|v| v.0.clone())) }
+
 /// The title the window of the game has (the setting "와우 창 제목"; the program name is looked at first): told by the center page.
 static GAME_TITLE: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new("World of Warcraft".to_string()));
 #[tauri::command]

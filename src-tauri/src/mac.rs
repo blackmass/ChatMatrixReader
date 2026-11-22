@@ -460,6 +460,46 @@ extern "C" fn can_become_key(this: *mut AnyObject, cmd: Sel) -> Bool {
     Bool::YES
 }
 /// The window becomes one that does not become the key window (a click on its page does not give it the keyboard). Before set_noactivate_light.
+// A web window must not be ordered over its center when it is pressed (see win.rs guard_z): the press goes to `sendEvent:`; the program is told not to order the window (preventWindowOrdering) and
+// the center is told that the window was pressed (webwin::raise_request).
+static GUARD_Z: Mutex<Vec<(isize, String)>> = Mutex::new(Vec::new());
+static SEND_ORIGINALS: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());          // (class, the method it had)
+extern "C" fn guarded_send_event(this: *mut AnyObject, cmd: Sel, event: *mut AnyObject) {
+    let label = GUARD_Z.lock().ok().and_then(|l| l.iter().find(|e| e.0 == this as isize).map(|e| e.1.clone()));
+    if let Some(label) = label {
+        let buttons: usize = unsafe { msg_send![class!(NSEvent), pressedMouseButtons] };
+        if buttons != 0 {
+            unsafe { let _: () = msg_send![shared_app(), preventWindowOrdering]; }
+            crate::webwin::raise_request(&label);
+        }
+    }
+    let mut cls = unsafe { object_getClass(this) };
+    while !cls.is_null() {
+        let orig = SEND_ORIGINALS.lock().ok().and_then(|l| l.iter().find(|e| e.0 == cls as usize).map(|e| e.1));
+        if let Some(f) = orig {
+            let f: extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) = unsafe { std::mem::transmute(f) };
+            return f(this, cmd, event);
+        }
+        cls = unsafe { class_getSuperclass(cls) };
+    }
+}
+pub fn guard_z(hwnd: isize, label: &str) {
+    let label = label.to_string();
+    on_main(move || unsafe {
+        let mut cls = object_getClass(hwnd as *const AnyObject);
+        if CStr::from_ptr(class_getName(cls)).to_string_lossy().starts_with("NSKVONotifying_") { cls = class_getSuperclass(cls); }
+        let have = SEND_ORIGINALS.lock().map(|l| l.iter().any(|e| e.0 == cls as usize)).unwrap_or(true);
+        if !have {
+            let m = class_getInstanceMethod(cls, sel!(sendEvent:));
+            if !m.is_null() {
+                let orig = method_getImplementation(m) as usize;
+                if let Ok(mut l) = SEND_ORIGINALS.lock() { l.push((cls as usize, orig)); }
+                class_replaceMethod(cls, sel!(sendEvent:), guarded_send_event as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) as *const c_void, method_getTypeEncoding(m));
+            }
+        }
+        if let Ok(mut l) = GUARD_Z.lock() { l.retain(|e| e.0 != hwnd); l.push((hwnd, label)); }
+    });
+}
 pub fn set_not_rude(_hwnd: isize) {}
 pub fn make_no_key(hwnd: isize) {
     on_main(|| unsafe {
@@ -526,6 +566,7 @@ pub fn forget(hwnd: isize) {
     if let Ok(mut l) = PANELS.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = KEY_ALLOWED.lock() { l.retain(|&h| h != hwnd); }
     if let Ok(mut l) = NO_KEY.lock() { l.retain(|&h| h != hwnd); }
+    if let Ok(mut l) = GUARD_Z.lock() { l.retain(|e| e.0 != hwnd); }
     if let Ok(mut l) = TAGGED.lock() { l.retain(|e| e.0 != hwnd); }
 }
 

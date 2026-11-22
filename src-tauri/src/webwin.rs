@@ -44,6 +44,23 @@ fn dispatch(app: &AppHandle, label: &str, raw: &str) {
     command(app, label, cmd, query);
 }
 
+/// A window of the system for the events that come from its window procedure (the press of a page, see win.rs guard_z).
+static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+static LAST_RAISE: LazyLock<Mutex<HashMap<String, std::time::Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// The page of the web window `label` was pressed: the system wanted to bring it to the front, which is not allowed; the center it belongs to brings it to the front of the web windows (and puts
+/// its page there). Many calls in a moment (a drag) are one.
+pub fn raise_request(label: &str) {
+    let Some(app) = APP.get() else { return };
+    {
+        let Ok(mut m) = LAST_RAISE.lock() else { return };
+        let now = std::time::Instant::now();
+        if m.get(label).map_or(false, |t| now.duration_since(*t) < std::time::Duration::from_millis(80)) { return; }
+        m.insert(label.to_string(), now);
+    }
+    let payload = json!({ "label": label });
+    match crate::center::web_center(label) { Some(c) => { let _ = app.emit_to(c, "web-raise", payload); } None => { let _ = app.emit("web-raise", payload); } }
+}
+
 /// How solid the page of each window is now, and the number of the fade that is going on (a new fade takes over from where the window is: the old one stops).
 static ALPHA: LazyLock<Mutex<std::collections::HashMap<String, (u64, f64)>>> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
@@ -315,6 +332,7 @@ fn cdp(win: &WebviewWindow, method: &'static str, params: String) {
 pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if !label_ok(&label) { return Err("bad label".into()); }
+    let _ = APP.set(app.clone());
     let url = tauri::Url::parse(args.get("url").and_then(|v| v.as_str()).unwrap_or("")).map_err(|e| e.to_string())?;
     let allow = strs(&args, "allow");
     // (only a window of the mini browser, made by the user, may go anywhere: web_b<number>; a plugin's window never)
@@ -388,6 +406,11 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     let win = b.build().map_err(|e| e.to_string())?;
     #[cfg(windows)]
     listen_messages(&win, app.clone(), label.clone());
+    {
+        // a press of the page does not bring the window over its center (the center brings it to the front of the web windows: raise_request)
+        let (lbl, w2) = (label.clone(), win.clone());
+        let _ = win.run_on_main_thread(move || { if let Ok(h) = hwnd_of(&w2) { win::guard_z(h, &lbl); } });
+    }
     {
         let zoom = args.get("zoom").and_then(|v| v.as_f64()).filter(|z| z.is_finite()).map(|z| ((z * 10.0).round() / 10.0).clamp(0.3, 3.0)).unwrap_or(1.0);
         if let Ok(mut m) = ZOOM.lock() { m.insert(label.clone(), zoom); }

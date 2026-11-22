@@ -1043,6 +1043,11 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(async () => (await zOf('web_b1')) > (await zOf('web_b2')) && sentZ('web_b1') > sentZ('web_b2'), 'the order of the system is taken: web_b1 in front');
     await cm.evaluate(() => window.__TAURI__.event.emit('web-order', { labels: ['web_b2', 'web_b1'] }));
     await until(async () => (await zOf('web_b2')) > (await zOf('web_b1')) && sentZ('web_b2') > sentZ('web_b1'), 'and the other way round');
+    // a page that is pressed: the system is not let to bring it over the center; the program says it was pressed and the center brings it to the front of the web windows
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-raise', { label: 'web_b1' }));
+    await until(() => sentZ('web_b1') > sentZ('web_b2'), 'a page that was pressed comes to the front');
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-raise', { label: 'web_b2' }));
+    await until(() => sentZ('web_b2') > sentZ('web_b1'), 'and the other one');
     await cmd('close', 2);
     await until(async () => (await cp.locator('.webpane').count()) === 1, 'the second window is closed');
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.filter(b => b.id !== 2) })));
