@@ -410,6 +410,22 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
         win::set_topmost(hw, true, 0);
     }
     let _ = win.show();
+    // macOS (diagnosis): what the system says of the window is written down whenever anything but its transparency changes (the "opaque" flag, the background, the number): when does a window turn black?
+    if cfg!(target_os = "macos") && is_free(&label) {
+        if let Ok(hw) = hwnd_of(&win) {
+            let (app5, lbl5) = (app.clone(), label.clone());
+            std::thread::spawn(move || {
+                let mut last = String::new();
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    if app5.get_webview_window(&lbl5).is_none() { return; }
+                    let info = win::alpha_info(hw);
+                    let key: String = info.splitn(2, ' ').nth(1).unwrap_or("").to_string();       // (without the alpha: that changes by design)
+                    if key != last { crate::startup_log(&format!("web window {lbl5}: state {info}")); last = key; }
+                }
+            });
+        }
+    }
     // macOS: the first time a window is made less than solid the system changes how it draws it, and a fade that is cut short (the mouse comes while it goes) leaves the page black behind. So the first
     // one is done at once, before the user can do anything (0.2 s: down a little and back); a fade the user starts meanwhile takes over.
     if cfg!(target_os = "macos") && is_free(&label) {
@@ -489,6 +505,7 @@ pub async fn web_ua(app: AppHandle, label: String, ua: String, hints: Option<Val
 
 /// A fade of the window `label` to `target` within `ms` milliseconds, from where it is now (a new one takes over: the old one stops). Returns the number of this fade.
 fn fade(app: &AppHandle, label: &str, hwnd: isize, target: f64, ms: u64) -> u64 {
+    if cfg!(target_os = "macos") { crate::startup_log(&format!("web alpha {label}: to {target:.2} in {ms} ms, now: {}", win::alpha_info(hwnd))); }
     let (gen, from) = {
         let Ok(mut m) = ALPHA.lock() else { return 0 };
         let e = m.entry(label.to_string()).or_insert((0, 1.0));

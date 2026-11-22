@@ -480,7 +480,7 @@ pub fn make_no_key(hwnd: isize) {
 }
 // ---- LAB: the window of the web flickers when the game is clicked: what is its state, and which of these helps (bit 1: no show/hide animation, 2: ordered to the front at every
 // poll, 4: may not be hidden by the system)
-/// What the system says of a window that is being faded (for the log).
+/// What the system says of a window that is being faded (for the log): its transparency and "opaque" flag, the colour of its background, its number, whether the content view is opaque.
 pub fn alpha_info(hwnd: isize) -> String {
     on_main(|| unsafe {
         let w = obj(hwnd);
@@ -488,7 +488,12 @@ pub fn alpha_info(hwnd: isize) -> String {
         let opaque: Bool = msg_send![w, isOpaque];
         let visible: Bool = msg_send![w, isVisible];
         let level: isize = msg_send![w, level];
-        format!("alpha={:.2} opaque={} visible={} level={}", alpha, opaque.as_bool() as u8, visible.as_bool() as u8, level)
+        let number: isize = msg_send![w, windowNumber];
+        let bg: *mut AnyObject = msg_send![w, backgroundColor];
+        let bg_text: String = if bg.is_null() { "nil".to_string() } else { let desc: *mut AnyObject = msg_send![&*bg, description]; string_of(desc).chars().take(80).collect() };
+        let content: *mut AnyObject = msg_send![w, contentView];
+        let content_opaque = if content.is_null() { 2 } else { let o: Bool = msg_send![&*content, isOpaque]; o.as_bool() as u8 };
+        format!("alpha={:.2} opaque={} bg=[{}] number={} contentOpaque={} visible={} level={}", alpha, opaque.as_bool() as u8, bg_text, number, content_opaque, visible.as_bool() as u8, level)
     })
 }
 pub fn lab_diag(hwnd: isize) -> String {
