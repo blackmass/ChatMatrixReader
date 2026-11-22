@@ -181,7 +181,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       if (!r || !r.ok) return false;
       return c.kind === 'page' ? !(r.manifest.windows || []).some(w => w.id === c.owner_win) : c.kind === 'web' ? !r.manifest.permissions.web : false;
     };
-    if (list.some(stale)) settings.set({ child_windows: list.filter(c => !stale(c)) });
+    if (list.some(stale)) settings.set({ child_windows: winconf.without(list, list.filter(stale).map(c => c.id)) });
   }
 
   async function startOne(id) {
@@ -321,7 +321,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
         if (registry.has(id)) return reply({ error: 'the plugin is there' });
         const rest = { ...entries() }; delete rest[id];
         bridges.delete(id);
-        settings.set({ plugins: rest, child_windows: (settings.cfg().child_windows || []).filter(c => c.owner !== id) });
+        settings.set({ plugins: rest, child_windows: winconf.without(settings.cfg().child_windows || [], (settings.cfg().child_windows || []).filter(c => c.owner === id).map(c => c.id)) });
         await files.remove(storePath(id)).catch(() => {});
         publishState();
         return reply({});

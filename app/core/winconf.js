@@ -111,6 +111,9 @@ export function normalize(items) {
   }
   if (!seen.has(VOICE_ID)) out.push(newConf(VOICE_ID, ['!VC']));
   out.sort((a, b) => a.id - b.id);
+  // a window that is a tab of a window that is not there (it was deleted): a window made later with that number must not get it as a tab
+  const ids = new Set(out.map(d => d.id));
+  for (const d of out) if (d.dock_to > 1 && !ids.has(d.dock_to)) d.dock_to = 0;
   return out;
 }
 
@@ -121,6 +124,9 @@ export const dockHost = (items, id) => { items = items || []; const h = rawDock(
 // the ids of the windows that are tabs of window `host`, in the order of the list
 export const dockedOf = (items, host) => (items || []).filter(c => dockHost(items, c.id) === host).map(c => c.id);
 
+// the list without the windows `ids`: a window is only known by its number, and a new window may get the number of one that is gone, so nothing may keep pointing at it
+// (the tabs of it become windows of their own). The settings of the windows that go are in their own entries: they go with them.
+export const without = (items, ids) => (items || []).filter(c => !ids.includes(c.id)).map(c => (ids.includes(Number(c.dock_to)) ? { ...c, dock_to: 0 } : c));
 export const nextId = items => Math.max(VOICE_ID, ...items.map(d => d.id)) + 1;
 
 // is this setting of an extra window empty (it follows window 1)? Only for the settings in FOLLOW

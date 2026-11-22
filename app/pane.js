@@ -10,6 +10,8 @@ import { WidgetLayer } from './widgets/render.js';
 import { tr } from './core/i18n.js';
 import { isMac } from './platform.js';
 import { T } from './core/timings.js';
+import { PageView } from './pageview.js';
+import * as settings from './settings.js';
 
 
 export const BAR_H = 22;
@@ -236,7 +238,9 @@ class Chat {
     this.seen = 0; this.firstLive = Infinity; this.replay = true;
     this.lines = document.createElement('div'); this.lines.className = 'plines lines'; this.lines.setAttribute('data-notr', '');
     pane.el.querySelector('.pbody').append(this.lines);
-    this.view = new ChatView(this.lines); this.view.sink = pane.center.viewSink;
+    const pc = id === MAIN ? null : pane.center.cfg().child_windows.find(c => c.id === id && c.kind === 'page') || null;          // a window of a plugin: its page instead of the chat
+    this.view = pc ? new PageView(this.lines) : new ChatView(this.lines); this.view.sink = pane.center.viewSink;
+    this.undo = [];                                                   // (what stops when the chat goes: the listeners of a page)
     this.feed = new WindowFeed(id, () => pane.center.cfg(), () => pane.confOf(id));
     // The review state follows the scroll position itself, whatever moved it (wheel, scrollbar, keys): going up = review, back at the newest line = done. Only what the user did counts as
     // "going up": the browser also moves the position by itself when the lines get shorter or the window smaller.
@@ -246,6 +250,7 @@ class Chat {
       if (this.id === pane.active) { if (t < lastTop - 1) { if (performance.now() - pane.lastInput < 600) pane.userScrolled(-1); } else if (t > lastTop + 1) pane.userScrolled(1); }
       lastTop = t;
     });
+    if (pc) this.startPage(pc);
     this.update();
   }
   opt(k, d) { return this.pane.copt(this.id, k, d); }
@@ -264,5 +269,37 @@ class Chat {
     this.view.apply(this.feed.clear(), this.feed.model); this.seen = 0;
     for (const x of events) if (!fresh || x.seq >= from) this.take(x.seq, x.event, true);
   }
-  destroy() { this.view.stop(); this.lines.remove(); }
+  // The page of a plugin window: a sandboxed frame at the address of the plugin (the hub gives the secret part only while the plugin runs and may have the window); the calls of the page go
+  // to the hub by events and its answers come back the same way (the bridge of the plugin checks everything), like the options page of a plugin.
+  startPage(pc) {
+    const frame = document.createElement('iframe'), from = 'win:' + this.id, BASE = isMac ? 'cmrplug://localhost/' : 'http://cmrplug.localhost/';
+    frame.className = 'pl-page'; frame.setAttribute('sandbox', 'allow-scripts');
+    this.lines.classList.add('page'); this.lines.append(frame);
+    const post = msg => { try { frame.contentWindow.postMessage(msg, '*'); } catch { /* gone */ } };
+    const ask = (method, args, seq) => emit('plugin-ui', { id: pc.owner, name: pc.owner_win, from, seq, method, args });
+    const onMessage = e => {
+      if (e.source !== frame.contentWindow) return;
+      const m = e.data;
+      if (!m || m.cmr !== 1) return;
+      if (m.event === 'hello') { ask('options.get', {}, -1); return; }                      // (the options the plugin asks for come as an event: seq -1)
+      if (typeof m.id === 'number' && m.id >= 0 && typeof m.method === 'string') ask(m.method, m.args, m.id);
+    };
+    addEventListener('message', onMessage);
+    this.undo.push(() => removeEventListener('message', onMessage));
+    const later = p => p.then(un => this.undo.push(un));
+    later(listen('plugin-ui-reply', e => {
+      const r = e.payload;
+      if (r.from !== from) return;
+      if (r.seq === -1) { if (r.ok) post({ cmr: 1, event: 'options', value: r.value }); return; }
+      post(r.ok ? { cmr: 1, id: r.seq, ok: true, value: r.value } : { cmr: 1, id: r.seq, ok: false, error: r.error });
+    }));
+    later(listen('plugin-page-reply', e => {
+      if (e.payload.from !== from) return;
+      if (!e.payload.token) { this.lines.append(Object.assign(document.createElement('div'), { className: 'pl-page-off', textContent: tr('플러그인이 꺼져 있습니다') })); frame.hidden = true; return; }
+      frame.src = BASE + e.payload.token + '/' + pc.page;
+    }));
+    emit('plugin-page', { from, owner: pc.owner, name: pc.owner_win });
+    this.undo.push(settings.onChange(() => ask('options.get', {}, -1)));                    // (the options of the plugin changed: the page is told)
+  }
+  destroy() { this.view.stop(); for (const u of this.undo) { try { u(); } catch { /* already gone */ } } this.lines.remove(); }
 }

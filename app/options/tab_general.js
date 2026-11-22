@@ -13,6 +13,11 @@ export default {
         options: [['', '시스템 언어를 따름'], ...LANGS.map(l => [l.code, l.name])],
         note: '프로그램의 글자(옵션, 안내 문구)가 바뀝니다. 번역하는 언어(목표 언어)와는 별개입니다. 다른 언어를 더하려면 프로그램 폴더의 locale 폴더에 언어 파일을 넣으세요 (locale/en-US.txt를 복사해서 번역).' },
     ] },
+    { title: '화면', rows: [
+      { key: 'center_scale', type: 'select', label: '화면 배율', keywords: '배율 dpi 크기 scale 확대 해상도',
+        options: [[0, '자동 (주 모니터의 배율)'], [100, '100%'], [125, '125%'], [150, '150%'], [175, '175%'], [200, '200%']],
+        note: '번역창 안의 글자와 버튼 크기입니다. 자동은 주 모니터의 배율을 따릅니다. 여러 모니터의 배율이 다르면 모든 모니터에서 같은 배율이 쓰입니다. 창의 위치와 크기(글 영역)는 화면 픽셀로 저장되어 배율을 바꿔도 같은 자리에 있습니다.' },
+    ] },
     { title: '게임', rows: [
       { key: 'wow_window_title', type: 'text', label: '와우 창 제목', placeholder: 'World of Warcraft', wide: true, keywords: 'wow 게임 창 이름',
         note: '게임 창은 먼저 프로그램 이름(Wow*.exe)으로 찾고, 못 찾으면 이 제목과 같은 창을 찾습니다.' },

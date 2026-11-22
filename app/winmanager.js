@@ -54,7 +54,7 @@ export function startWindows({ settings }) {
     remove(id) {                                    // (window 2 is the voice window: it stays)
       if (id < 2 || id === winconf.VOICE_ID || (conf(id) && conf(id).owner)) return;                  // (the window of a plugin is not deleted by hand: it goes with the plugin)
       manual.delete(id); closedBy.delete(id);
-      setChildren(children().filter(c => c.id !== id));
+      setChildren(winconf.without(children(), [id]));
     },
     // What the user does to a window is only for now and does not touch the settings: the X closes it (an "always" window opens again when the program
     // is started again, a "voice" window the next time the voice recognition is turned on), and opening one by hand opens it.

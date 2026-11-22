@@ -7,7 +7,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{base_dir, hwnd_of, make_window, win};
 
@@ -21,18 +21,49 @@ const MODES: [(&str, u32); 3] = [("center0", 0), ("center1", 1), ("center2", 2)]
 
 pub fn wanted() -> bool { base_dir().join("center_mode").exists() }
 
+/// The screens now: (each one as [x, y, w, h] in pixels, the main screen first) and the rectangle of all together [l, t, r, b]. None: not known.
+fn screens(app: &AppHandle) -> Option<(Vec<[i32; 4]>, [i32; 4])> {
+    let (mut l, mut t, mut r, mut b) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    let primary = app.primary_monitor().ok().flatten().map(|m| (m.position().x, m.position().y));
+    let mut list: Vec<[i32; 4]> = Vec::new();
+    for m in app.available_monitors().unwrap_or_default() {
+        let (p, s) = (m.position(), m.size());
+        l = l.min(p.x); t = t.min(p.y); r = r.max(p.x + s.width as i32); b = b.max(p.y + s.height as i32);
+        let one = [p.x, p.y, s.width as i32, s.height as i32];
+        if primary == Some((p.x, p.y)) { list.insert(0, one); } else { list.push(one); }
+    }
+    if l == i32::MAX { None } else { Some((list, [l, t, r, b])) }
+}
+/// What the centers cover now (the screens and their rectangle); the loop of `run` looks again every 2 s.
+static SCREENS: Mutex<Option<(Vec<[i32; 4]>, [i32; 4])>> = Mutex::new(None);
+
+fn layout_payload(s: &(Vec<[i32; 4]>, [i32; 4])) -> Value { json!({ "origin": [s.1[0], s.1[1]], "monitors": s.0 }) }
+
+/// The screens (for a page that starts after the change was told): { origin: [x, y], monitors: [[x, y, w, h], ..] } (the main screen first).
+#[tauri::command]
+pub async fn center_layout() -> Result<Value, String> {
+    Ok(SCREENS.lock().ok().and_then(|s| s.as_ref().map(layout_payload)).unwrap_or(Value::Null))
+}
+
+/// The size of everything in a center: `scale` 0 = as big as on the main screen (what the system says), else the factor wanted (1.25 = 125%). The page is zoomed so that one pixel of the page
+/// is `scale` pixels of the screen. -> the scale in force.
+#[tauri::command]
+pub async fn center_zoom(app: AppHandle, label: String, scale: f64) -> Result<f64, String> {
+    let w = app.get_webview_window(&label).ok_or("no such window")?;
+    let own = w.scale_factor().unwrap_or(1.0).max(0.1);                        // (what the system thinks of the screen this window stands on)
+    let want = if scale >= 0.5 { scale } else { app.primary_monitor().ok().flatten().map(|m| m.scale_factor()).unwrap_or(own) };
+    w.set_zoom(want / own).map_err(|e| e.to_string())?;
+    Ok(want)
+}
+
 /// Makes the three centers (a few seconds after the start) and runs the loop that serves them.
 pub fn start(app: AppHandle) {
     if !wanted() { return; }
     tauri::async_runtime::spawn(async move {
         let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(3000))).await;
         // the rectangle of all the screens together (physical pixels)
-        let (mut l, mut t, mut r, mut b) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
-        for m in app.available_monitors().unwrap_or_default() {
-            let (p, s) = (m.position(), m.size());
-            l = l.min(p.x); t = t.min(p.y); r = r.max(p.x + s.width as i32); b = b.max(p.y + s.height as i32);
-        }
-        if l == i32::MAX { return; }
+        let Some((monitors, [l, t, r, b])) = screens(&app) else { return };
+        if let Ok(mut s) = SCREENS.lock() { *s = Some((monitors, [l, t, r, b])); }
         for (label, mode) in MODES {
             let page = format!("center.html?mode={mode}&ox={l}&oy={t}");
             if let Ok(w) = make_window(&app, label, &page, "center") {
@@ -167,6 +198,7 @@ fn run(app: AppHandle) {
     let mut z_at = Instant::now() - Duration::from_secs(1);
     let mut game = 0isize;
     let mut game_at = Instant::now() - Duration::from_secs(5);
+    let mut screens_at = Instant::now();
     loop {
         std::thread::sleep(Duration::from_millis(16));
         let (cx, cy) = win::cursor_pos();                                      // (pixels: macOS multiplies its points by the scale of the main screen itself)
@@ -204,6 +236,25 @@ fn run(app: AppHandle) {
         if game_at.elapsed() > Duration::from_secs(2) {
             game = win::find_game(game, "World of Warcraft").map(|g| g.hwnd).unwrap_or(0);
             game_at = Instant::now();
+        }
+        // the screens changed (a screen plugged in or out, another resolution): the centers cover the new area and the pages are told (they bring back what is out of sight)
+        if screens_at.elapsed() > Duration::from_secs(2) {
+            screens_at = Instant::now();
+            if let Some(now) = screens(&app) {
+                let changed = SCREENS.lock().map(|s| s.as_ref().map_or(true, |o| o.0 != now.0 || o.1 != now.1)).unwrap_or(false);
+                if changed {
+                    let [l, t, r, b] = now.1;
+                    for (label, _) in MODES {
+                        if let Some(w) = app.get_webview_window(label) {
+                            let _ = w.set_position(tauri::PhysicalPosition::new(l, t));
+                            let _ = w.set_size(tauri::PhysicalSize::new((r - l) as u32, (b - t) as u32));
+                        }
+                    }
+                    let payload = layout_payload(&now);
+                    if let Ok(mut s) = SCREENS.lock() { *s = Some(now); }
+                    for (label, _) in MODES { let _ = app.emit_to(label, "center-layout", payload.clone()); }
+                }
+            }
         }
         for (label, mode) in MODES {
             let Some(c) = app.get_webview_window(label) else { continue };

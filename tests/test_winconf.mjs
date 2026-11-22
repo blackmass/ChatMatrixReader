@@ -57,3 +57,13 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   const l = w.normalize([{ id: 2, name: 'x', owner: 'p-1', owner_win: 'web', kind: 'web', page: 'a.html', geometry: '360x640' }, { id: 3, name: 'y', kind: 'web' }]);
   eq(l.find(c => c.id === 2).kind === 'web' && l.find(c => c.id === 2).page === '' && l.find(c => c.id === 3).kind === '' && l.find(c => c.id === 3).owner === '', true, 'winconf: a web window keeps its plugin and has no page; without a plugin it is nothing');
 }
+
+// a window that is gone: nothing keeps pointing at its number (a new window may get it)
+{
+  const l = w.normalize([{ id: 3, dock_to: 4 }, { id: 4 }, { id: 5, dock_to: 9 }]);
+  eq(l.find(c => c.id === 5).dock_to, 0, 'dock_to: a missing window (9) is dropped when the list is read');
+  const rest = w.without(l, [4]);
+  eq(rest.map(c => [c.id, c.dock_to]).filter(([i]) => i !== 2), [[3, 0], [5, 0]], 'without: the windows that were tabs of a deleted one are windows of their own again');
+  const again = w.normalize([...rest, { ...w.newConf(w.nextId(rest), []) }]);
+  eq(again.every(c => c.dock_to === 0), true, 'a window that takes the number of a deleted one starts clean: nothing is its host');
+}

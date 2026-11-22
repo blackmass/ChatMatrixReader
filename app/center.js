@@ -13,7 +13,8 @@ import { isMac } from './platform.js';
 import { defaultRegistry } from './widgets/defaults.js';
 import { syncPluginDefs } from './widgets/registry.js';
 
-const q = new URLSearchParams(location.search), mode = Number(q.get('mode')) || 0, ox = Number(q.get('ox')) || 0, oy = Number(q.get('oy')) || 0;
+const q = new URLSearchParams(location.search), mode = Number(q.get('mode')) || 0;
+let ox = Number(q.get('ox')) || 0, oy = Number(q.get('oy')) || 0;                    // (where the page starts on the screen: it changes when the screens do)
 const label = 'center' + mode;
 const dpr = () => window.devicePixelRatio || 1;
 let cfg = await settings.load({ readOnly: true });
@@ -155,7 +156,7 @@ addEventListener('wheel', e => {
   c.lines.scrollTop += e.deltaMode === 1 ? d * 40 : d;
 }, { passive: false });
 
-settings.onChange(c => { cfg = c; for (const p of panes.values()) p.update(); sync(); });
+settings.onChange(c => { const was = cfg.center_scale; cfg = c; if (c.center_scale !== was) applyScale(); for (const p of panes.values()) p.update(); sync(); });
 await listen('win-state', e => { open = new Set([MAIN, ...(e.payload.open || [])]); sync(); });
 await listen('feed', e => { for (const p of panes.values()) p.take(e.payload.seq, e.payload.event, false); });
 await listen('feed-replay', e => { for (const p of panes.values()) p.takeReplay(e.payload.label, e.payload.events); });
@@ -168,7 +169,44 @@ await listen('voice-lamp', e => {
   lampState = { st, title };
   for (const p of panes.values()) p.lamp(st, title);
 });
+// the size of everything: "화면 배율" (0 = as the main screen has it); the notice says it once when it is not 100%
+let scaleTold = false;
+async function applyScale() {
+  try { await invoke('center_zoom', { label, scale: (Number(cfg.center_scale) || 0) / 100 }); } catch { return; }
+  for (const p of panes.values()) p.place();
+  report();
+  if (!scaleTold && Math.abs(dpr() - 1) > 0.01) {
+    const main = panes.get(MAIN);
+    if (main) { scaleTold = true; main.note('ℹ ' + tr('화면 배율 {n}%로 표시합니다. 옵션의 일반 탭에서 바꿀 수 있습니다.', { n: Math.round(dpr() * 100) })); }
+  }
+}
+// the screens changed (or this is the start): where the page starts is told again; a window that is out of every screen comes back to the main one, once told
+let screens = [];
+function fit() {
+  const d = dpr(), moved = [];
+  for (const p of panes.values()) {
+    const b = p.screenBox(), seen = screens.some(m => Math.min(b.x + b.w, m[0] + m[2]) - Math.max(b.x, m[0]) >= 60 && Math.min(b.y + b.h, m[1] + m[3]) - Math.max(b.y, m[1]) >= 22);
+    if (seen || !screens.length) continue;
+    const m = screens[0], k = moved.length;
+    p.rect.x = (m[0] + 60 + k * 30 - ox) / d; p.rect.y = Math.max(22, (m[1] + 80 + k * 30 - oy) / d);
+    p.layout(); p.save(); moved.push(p);
+  }
+  if (moved.length) { report(); moved[0].note('⚠ ' + tr('모니터 환경이 바뀌어 일부 창의 위치가 변경되었습니다.')); }
+}
+function layout(l) {
+  if (!l) return;
+  const [nx, ny] = l.origin, d = dpr();
+  if (nx !== ox || ny !== oy) {
+    for (const p of panes.values()) { p.rect.x += (ox - nx) / d; p.rect.y += (oy - ny) / d; p.layout(); }              // (a window stays where it is on the screen)
+    ox = nx; oy = ny;
+  }
+  screens = l.monitors || [];
+  applyScale().then(fit);
+}
+await listen('center-layout', e => layout(e.payload));
 emit('voice-lamp-hello', {});
 emit('win-state-hello', {});
 sync();
+await applyScale();
+layout(await invoke('center_layout').catch(() => null));
 setInterval(report, 1000);

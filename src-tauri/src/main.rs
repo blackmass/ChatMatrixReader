@@ -1148,6 +1148,8 @@ fn main() {
             process_stats,
             center::center_rects,
             center::center_wheel,
+            center::center_layout,
+            center::center_zoom,
             center::center_raise,
             webwin::web_open,
             webwin::web_close,

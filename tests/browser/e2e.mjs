@@ -71,6 +71,8 @@ async function invoke(cmd, a = {}) {
     case 'plugin_forget': return null;
     case 'plugin_open_url': pluginOpened.push(a); return null;
     case 'center_rects': centerRects.push(a); return null;
+    case 'center_zoom': return a.scale || 1;
+    case 'center_layout': return { origin: [0, 0], monitors: [[0, 0, 1920, 1080]] };
     case 'process_stats': return { os: 'windows', self: 10, note: '', procs: [{ pid: 10, parent: 1, name: 'ChatMatrix Reader.exe', kind: 'main', sub: '', ws: 104857600, private: 83886080, cpu_ms: 1000, handles: 300, gdi: 40, user: 60 }, { pid: 11, parent: 10, name: 'msedgewebview2.exe', kind: 'renderer', sub: '', ws: 52428800, private: 31457280, cpu_ms: 500, handles: 150, gdi: 10, user: 10 }] };
     case 'web_open': webCalls.push(['open', a.args]); return null;
     case 'web_close': webCalls.push(['close', a.label]); return null;
@@ -831,6 +833,12 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   ok(await cp.locator('.pane .ptab').nth(1).evaluate(e => e.classList.contains('on')) && await cp.locator('.pane .plines.off').count() === 1, 'center/tabs: a touched tab becomes the active one, the other chat is hidden');
   await dockSet(0); await control.waitForTimeout(1800);
   ok(await cp.locator('.pane .ptab').count() === await cp.locator('.pane').count(), 'center/tabs: undocked again: a pane of its own');
+  // the screens changed so that a window is out of sight: it comes back to the main screen, and the user is told once
+  await control.evaluate(() => window.__TAURI__.event.emit('center-layout', { origin: [0, 0], monitors: [[3000, 0, 800, 600]] })); await control.waitForTimeout(800);
+  const mb2 = await cp.locator('.pane').first().boundingBox();
+  const dp = await cp.evaluate(() => window.devicePixelRatio);
+  ok(mb2.x >= 3000 / dp - 5 && (await cp.locator('.pane .cv-list').first().textContent()).includes('모니터 환경이 바뀌어'), 'center/screens: a window that is out of every screen comes to the main one, with a notice: ' + mb2.x);
+  await control.evaluate(() => window.__TAURI__.event.emit('center-layout', { origin: [0, 0], monitors: [[0, 0, 1920, 1080]] })); await control.waitForTimeout(500);
   await control.evaluate(([g, g3]) => import('./settings.js').then(m => m.set({ geometry: g, child_windows: m.cfg().child_windows.map(c => (c.id === 3 ? { ...c, geometry: g3 || '' } : c)) })), geoBefore); await control.waitForTimeout(400);
   await cp.close();
 }

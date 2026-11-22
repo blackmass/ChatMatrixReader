@@ -142,6 +142,7 @@ export const DEFAULTS = {
     plugins: {},                           // plugin id -> { enabled: bool, granted: { net: [host], 'chat.inject': bool, storage: bool }, options: { key: value } } (app/plugin_host.js)
     widgets: {},                           // the widgets of the main window: { 'owner:name': { place, anchor, dx, dy, style, show, scale, opacity, opts } } (docs/WIDGETS.md)
     wheel_through: false,                  // click-through windows: the wheel over them may scroll (reading the earlier chat); off = nothing but the tooltip gets through
+    center_scale: 0,                       // 3.2: the size of the translation windows' contents: 0 = as the main screen has it, else a percent (100 ... 200)
     through_tips: true,                    // click-through windows: the tip of a link (item, quest ...) under the mouse is shown (the page cannot see the mouse: the window loop does)
     auto_copy: false,                      // the text selected in a window is copied when the mouse leaves the window
     tuning: {},                            // options tab 고급: { NAME: value } of the timers in core/timings.js (missing = the default)
@@ -179,6 +180,7 @@ export function normalize(saved) {
   if (!isObj(cfg.plugins)) cfg.plugins = {};
   cfg.widgets = normalizeWidgets(cfg.widgets);
   if (!isObj(cfg.tuning)) cfg.tuning = {};
+  cfg.center_scale = Number(cfg.center_scale) >= 50 && Number(cfg.center_scale) <= 300 ? Math.round(Number(cfg.center_scale)) : 0;
   cfg.wheel_through = cfg.wheel_through === true;
   cfg.through_tips = cfg.through_tips !== false;
   cfg.auto_copy = cfg.auto_copy === true;
