@@ -13,11 +13,13 @@ PRE=$(sed -n "s/^export const PRERELEASE = '\([^']*\)'.*/\1/p" app/core/version.
 [ -n "$VERSION" ] || { echo "The version was not found in app/core/version.js"; exit 1; }
 [ -z "$PRE" ] || { echo "app/core/version.js says PRERELEASE = '$PRE': a release needs ''. (git pull the released commit)"; exit 1; }
 NAME="ChatMatrixReader-v$VERSION-macos-arm64"
-OUT="release-mac"
-rm -rf "$OUT"; mkdir -p "$OUT/ChatMatrixReader"
+OUT="release-mac/v$VERSION"                                  # (like release-out\v<version> of Windows: the zip and its SHA256SUMS-macos.txt are made here)
+STAGE="release-mac/stage"                                    # (what goes into the zip, put together here first)
+rm -rf "$STAGE"; mkdir -p "$STAGE/ChatMatrixReader" "$OUT"
+rm -f "$OUT/$NAME.zip" "$OUT/SHA256SUMS-macos.txt"
 
-python3 tools/make_notices.py --target aarch64-apple-darwin --out "$OUT/ChatMatrixReader/THIRD-PARTY-NOTICES.txt" || exit 1
-ditto "$APP" "$OUT/ChatMatrixReader/$APP"                  # (ditto keeps the signature of the app)
+python3 tools/make_notices.py --target aarch64-apple-darwin --out "$STAGE/ChatMatrixReader/THIRD-PARTY-NOTICES.txt" || exit 1
+ditto "$APP" "$STAGE/ChatMatrixReader/$APP"                  # (ditto keeps the signature of the app)
 # the files of the list (name/ = a whole folder, name = one file; # = comment). The file may have Windows line ends and no line end at its last line.
 LIST="release/files-windows.txt"
 [ -f "$LIST" ] || { echo "$LIST was not found."; exit 1; }
@@ -27,11 +29,11 @@ while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in ChatMatrixReader.exe|THIRD-PARTY-NOTICES.txt) continue ;; esac     # (Windows only / made above for the Mac)
   name="${line%/}"
   if [ ! -e "$name" ]; then echo "$line: the file is not there (it is in $LIST)."; exit 1; fi
-  mkdir -p "$OUT/ChatMatrixReader/$(dirname "$name")"
-  if [ "$name" != "$line" ]; then cp -R "$name" "$OUT/ChatMatrixReader/$(dirname "$name")/"; else cp "$name" "$OUT/ChatMatrixReader/$name"; fi
+  mkdir -p "$STAGE/ChatMatrixReader/$(dirname "$name")"
+  if [ "$name" != "$line" ]; then cp -R "$name" "$STAGE/ChatMatrixReader/$(dirname "$name")/"; else cp "$name" "$STAGE/ChatMatrixReader/$name"; fi
 done < "$LIST"
-find "$OUT/ChatMatrixReader" -name .DS_Store -type f -delete
-find "$OUT/ChatMatrixReader" -name __pycache__ -type d -prune -exec rm -rf {} +
+find "$STAGE/ChatMatrixReader" -name .DS_Store -type f -delete
+find "$STAGE/ChatMatrixReader" -name __pycache__ -type d -prune -exec rm -rf {} +
 
 COMMIT=$(git rev-parse HEAD 2>/dev/null || echo unknown)
 DIRTY=""; [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] && DIRTY=" + changes that are not committed"
@@ -41,10 +43,10 @@ DIRTY=""; [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] &&
   echo "made   : $(date -u '+%Y-%m-%d %H:%M UTC')"
   echo "tools  : $(rustc --version 2>/dev/null) / $(sw_vers -productVersion 2>/dev/null)"
   echo "The app is signed with a certificate of its own (not Apple's): the first start shows a warning (right-click > Open)."
-} > "$OUT/ChatMatrixReader/BUILD-INFO.txt"
+} > "$STAGE/ChatMatrixReader/BUILD-INFO.txt"
 
-ditto -c -k --keepParent "$OUT/ChatMatrixReader" "$NAME.zip" || exit 1
+ditto -c -k --keepParent "$STAGE/ChatMatrixReader" "$OUT/$NAME.zip" || exit 1
 echo
-echo "Done: $(pwd)/$NAME.zip"
-shasum -a 256 "$NAME.zip" | tee "$OUT/SHA256SUMS-macos.txt"          # (the same line as in the file of the Windows release: SHA-256, two spaces, the name)
-echo "(upload the zip to the release, and with it $(pwd)/$OUT/SHA256SUMS-macos.txt; the SHA-256 above may also go into the notes)"
+echo "Done: $(pwd)/$OUT/$NAME.zip"
+(cd "$OUT" && shasum -a 256 "$NAME.zip" | tee SHA256SUMS-macos.txt)          # (the same line as in the file of the Windows release: SHA-256, two spaces, the name)
+echo "(upload everything in $(pwd)/$OUT to the release; the SHA-256 above may also go into the notes)"
