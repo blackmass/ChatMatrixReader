@@ -1017,6 +1017,12 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(() => cfgFile().browser_windows[0].zoom === 1.2, 'the window keeps the size when asked to', 3000);
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, remember_zoom: false } : b)) })));
     await until(() => cfgFile().browser_windows[0].zoom === 1, 'turning it off puts the kept size back to 100 %', 3000);
+    // the text selected on the page and copied with the right button: the program sends it, the center puts it on the clipboard and the bar says so
+    const clip0 = clip.length;
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-copy', { label: 'web_b1', text: '/console reload' }));
+    await until(() => clip.length === clip0 + 1 && clip.at(-1) === '/console reload', 'browser/copy: the selected text is on the clipboard');
+    await until(async () => (await cp.locator('.webpane .pcopied').evaluate(e => e.style.opacity)) === '1', 'and the bar says it was copied');
+    ok(opens().at(-1)[1].rclick_copy === true, 'browser/copy: the right button copies by default');
     // the menu of the window opens from its bars, not from the page (where the page is, the center only has it while a menu is open)
     await cp.locator('.webpane .pbody').dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 });
     await cp.waitForTimeout(200);

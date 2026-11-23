@@ -104,8 +104,8 @@ export function normalize(items) {
     d.owner_win = typeof d.owner_win === 'string' && /^[a-z0-9_-]{1,24}$/.test(d.owner_win) ? d.owner_win : '';
     d.page = typeof d.page === 'string' && /^[A-Za-z0-9_\-./]{1,200}\.html$/.test(d.page) && !d.page.includes('..') && !d.page.startsWith('/') && !d.page.includes('//') ? d.page : '';
     d.kind = d.kind === 'page' && d.owner && d.page ? 'page' : d.kind === 'web' && d.owner ? 'web' : '';          // (a page window needs its plugin and its page; a web window its plugin: the page is the plugin's to open)
-    if (d.kind === 'web') { d.page = ''; d.click_through = false; d.cookies = truthy(it.cookies); d.hide_ui = truthy(it.hide_ui); d.shift_scroll = truthy(it.shift_scroll); d.rclick_close = truthy(it.rclick_close); }          // (a web window is used with the mouse: it is not click-through; `cookies`: the login of the window is kept)
-    else { delete d.cookies; delete d.hide_ui; delete d.shift_scroll; delete d.rclick_close; }
+    if (d.kind === 'web') { d.page = ''; d.click_through = false; d.cookies = truthy(it.cookies); d.hide_ui = truthy(it.hide_ui); d.shift_scroll = truthy(it.shift_scroll); d.rclick_close = truthy(it.rclick_close); d.rclick_copy = 'rclick_copy' in it ? truthy(it.rclick_copy) : true; }          // (a web window is used with the mouse: it is not click-through; `cookies`: the login of the window is kept)
+    else { delete d.cookies; delete d.hide_ui; delete d.shift_scroll; delete d.rclick_close; delete d.rclick_copy; }
     if (!d.kind) { d.owner = ''; d.owner_win = ''; d.page = ''; }
     if (d.dock_to === d.id) d.dock_to = 0;
     out.push(d);

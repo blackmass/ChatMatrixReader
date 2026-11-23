@@ -130,7 +130,16 @@ const PAGE: &str = r#"(() => {
   window.addEventListener('wheel', e => { if (e.isTrusted && e.ctrlKey) see('wheel'); }, { capture: true, passive: true });
   window.addEventListener('keydown', e => { if (e.isTrusted && (e.ctrlKey || e.metaKey) && !e.altKey && ['+', '-', '=', '0', '_'].includes(e.key)) see('key'); }, true);
   // The right button: the page tells the program (the center closes the window when the user chose that; the menu itself is not shown, see KEYS). A frame of the page says it by a message.
-  document.addEventListener('contextmenu', e => { if (e.isTrusted) go('rclick'); }, true);
+  // When text is selected, the right button copies it (and clears the selection) instead: the program puts it on the clipboard. The selection is read when the button goes DOWN (a right click
+  // outside the selection may clear it before the menu event); the window never takes the keyboard for it.
+  const RCOPY = __RCOPY__;
+  let rsel = '';
+  document.addEventListener('mousedown', e => { if (e.button === 2 && e.isTrusted) rsel = RCOPY ? String(getSelection()).trim() : ''; }, true);
+  document.addEventListener('contextmenu', e => {
+    if (!e.isTrusted) return;
+    const t = (rsel || (RCOPY ? String(getSelection()).trim() : '')).slice(0, 1000); rsel = '';
+    if (t) { go('copy?t=' + encodeURIComponent(t)); try { getSelection().removeAllRanges(); } catch (x) {} } else go('rclick');
+  }, true);
   window.addEventListener('message', e => { if (e.data === '__cmr_rclick__') go('rclick'); });
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
@@ -240,6 +249,10 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
         }
         "hello" => diag(format!("{label}: the script of the page ran ({})", query.unwrap_or(""))),
         "zseen" => diag_in(true, format!("{label}: the page saw a zoom input ({})", query.unwrap_or(""))),
+        "copy" => {                                     // the user's right button with a text selected on the page: the text goes to the clipboard (the center puts it there and says so)
+            let text = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "t").map(|(_, v)| v.into_owned()));
+            if let Some(t) = text.map(|t| t.chars().take(1000).collect::<String>()).filter(|t| !t.trim().is_empty()) { let _ = app.emit("web-copy", json!({ "label": label, "text": t })); }
+        }
         "rclick" => { let _ = app.emit("web-rclick", json!({ "label": label })); }          // (the center closes the window when the user chose that for it)
         "zoom" => {                                     // the page asks for a larger / smaller size (d = 1, -1; 0 = 100 %): only a window the user opened
             if !is_free(label) { diag_in(true, format!("{label}: zoom refused, not a window of the mini browser")); return; }
@@ -316,7 +329,7 @@ fn listen_messages(win: &WebviewWindow, app: AppHandle, label: String) {
                 let mut p = PWSTR::null();
                 if args.TryGetWebMessageAsString(&mut p).is_ok() && !p.is_null() {
                     let text = webview2_com::take_pwstr(p);
-                    if text.len() <= 2000 {
+                    if text.len() <= 12000 {                       // (a copied text is the longest: 1000 characters as an address are some 9000)
                         dispatch(&app, &label, &text);
                     }
                 }
@@ -398,9 +411,9 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     if let Ok(mut m) = TOKENS.lock() { m.insert(label.clone(), token.clone()); }
     // what the user chose for this window (the scripts are made for it: a change is for the next time the window is opened)
     let flag = |k: &str, d: bool| args.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
-    let (ctrl_zoom, shift_scroll) = (flag("ctrl_zoom", true), flag("shift_scroll", false));
+    let (ctrl_zoom, shift_scroll, rclick_copy) = (flag("ctrl_zoom", true), flag("shift_scroll", false), flag("rclick_copy", true));
     let keys = KEYS.replace("__SHIFTSCROLL__", &shift_scroll.to_string()).replace("__CTRLZOOM__", &ctrl_zoom.to_string());
-    let b = b.initialization_script(PAGE.replace("__TOKEN__", &token).replace("__CTRLZOOM__", &ctrl_zoom.to_string())).initialization_script(keys.clone()).initialization_script_for_all_frames(keys);
+    let b = b.initialization_script(PAGE.replace("__TOKEN__", &token).replace("__CTRLZOOM__", &ctrl_zoom.to_string()).replace("__RCOPY__", &rclick_copy.to_string())).initialization_script(keys.clone()).initialization_script_for_all_frames(keys);
     let mut b = b
         .title("CMR Web")
         .decorations(false)

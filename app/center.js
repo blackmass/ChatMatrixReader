@@ -268,6 +268,7 @@ await listen('center-layout', e => layout(e.payload));
 // the web windows: which are open (the hub), the title and the address of the page, how far it has scrolled (the program: webwin.rs)
 await listen('web-state', e => { webBy[e.payload.source === 'browser' ? 'browser' : 'plugin'] = e.payload.windows || []; webWins = [...webBy.plugin, ...webBy.browser]; sync(); });
 await listen('web-zoom', e => { const p = webs.get(e.payload.label); if (p && p.setZoom) p.setZoom(e.payload.zoom); });
+await listen('web-copy', e => { const p = webs.get(e.payload && e.payload.label); if (p && p.copy) p.copy(e.payload.text); });
 await listen('web-rclick', e => { const p = webs.get(e.payload && e.payload.label); if (p && p.rclick) p.rclick(); });
 await listen('web-raise', e => { const p = webs.get(e.payload && e.payload.label); if (p) center.raise(p); });       // (a page was pressed: the system is not let to bring it over the center, the center does it)
 await listen('web-order', e => {                                    // (a page that was pressed was brought to the front by the system: the windows are numbered in the order it says, front first)

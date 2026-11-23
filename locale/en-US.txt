@@ -1120,3 +1120,6 @@ Shift+휠로 가로 스크롤 = Scroll sideways with Shift + wheel
 웹 페이지 위에서 마우스 오른쪽 버튼을 누르면 이 창이 닫힙니다. 제목 바에서는 닫히지 않습니다. 바로 적용됩니다. = A right click on the web page closes this window. It does not close from the title bar. It applies at once.
 확대·축소율 기억 = Remember the zoom
 켜면 이 창을 확대·축소한 크기를 다음에 열 때도 그대로 씁니다. 끄면(기본) 열 때마다 100%로 시작하고, 끄는 순간 저장된 크기도 100%로 돌아갑니다. = When it is on, the size you zoomed this window to is used the next time it is opened. When it is off (the default), it starts at 100 % every time, and the saved size goes back to 100 % at the moment you turn it off.
+복사됨 = Copied
+우클릭으로 선택한 글 복사 = Copy the selected text with a right click
+웹 페이지에서 글을 드래그로 선택한 뒤 마우스 오른쪽 버튼을 누르면 그 글이 복사되고 선택이 풀립니다. 게임 조작은 끊기지 않습니다. 선택한 글이 없을 때의 우클릭은 아래 "우클릭으로 창 닫기"를 따릅니다. = Select text on the web page by dragging, then press the right mouse button: the text is copied and the selection is cleared. The game keeps the keyboard. A right click with nothing selected follows "Close the window with a right click" below.

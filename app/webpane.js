@@ -20,7 +20,7 @@ export class WebPane {
     const row = this.kind === 'browser' ? '<div class="paddrbar"><button class="phome" tabindex="-1" title="처음 주소로">⌂</button><div class="paddr"><span class="phold">주소 또는 검색어</span><span class="ptxt"></span></div><button class="pmode" tabindex="-1"></button><span class="pzoom"></span></div>' : '';       // (the second line of a window of the mini browser: the address)
     this.head = this.kind === 'browser' ? BAR_H * 2 : BAR_H;                   // (how much of the window is above the page, css pixels: below it when `flip`)
     this.flip = false;
-    this.el.innerHTML = '<div class="pbar">' + head + '<span class="pspace"></span><span class="ptools"><button class="pback" tabindex="-1" title="뒤로">‹</button><button class="preload" tabindex="-1" title="새로고침">↻</button><button class="pclose" tabindex="-1" title="닫기">✕</button></span></div>' + row + '<div class="pbody"><div class="pscroll"></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div>';
+    this.el.innerHTML = '<div class="pbar">' + head + '<span class="pspace"></span><span class="pcopied">복사됨</span><span class="ptools"><button class="pback" tabindex="-1" title="뒤로">‹</button><button class="preload" tabindex="-1" title="새로고침">↻</button><button class="pclose" tabindex="-1" title="닫기">✕</button></span></div>' + row + '<div class="pbody"><div class="pscroll"></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div>';
     document.body.append(this.el);
     this.el.style.zIndex = String(this.center.nextWebZ());                       // (a new web window is in front of the web windows; all of them are below every translation window)
     this.el.addEventListener('pointerdown', () => this.center.raise(this), true);
@@ -137,6 +137,13 @@ export class WebPane {
   closeNow() { this.save(); emit('web-close', { label: this.label }); }
   // the right button on the page (the page tells the program, the program the centers): the window closes when the user chose that for it. Read now, so a change of the option is at once.
   rclick() { if (this.opt('rclick_close', false)) this.closeNow(); }
+  // the text the user selected on the page and copied with the right button (the program has sent it): on the clipboard, and the bar says so for a moment
+  copy(text) {
+    const t = String(text || ''); if (!t.trim()) return;
+    try { window.__TAURI__.clipboardManager.writeText(t); } catch { /* no clipboard */ }
+    const c = this.el.querySelector('.pcopied'); if (!c) return;
+    c.style.opacity = '1'; clearTimeout(this.copyT); this.copyT = setTimeout(() => { c.style.opacity = '0'; }, 1200);
+  }
   setZoom(z) {
     const c = this.el.querySelector('.pzoom'); if (!c || !Number.isFinite(z)) return;
     c.textContent = Math.round(z * 100) + '%'; c.style.opacity = '1';
@@ -199,5 +206,5 @@ export class WebPane {
       if (sg !== this.geo && !near && !this.resizing) { this.place(); this.center.changed(this); }
     }
   }
-  destroy() { clearTimeout(this.scrollT); clearTimeout(this.zoomT); if (this.kind === 'browser') invoke('address_hide').catch(() => {}); this.el.remove(); }
+  destroy() { clearTimeout(this.scrollT); clearTimeout(this.zoomT); clearTimeout(this.copyT); if (this.kind === 'browser') invoke('address_hide').catch(() => {}); this.el.remove(); }
 }

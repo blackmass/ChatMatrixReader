@@ -75,5 +75,6 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   eq([by(5).cookies, by(6).cookies, 'cookies' in by(7), 'cookies' in by(8)], [true, false, false, false], 'winconf: cookies are a setting of a web window only');
   const k = w.normalize([{ id: 5, owner: 'p', owner_win: 'web', kind: 'web', shift_scroll: true, rclick_close: true }, { id: 6, owner: 'p', owner_win: 'web', kind: 'web' }, { id: 8, owner: 'p', owner_win: 'x', kind: 'page', page: 'a.html', shift_scroll: true, rclick_close: true }]);
   const kk = id => k.find(c => c.id === id);
+  eq([kk(5).rclick_copy, kk(6).rclick_copy, 'rclick_copy' in kk(8)], [true, true, false], 'winconf: a web window copies with the right button unless told not to; the others have no such setting');
   eq([kk(5).shift_scroll, kk(5).rclick_close, kk(6).shift_scroll, kk(6).rclick_close, 'shift_scroll' in kk(8), 'rclick_close' in kk(8)], [true, true, false, false, false, false], 'winconf: the sideways wheel and the right button are settings of a web window only');
 }
