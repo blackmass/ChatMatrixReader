@@ -565,27 +565,13 @@ extern "system" {
     fn DwmSetWindowAttribute(hwnd: Handle, attr: u32, value: *const c_void, size: u32) -> i32;
 }
 
-/// (only for the log) The blur the system says a window has now: 0 = none, 3 = blur, 4 = acrylic, -1 = cannot be read.
-pub fn blur_state(hwnd: isize) -> i32 {
-    unsafe {
-        let name: Vec<u16> = "user32.dll\0".encode_utf16().collect();
-        let module = GetModuleHandleW(name.as_ptr());
-        if module == 0 { return -1; }
-        let p = GetProcAddress(module, b"GetWindowCompositionAttribute\0".as_ptr());
-        if p.is_null() { return -1; }
-        let f = std::mem::transmute::<*const c_void, CompositionFn>(p);
-        let mut accent = AccentPolicy { state: -2, flags: 0, gradient: 0, animation: 0 };
-        let mut data = CompositionData { attribute: 19, data: &mut accent as *mut AccentPolicy as *mut c_void, size: std::mem::size_of::<AccentPolicy>() };
-        if f(hwnd, &mut data) == 0 { -1 } else { accent.state }
-    }
-}
-/// (only for the log) What a window is: its class, its program and the start of its title.
+/// (only for the log) What a window is: its class and its program (not its title).
 pub fn describe(hwnd: isize) -> String {
     if hwnd == 0 { return "none".into(); }
     let mut buf = [0u16; 128];
     let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
     let class = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
-    format!("class {class}, program {}, title \"{}\"", exe_of(hwnd), window_title(hwnd).chars().take(30).collect::<String>())
+    format!("class {class}, program {}", exe_of(hwnd))          // (no title: it may say what the user reads or does)
 }
 /// (only for the log) The owner of a window (0 = none) and whether it is a topmost one.
 pub fn owner_of(hwnd: isize) -> isize { unsafe { GetWindow(hwnd, 4) } }
@@ -763,6 +749,33 @@ pub fn set_client_rect(hwnd: isize, x: i32, y: i32, w: i32, h: i32) -> bool {
 /// `hwnd` goes directly below `above` (and stays in its band: topmost or not) without taking the focus.
 pub fn place_below(hwnd: isize, above: isize) {
     unsafe { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); }          // NOMOVE | NOSIZE | NOACTIVATE
+}
+
+/// A center, its blur windows and its web windows (`group`, from the front) are put in the state of the mode, one behind the other, in the order in which no window is ever over the one that is to be
+/// over it, not even between two calls: going UP (topmost, or the top of the ordinary windows) the front one goes first and each next one directly behind it; going DOWN (22: directly over the
+/// game) the one at the back goes first and each next one directly over it. State: 0 ordinary, 1 / 21 / 23 on top, 22 over the game; `was`: the state before (23 -> 22 puts the order first, then the owner).
+pub fn place_group(group: &[isize], state: u32, was: u32, game: isize) {
+    if group.is_empty() { return; }
+    let own = |owner: isize| { for h in group { set_owner(*h, owner); } };
+    let flags = 0x0001 | 0x0002 | 0x0010;                                                  // NOMOVE | NOSIZE | NOACTIVATE
+    if state == 22 {
+        if was != 23 { own(game); }
+        let n = group.len();
+        set_topmost(group[n - 1], false, game);
+        for i in (0..n - 1).rev() { set_topmost(group[i], false, group[i + 1]); }
+        if was == 23 { own(game); }
+    } else {
+        own(0);                                                                            // (the owner goes first: a window that is owned is not asked to be topmost)
+        unsafe {
+            SetWindowPos(group[0], if state == 0 { -2 } else { -1 }, 0, 0, 0, 0, flags);   // HWND_NOTOPMOST (the top of the ordinary windows) / HWND_TOPMOST
+            for i in 1..group.len() { SetWindowPos(group[i], group[i - 1], 0, 0, 0, 0, flags); }
+        }
+    }
+}
+
+/// The window is shown and put directly below `above` in one call, without taking the focus (shown first and put there after, it would be at the top for a moment).
+pub fn show_below(hwnd: isize, above: isize) {
+    unsafe { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040); }          // NOMOVE | NOSIZE | NOACTIVATE | SHOWWINDOW
 }
 
 /// The window goes to the top of the ordinary windows without taking the focus (what a click does to a normal window; ours do not take the focus).

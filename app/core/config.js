@@ -5,6 +5,7 @@
 import { log, fmt } from './log.js';
 import { tr } from './i18n.js';
 import * as winconf from './winconf.js';
+import * as debuglog from './debuglog.js';
 import { defaultBrowser, normalizeBrowsers, normalizeBookmarks } from './browsers.js';
 import { pyInt, truthy } from './winconf.js';
 import { normalizeWidgets } from '../widgets/registry.js';
@@ -148,6 +149,7 @@ export const DEFAULTS = {
     web_render: 'auto',                    // the web window of a plugin is drawn by: 'auto' (the web view decides: the graphics card when there is one) | 'cpu' (the processor) | 'gpu' (the graphics card, always)
     center_scale: 0,                       // 3.2: the size of the translation windows' contents: 0 = as the main screen has it, else a percent (100 ... 200)
     through_tips: true,                    // click-through windows: the tip of a link (item, quest ...) under the mouse is shown (the page cannot see the mouse: the window loop does)
+    debug_log: debuglog.defaults(),         // 3.2: the areas of the detailed log that are on (Options > 기록 > 상세 기록; all off)
     chat_links: true,                      // 3.2: a web address in the chat is a link: [discord.gg/abc] (a click asks where to open it). Off: it stays plain text
     read_matrix: true,                     // 3.2: the screen is read for the chat matrix (off: only the overlay is used; read once at the start)
     auto_copy: false,                      // the text selected in a window is copied when the mouse leaves the window
@@ -195,6 +197,7 @@ export function normalize(saved) {
   cfg.auto_copy = cfg.auto_copy === true;
   cfg.read_matrix = cfg.read_matrix !== false;
   cfg.chat_links = cfg.chat_links !== false;
+  cfg.debug_log = debuglog.normalize(cfg.debug_log);
   const gi = cfg.glossary_inline; delete cfg.glossary_inline;
   if (truthy(gi)) cfg.glossary_mode = 'list';                 // (replaced by glossary_mode)
   const mp = cfg.manual_pos; delete cfg.manual_pos;           // (removed option) an old manual position becomes the first guess

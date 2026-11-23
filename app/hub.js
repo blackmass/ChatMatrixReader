@@ -28,6 +28,7 @@ import { makeInstaller, makeBackend, makeBencher } from './voice_install.js';
 import { ExitWatch } from './core/exitwatch.js';
 import { every } from './core/timings.js';
 import { report } from './core/perf.js';
+import * as debuglog from './core/debuglog.js';
 
 const { emit, listen } = window.__TAURI__.event;
 const invoke = window.__TAURI__.core.invoke;
@@ -199,6 +200,12 @@ report('hub', emit);
 
 const plugins = startPlugins({ settings, files, publish, pipeline, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen, widgets, windows });        // (the plugins folder: docs/PLUGINS.md)
 
+// the areas of the detailed log that are on (Options > 기록 > 상세 기록): the exe is told at the start and at every change
+{
+  let told = '';
+  const tellDebug = () => { const areas = debuglog.enabled(settings.cfg()); const key = areas.join(','); if (key === told) return; told = key; tauriInvoke('set_debug_areas', { areas }).catch(() => {}); };
+  tellDebug(); settings.onChange(tellDebug);
+}
 const browsers = startBrowsers({ settings, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen, note: hubLog });          // (the windows of the mini browser: core/browsers.js)
 windows.setPluginCheck((owner, name) => plugins.windowAllowed(owner, name));       // (a window of a plugin opens only while its plugin runs and may have it)
 

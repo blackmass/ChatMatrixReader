@@ -39,11 +39,9 @@ fn new_token() -> String {
     let part = || { let mut h = std::collections::hash_map::RandomState::new().build_hasher(); h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)); h.finish() };
     format!("{:016x}{:016x}", part(), part())
 }
-/// A line in logs/startup.log about the zoom and the channel of the pages (the first ones only): where a zoom is lost when it does not work.
-static DIAG: [std::sync::atomic::AtomicUsize; 2] = [std::sync::atomic::AtomicUsize::new(0), std::sync::atomic::AtomicUsize::new(0)];
-/// `zoom` = the lines about the zoom itself (they have their own count, so the many lines of the pages that load do not use it up).
-fn diag_in(zoom: bool, msg: String) { if DIAG[zoom as usize].fetch_add(1, std::sync::atomic::Ordering::Relaxed) < if zoom { 80 } else { 60 } { crate::startup_log(&format!("web: {msg}")); } }
-fn diag(msg: String) { diag_in(false, msg) }
+/// A line of the detailed log, area "web" (Options > 기록 > 상세 기록): the channel of the pages and the zoom, where a zoom is lost when it does not work.
+fn diag_in(_zoom: bool, msg: String) { crate::debug_log("web", &msg); }
+fn diag(msg: String) { crate::debug_log("web", &msg); }
 /// A command of a page: `raw` = "<secret>/<command>?<query>". Only the one that carries the secret of this window is carried out.
 fn dispatch(app: &AppHandle, label: &str, raw: &str) {
     let Some((token, rest)) = raw.split_once('/') else { event("command refused: no secret".into()); diag(format!("{label}: command refused, no secret")); return };

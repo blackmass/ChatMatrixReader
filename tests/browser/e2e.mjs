@@ -32,7 +32,7 @@ const files = new Map([['Glossary.sample.txt', 'LFM = 구인\n'], ['fonts/나눔
 // the version of the program (app/core/version.js) and the next patch version: the fake release list of GitHub is made from them, so the test does not change at every release
 const THIS_VERSION = /VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'app', 'core', 'version.js'), 'utf8'))[1];
 const NEXT_VERSION = THIS_VERSION.replace(/\d+$/, n => String(Number(n) + 1));
-const requests = [], calls = [], clip = [], modelAsks = [], chatOpened = [];
+const requests = [], calls = [], clip = [], modelAsks = [], chatOpened = [], debugAreas = [];
 let lastInputOpen = null;                            // the arguments of the last show_input
 let aiMode = 'ok';                                   // what the fake AI server answers to the model list: ok | down | 401 | bad
 let osVersion = '14.5';                                    // what the command os_version answers (macOS only)
@@ -70,6 +70,7 @@ async function invoke(cmd, a = {}) {
     case 'plugin_forget': return null;
     case 'plugin_open_url': pluginOpened.push(a); return null;
     case 'open_chat_url': chatOpened.push(a.url); return null;
+    case 'set_debug_areas': debugAreas.push(a.areas); return null;
     case 'center_rects': centerRects.push(a); return null;
     case 'center_wheel': return { seq: wheel.length, turns: wheel.slice(a.seq).map(d => ({ id: '1', delta: d })) };
     case 'center_zoom': return a.scale || 1;
@@ -1614,9 +1615,9 @@ files.delete('LICENSE');
 
 files.set('logs/chatmatrix.log', Array.from({ length: 600 }, (_, i) => 'LOG LINE ' + i).join('\n'));
 await opt.locator('#tabs li', { hasText: '기록' }).click(); await opt.waitForTimeout(300);
-await opt.locator('.row.t-logview button', { hasText: '새로 고침' }).click();
+await opt.locator('.row.t-logview button', { hasText: '새로 고침' }).first().click();       // (the first one: the log of the program; the second is the detailed log)
 await control.waitForTimeout(300);
-const logText = await opt.inputValue('textarea.logtext');
+const logText = await opt.locator('textarea.logtext').first().inputValue();
 ok(logText.endsWith('LOG LINE 599') && !logText.includes('LOG LINE 100\n') && logText.split('\n').length === 400, 'options/log: the log shows its last 400 lines');
 
 // ---- the display language: the texts of every window follow the setting, and switching back restores them
@@ -1658,6 +1659,22 @@ await new Promise(r => setTimeout(r, 200));                      // (real time: 
 await main.evaluate(() => { document.querySelector('.cv-blk').dispatchEvent(new WheelEvent('wheel', { shiftKey: true, deltaY: -30, cancelable: true, bubbles: true })); });
 for (let i = 0; i < 20 && !(await main.evaluate(() => document.body.classList.contains('review'))); i++) await control.waitForTimeout(100);       // (the window loop takes a round or two)
 ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift+wheel up (the page gets it itself) also starts the review of the old chat: ' + await main.evaluate(() => { const l = document.getElementById('lines'); return JSON.stringify({ top: l.scrollTop, h: l.scrollHeight, c: l.clientHeight, cls: document.body.className, hidden: document.hidden }); }));
+
+// ---- the detailed log (Options > 기록 > 상세 기록): areas, all off; a change is told to the exe at once
+{
+  ok(debugAreas.every(x => x.length === 0), 'debug log: nothing is on at the start: ' + JSON.stringify(debugAreas));
+  await opt.locator('#tabs li', { hasText: '기록' }).first().click();
+  const area = t => opt.locator('.row', { has: opt.locator('b.label', { hasText: new RegExp('^' + t + '$') }) });
+  await opt.waitForSelector('b.label:text-is("블러 효과")');
+  ok(await area('창 순서').count() === 1 && await area('블러 효과').count() === 1 && await area('웹창').count() === 1, 'debug log: one box for every area');
+  ok(!(await area('블러 효과').locator('input[type=checkbox]').isChecked()), 'debug log: the boxes are not checked');
+  await area('블러 효과').locator('input[type=checkbox]').check();
+  await until(() => debugAreas.length > 0 && debugAreas.at(-1).join() === 'blur', 'debug log: the exe is told that the blur area is on');
+  await until(() => cfgFile().debug_log && cfgFile().debug_log.blur === true, 'debug log: the setting is kept', 3000);
+  ok(cfgFile().debug_log.order === false, 'debug log: and only that area');
+  await area('블러 효과').locator('input[type=checkbox]').uncheck();
+  await until(() => debugAreas.at(-1).length === 0, 'debug log: and off again');
+}
 
 // ---- tabs: a window that is a TAB of another ("탭으로 합칠 창"): no window of its own, a tab in the bar of the other, its own lines, a mark for new lines
 {

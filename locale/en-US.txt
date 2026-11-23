@@ -1137,3 +1137,14 @@ Shift+휠로 가로 스크롤 = Scroll sideways with Shift + wheel
 주소 복사 = Copy the address
 
 창의 모양(이름 탭, 기능 버튼, 프레임)은 위의 "평소에 … 숨기기" 설정을 따릅니다. 관통 중에는 보이기만 하고 누를 수는 없습니다 (조작 키를 누르면 누를 수 있습니다). = The look of the window (the name tab, the icons, the frame) follows the "Hide … normally" settings above. While the mouse goes through, they can be seen but not clicked (hold the interact key to click them).
+
+상세 기록 (문제를 찾을 때만) = Detailed log (only when looking for a problem)
+평소에는 모두 꺼 두세요. 켠 영역의 자세한 기록이 프로그램 폴더의 logs/debug.log에 쌓이고, 끄면 바로 멈춥니다 (재시작이 필요 없습니다). = Keep all of them off normally. The detailed record of an area that is on is written to logs/debug.log in the program folder, and it stops at once when it is turned off (no restart needed).
+문제가 생겼을 때 해당 영역을 켜고 증상을 한 번 만든 뒤, 아래 기록을 복사하거나 파일을 보내 주세요. 창 이름은 남기지 않고 창 종류와 프로그램 이름만 남깁니다. = When a problem happens, turn the area on, make the symptom once, then copy the record below or send the file. Window titles are not written, only the kind of window and the program name.
+창 순서 = Window order
+번역창(센터), 블러 창, 웹창이 게임과 앞뒤로 어떻게 놓이는지 기록합니다. 다른 창을 눌렀을 때 창이 깜빡이거나 가려질 때 켜세요 (Windows). = Records how the translation windows (center), the blur windows and the web windows are placed in front of and behind the game. Turn it on when windows flicker or are covered after another window is clicked (Windows).
+블러 효과 = Blur effect
+번역창 뒤의 블러를 켜고 끌 때의 호출과 그 결과를 기록합니다. 블러가 안 보이거나 깜빡일 때 켜세요. = Records the calls that turn the blur behind a translation window on and off, and what came back. Turn it on when the blur is not seen or flickers.
+웹창 = Web windows
+웹창 페이지와 프로그램 사이의 연결, 확대·축소 요청을 기록합니다. 확대·축소가 가끔 안 될 때 켜세요. = Records the connection between the page of a web window and the program, and the zoom requests. Turn it on when the zoom sometimes does not work.
+상세 기록 = Detailed record

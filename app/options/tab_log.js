@@ -1,6 +1,7 @@
 // 기록: the log of the program, and what the program and its helper processes use (memory, CPU, handles). The numbers are read only while this page is shown.
 import { tr } from '../core/i18n.js';
 import { files } from '../fs.js';
+import * as debuglog from '../core/debuglog.js';
 
 const invoke = window.__TAURI__.core.invoke;
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -70,6 +71,11 @@ export default {
     ] },
     { title: '로그', note: '문제가 생기면 이 내용을 복사해서 알려 주세요. 파일은 프로그램 폴더의 logs/chatmatrix.log 입니다.', rows: [
       { type: 'logview', label: '최근 로그', files, path: 'logs/chatmatrix.log', last: 400, rows: 20, keywords: '로그 log 기록 오류' },
+    ] },
+    { title: '상세 기록 (문제를 찾을 때만)', note: ['평소에는 모두 꺼 두세요. 켠 영역의 자세한 기록이 프로그램 폴더의 logs/debug.log에 쌓이고, 끄면 바로 멈춥니다 (재시작이 필요 없습니다).', '문제가 생겼을 때 해당 영역을 켜고 증상을 한 번 만든 뒤, 아래 기록을 복사하거나 파일을 보내 주세요. 창 이름은 남기지 않고 창 종류와 프로그램 이름만 남깁니다.'], rows: [
+      ...debuglog.AREAS.map(a => ({ key: 'debug_' + a.key, type: 'check', label: a.label, keywords: '상세 기록 디버그 로그 진단 ' + a.key, note: a.note, def: false,
+        get: cfg => debuglog.normalize(cfg.debug_log)[a.key], patch: (cfg, v) => ({ debug_log: { ...debuglog.normalize(cfg.debug_log), [a.key]: v === true } }) })),
+      { type: 'logview', label: '상세 기록', files, path: 'logs/debug.log', last: 400, rows: 14, keywords: '상세 기록 디버그 로그 진단 debug' },
     ] },
   ],
 };

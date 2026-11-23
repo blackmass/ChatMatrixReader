@@ -151,6 +151,10 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Op
 /// is gone, or when the blur has been off for BLUR_KEEP (the option is off for good: no empty web view is kept).
 static BLURS: LazyLock<Mutex<HashMap<String, (String, u32, isize, [i32; 4], Option<Instant>)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 const BLUR_KEEP: Duration = Duration::from_secs(30);
+/// The blur windows whose page has just been loaded (main.rs tells): the loop asks the system for their blur once more (the web view starts after the window is made, and what it does can undo
+/// what was asked before). Only a label is put here and taken out again: no window is asked while this list is held.
+static BLUR_READY: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+pub fn blur_page_ready(label: &str) { if let Ok(mut v) = BLUR_READY.lock() { if !v.iter().any(|x| x == label) { v.push(label.to_string()); } } }
 
 fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
     let key = |id: &str| format!("blur_{}_{}", center, id);
@@ -183,22 +187,25 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
         if known.is_none() {
             let _ = w.set_ignore_cursor_events(true);
             win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h);
-            // the same as a web window gets (webwin.rs web_open): the system may not bring it over its center by itself (the order guard: it is put on from the thread that made the window)
+            // (no order guard, unlike a web window: nobody presses a blur window, and the guard would refuse what the loop asks of it, the top of a band or a place over the game: it is the center's
+            // backdrop and is put in the state of the center, like the center)
             #[cfg(windows)]
-            {
-                let (hh, lbl) = (h, k.clone());
-                let _ = w.run_on_main_thread(move || win::guard_z(hh, &lbl));
-                win::no_transitions(h);                   // (the blur goes at once with the text: the system fades a window that is hidden or closed)
-                // directly under its center before it is shown (a new window is put at the top by the system: over the text for a moment); else in the band the web windows start in
-                match app.get_webview_window(center).and_then(|c| hwnd_of(&c).ok()) { Some(ch) => win::place_below(h, ch), None => win::set_topmost(h, true, 0) }
-            }
+            win::no_transitions(h);                       // (the blur goes at once with the text: the system fades a window that is hidden or closed)
         }
         let woke = known.as_ref().map_or(false, |v| v.4.is_some());                 // (it was kept with its blur off: on again, nothing is made)
+        if known.is_none() {
+            // shown and put directly under its center in one call (a window that is shown is put at the top by the system: over the text for a moment)
+            #[cfg(windows)]
+            { match app.get_webview_window(center).and_then(|c| hwnd_of(&c).ok()) { Some(ch) => win::show_below(h, ch), None => { let _ = w.show(); } } }
+            #[cfg(not(windows))]
+            { let _ = w.show(); }
+        }
+        // (the blur is asked for AFTER the window is shown: asked of a window that is not shown, the system answers yes and does not draw it until the window is put somewhere else. A new window is asked
+        // once more when its page has loaded: see blur_page_ready)
         if known.as_ref().map_or(true, |v| v.1 != level) || woke {
-            let why = match &known { None => "a new window".to_string(), Some(v) if woke => format!("the blur is on again (level {})", v.1), Some(v) => format!("the level goes from {} to {}", v.1, level) };
+            let why = match &known { None => "a new window, shown".to_string(), Some(v) if woke => format!("the blur is on again (level {})", v.1), Some(v) => format!("the level goes from {} to {}", v.1, level) };
             blur_apply(h, &k, &why, true, level);
         }
-        if known.is_none() { let _ = w.show(); }
         have.insert(k, (center.to_string(), level, h, r, None));
     }
 }
@@ -290,47 +297,48 @@ fn inside(panes: &[Pane], x: i32, y: i32, margin: f64) -> bool {
 }
 
 /// The order of the windows of a mode: 0 ordinary, 1 always on top, 2 above the game only (two states: the game or a window of ours in front: topmost; another program in front: right above the game).
-/// Puts a window in the state its mode wants (0 ordinary, 1 on top, 2 over the game: 21 the game is in front, 22 another program is, 23 this one is). Some((was, now)) when the state changed.
-fn apply_mode(h: isize, mode: u32, game: isize, last: &mut HashMap<isize, u32>) -> Option<(u32, u32)> {
-    let want = match mode {
+/// The state a mode asks for now: 0 ordinary, 1 on top, and for the mode over the game: 21 the game is in front, 22 another program is, 23 this one is.
+fn mode_state(mode: u32, game: isize) -> u32 {
+    match mode {
         1 => 1,
         2 => if game > 0 { let fg = win::foreground(); if fg == game { 21 } else if win::self_front() { 23 } else { 22 } } else { 1 },
         _ => 0,
-    };
+    }
+}
+
+/// Puts a window in the state its mode wants (0 ordinary, 1 on top, 2 over the game: 21 the game is in front, 22 another program is, 23 this one is). Some((was, now)) when the state changed.
+#[cfg_attr(windows, allow(dead_code))]
+fn apply_mode(h: isize, mode: u32, game: isize, last: &mut HashMap<isize, u32>) -> Option<(u32, u32)> {
+    let want = mode_state(mode, game);
     let was = last.get(&h).copied().unwrap_or(99);
     if was == want { return None; }
     last.insert(h, want);
     match want {
         0 => { win::set_owner(h, 0); win::set_topmost(h, false, 0); }
-        1 | 21 => { win::set_topmost(h, true, 0); win::set_owner(h, 0); }
-        23 => { win::set_owner(h, 0); win::set_topmost(h, true, 0); }
+        1 | 21 | 23 => { win::set_owner(h, 0); win::set_topmost(h, true, 0); }                 // (the owner goes first: a window that is owned is not asked to be topmost)
         22 if was == 23 => { win::set_topmost(h, false, game); win::set_owner(h, game); }
         _ => { win::set_owner(h, game); win::set_topmost(h, false, game); }
     }
     Some((was, want))
 }
 
-/// A line in startup.log about the blur of the panes: when the blur is put on or off, and what happens to a center and its blur windows when another window comes to the front (the first ones only).
-static BLUR_DIAG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-fn blur_diag(msg: String) { if BLUR_DIAG.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 120 { crate::startup_log(&format!("blur: {msg}")); } }
-/// The blur of a window is put on or off; the system is asked what it has afterwards (the log says what was asked, what came back, and what the system says it has).
+/// The blur of a window is put on or off (detailed log, area "blur": what was asked and what came back).
 fn blur_apply(h: isize, key: &str, why: &str, on: bool, level: u32) {
     let ok = win::set_blur(h, on, if level == 2 { 4 } else { 3 }, 0x1e, 0x1f, 0x22, 0.004);
-    blur_diag(format!("{key}: {why}: asked for {} (level {level}), returned {ok}, the system says state {}", if on { "on" } else { "off" }, win::blur_state(h)));
+    if crate::debug_on("blur") { crate::debug_log("blur", &format!("{key}: {why}: asked for {} (level {level}), returned {ok}", if on { "on" } else { "off" })); }
 }
-/// What the stack of windows looks like for a center, its blur windows and the game: from the front, which of them are topmost, who owns whom, what blur the system says each has.
+/// What the stack of windows looks like for a center, its blur windows and the game: from the front, which of them are topmost, and who owns whom.
 fn blur_snapshot(label: &str, since_ms: u128, ch: isize, blurs: &[isize], game: isize) -> String {
     let mut all = vec![ch]; all.extend_from_slice(blurs); if game != 0 { all.push(game); }
     let name = |h: isize| if h == ch { "C".to_string() } else if h == game { "G".to_string() } else { format!("B{}", blurs.iter().position(|b| *b == h).map_or(0, |i| i + 1)) };
     let z: Vec<String> = win::z_order_global(&all).into_iter().map(name).collect();
     let own = |h: isize| { let o = win::owner_of(h); if o == 0 { "-".to_string() } else if o == game { "game".to_string() } else if o == ch { "center".to_string() } else { "other".to_string() } };
-    let each: Vec<String> = blurs.iter().enumerate().map(|(i, b)| format!("B{} topmost {} owner {} blur {}", i + 1, win::is_topmost(*b), own(*b), win::blur_state(*b))).collect();
+    let each: Vec<String> = blurs.iter().enumerate().map(|(i, b)| format!("B{} topmost {} owner {}", i + 1, win::is_topmost(*b), own(*b))).collect();
     format!("{label} +{since_ms} ms: front to back {z:?}; C topmost {} owner {}; {}; in front: {}", win::is_topmost(ch), own(ch), each.join("; "), win::describe(win::foreground()))
 }
 
-/// A line in startup.log about the order of a center and its blur windows (the first ones only).
-static ORDER_DIAG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-fn order_diag(msg: String) { if ORDER_DIAG.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40 { crate::startup_log(&msg); } }
+/// A line of the detailed log, area "order": the order of a center, its blur windows and the game.
+fn order_diag(msg: String) { crate::debug_log("order", &msg); }
 
 fn run(app: AppHandle) {
     let mut mis: HashMap<String, Instant> = HashMap::new();                // (a center whose blur windows are out of order: since when)
@@ -373,6 +381,12 @@ fn run(app: AppHandle) {
                 ignoring.insert(label, want_ignore);
             }
         }
+        // a blur window whose page has loaded: its blur is asked for once more (what the blur table holds is copied first: no lock is held while the system is asked)
+        let ready: Vec<String> = BLUR_READY.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
+        for k in ready {
+            let one = BLURS.lock().ok().and_then(|b| b.get(&k).map(|v| (v.1, v.2, v.4.is_some())));
+            if let Some((level, h, off)) = one { if !off { blur_apply(h, &k, "its page has loaded", true, level); } }
+        }
         if z_at.elapsed() < Duration::from_millis(100) { continue; }
         z_at = Instant::now();
         if game_at.elapsed() > Duration::from_secs(2) {
@@ -402,7 +416,6 @@ fn run(app: AppHandle) {
             let Some(c) = app.get_webview_window(label) else { continue };
             let Ok(ch) = hwnd_of(&c) else { continue };
             win::keep_style(ch);
-            let switched = apply_mode(ch, mode, game, &mut last);
             // the blur windows of this center follow it: the same order (the layer of the center), and directly under it
             let blurs: Vec<(String, isize)> = BLURS.lock().map(|b| b.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (k.clone(), v.2)).collect()).unwrap_or_default();
             // the web windows: in the order the center draws their frames (the highest `z` first), so that a page and its frame are never one over and one under another window's
@@ -412,32 +425,49 @@ fn run(app: AppHandle) {
             let web_labels: Vec<(isize, String)> = webs.iter().map(|w| (w.1, w.2.clone())).collect();
             // from the front: the center, the blurs of its windows (they blur what is under the windows: the pages too), the web windows
             let n_blur = blurs.len();
+            let blur_hs: Vec<isize> = blurs.iter().map(|b| b.1).collect();
+            let mut want: Vec<isize> = vec![ch];
+            for bh in blur_hs.iter().copied().chain(webs.iter().map(|w| w.1)) { win::keep_style(bh); want.push(bh); }
+            let state = mode_state(mode, game);
+            let mut switched = None;
+            // (Windows) The center, its blur windows and its pages are put in their state TOGETHER, in the order in which no window is over the one that is to be over it, not even between two calls
+            // (win::place_group). A window that joins (a new blur window) while the state stays the same puts the group again too.
+            #[cfg(windows)]
+            {
+                let was = last.get(&ch).copied().unwrap_or(99);
+                if was != state || want.iter().any(|h| !last.contains_key(h)) {
+                    win::place_group(&want, state, was, game);
+                    for h in &want { last.insert(*h, state); }
+                    if was != state { switched = Some((was, state)); }
+                }
+            }
+            // (elsewhere: one window after the other, in the order that leaves them right: a window put "to the top" goes over what is there, so the last one is the front one; a window put directly
+            // over the game goes under the ones put before it)
+            #[cfg(not(windows))]
+            {
+                let order: Vec<isize> = if state == 22 { want.clone() } else { want.iter().rev().copied().collect() };
+                if order.iter().any(|h| !last.contains_key(h)) { last.remove(&ch); }
+                for h in order { let r = apply_mode(h, mode, game, &mut last); if h == ch { switched = r; } }
+            }
             // (only written down) another window came to the front and the state of this center changed: what the stack of windows looks like then, a moment later, and later still
-            if n_blur > 0 {
-                let blur_hs: Vec<isize> = blurs.iter().map(|b| b.1).collect();
+            if n_blur > 0 && crate::debug_on("order") {
                 if let Some((was, now)) = switched {
                     watch.insert(label.to_string(), (Instant::now(), 0));
-                    blur_diag(format!("switch {label} (mode {mode}): state {was} to {now}; the game is {}; {}", if game != 0 { "there" } else { "not found" }, blur_snapshot(label, 0, ch, &blur_hs, game)));
+                    order_diag(format!("switch {label} (mode {mode}): state {was} to {now}; the game is {}; {}", if game != 0 { "there" } else { "not found" }, blur_snapshot(label, 0, ch, &blur_hs, game)));
                 }
                 if let Some((t, stage)) = watch.get(label).copied() {
                     let due = if stage == 0 { t.elapsed() > Duration::from_millis(300) } else { t.elapsed() > Duration::from_millis(1500) };
                     if due {
-                        blur_diag(blur_snapshot(label, t.elapsed().as_millis(), ch, &blur_hs, game));
+                        order_diag(blur_snapshot(label, t.elapsed().as_millis(), ch, &blur_hs, game));
                         if stage == 0 { watch.insert(label.to_string(), (t, 1)); } else { watch.remove(label); }
                     }
                 }
-            }
-            let mut want: Vec<isize> = vec![ch];
-            for bh in blurs.into_iter().map(|b| b.1).chain(webs.iter().map(|w| w.1)) {
-                win::keep_style(bh);
-                apply_mode(bh, mode, game, &mut last);
-                want.push(bh);
             }
             if want.len() > 1 {
                 let seen = win::z_order(&want);
                 let expected: Vec<isize> = want.iter().copied().filter(|h| seen.contains(h)).collect();
                 // (only written down, nothing is done with it) the center and its blur windows out of order: when it was found, how long it lasted, which window of the system was in front
-                if n_blur > 0 {
+                if n_blur > 0 && crate::debug_on("order") {
                     let cb: Vec<isize> = want.iter().take(1 + n_blur).copied().collect();
                     let seen_cb: Vec<isize> = seen.iter().filter(|h| cb.contains(h)).copied().collect();
                     let exp_cb: Vec<isize> = cb.iter().filter(|h| seen.contains(h)).copied().collect();

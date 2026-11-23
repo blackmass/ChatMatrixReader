@@ -316,7 +316,10 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
     // that is hidden or covered (the control window) running at full speed: its timers are the capture loop and the translation queue.
     let b = WebviewWindowBuilder::new(app, label, WebviewUrl::External(page_url(page)))
         .initialization_script(ERROR_SCRIPT)
-        .on_page_load(|w, p| startup_log(&format!("page {:?} {} {}", p.event(), w.label(), p.url())));
+        .on_page_load(|w, p| {
+            startup_log(&format!("page {:?} {} {}", p.event(), w.label(), p.url()));
+            if w.label().starts_with("blur_") && matches!(p.event(), tauri::webview::PageLoadEvent::Finished) { center::blur_page_ready(w.label()); }
+        });
     #[cfg(windows)]
     let b = b.data_directory(data_dir()).additional_browser_args(
         "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
@@ -1005,6 +1008,35 @@ pub(crate) fn startup_log(msg: &str) {
     }
 }
 
+// ---- the detailed log (Options > 기록 > 상세 기록): areas the user turns on one by one when a problem is looked for. Off, a call costs one test of a flag and nothing else; on, the lines go to
+// logs/debug.log with the area in front. A new area: a line in app/core/debuglog.js (the option), and `debug_log("name", ...)` where it is wanted (docs/ARCHITECTURE.md "상세 기록").
+static DEBUG_ANY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static DEBUG_AREAS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// Is the detailed log of this area on? (Call it before the work of making a line, too: the work is not done when it is off.)
+pub(crate) fn debug_on(area: &str) -> bool {
+    DEBUG_ANY.load(std::sync::atomic::Ordering::Relaxed) && DEBUG_AREAS.lock().map(|v| v.iter().any(|a| a == area)).unwrap_or(false)
+}
+/// A line in logs/debug.log, when the area is on. The file is cut when it gets big (the old part goes: a new problem is looked at in a short file).
+pub(crate) fn debug_log(area: &str, msg: &str) {
+    use std::io::Write;
+    if !debug_on(area) { return; }
+    let dir = base_dir().join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("debug.log");
+    if std::fs::metadata(&path).map(|m| m.len() > 1_000_000).unwrap_or(false) { let _ = std::fs::remove_file(&path); }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| (d.as_secs(), d.subsec_millis())).unwrap_or((0, 0));
+        let _ = writeln!(f, "{}.{:03} [{area}] {msg}", t.0, t.1);
+    }
+}
+/// The areas of the detailed log that the user has turned on (the hub tells at the start and at every change).
+#[tauri::command]
+fn set_debug_areas(areas: Vec<String>) {
+    let areas: Vec<String> = areas.into_iter().filter(|a| a.len() <= 32 && a.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')).take(32).collect();
+    DEBUG_ANY.store(!areas.is_empty(), std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut v) = DEBUG_AREAS.lock() { *v = areas; }
+}
+
 /// What a page tells about its own errors (see ERROR_SCRIPT): a page that cannot start has no log of its own, so the program writes it down. At most 60 lines in a run.
 #[tauri::command]
 fn startup_js(window: WebviewWindow, text: String) {
@@ -1054,6 +1086,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             plugin_token,
             startup_js,
+            set_debug_areas,
             plugin_forget,
             plugin_hash,
             plugin_fetch,

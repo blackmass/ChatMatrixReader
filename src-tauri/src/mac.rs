@@ -464,7 +464,7 @@ extern "C" fn can_become_key(this: *mut AnyObject, cmd: Sel) -> Bool {
 pub fn guard_z(_hwnd: isize, _label: &str) {}
 pub fn set_not_rude(_hwnd: isize) {}
 pub fn no_transitions(_hwnd: isize) {}
-pub fn blur_state(_hwnd: isize) -> i32 { -1 }
+pub fn show_below(_hwnd: isize, _above: isize) {}
 pub fn describe(_hwnd: isize) -> String { String::new() }
 pub fn owner_of(_hwnd: isize) -> isize { 0 }
 pub fn is_topmost(_hwnd: isize) -> bool { false }
