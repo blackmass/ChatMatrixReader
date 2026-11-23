@@ -69,6 +69,8 @@ const browserCard =
         note: '마우스가 창 위에 없을 때는 위쪽 바, 주소 줄, 테두리를 모두 숨기고 웹 페이지만 보입니다. 마우스를 올리면 바로 나타나고, 벗어나면 잠시 뒤 천천히 사라집니다.' }),
       mine('ctrl_zoom', true, { type: 'check', label: 'Ctrl로 확대·축소', keywords: '컨트롤 줌 확대 축소 휠 단축키 핀치 zoom ctrl', show: hasWindow,
         note: ['Ctrl+휠, Ctrl+더하기/빼기/0, 맥의 핀치로 페이지를 크게 또는 작게 합니다. 끄면 Ctrl+휠은 그냥 스크롤이 되고 확대·축소 키는 아무 일도 하지 않습니다.', '바꾼 뒤 창을 다시 열면 적용됩니다.'] }),
+      mine('remember_zoom', false, { type: 'check', label: '확대·축소율 기억', keywords: '줌 배율 기억 저장 확대 축소 100% zoom remember', show: hasWindow,
+        note: '켜면 이 창을 확대·축소한 크기를 다음에 열 때도 그대로 씁니다. 끄면(기본) 열 때마다 100%로 시작하고, 끄는 순간 저장된 크기도 100%로 돌아갑니다.' }),
       mine('shift_scroll', false, { type: 'check', label: 'Shift+휠로 가로 스크롤', keywords: '쉬프트 가로 스크롤 휠 옆으로 shift horizontal', show: hasWindow,
         note: ['켜면 Shift+휠이 가로 스크롤이 됩니다. 끄면(기본) Shift+휠도 그냥 세로 스크롤입니다.', '바꾼 뒤 창을 다시 열면 적용됩니다.'] }),
       mine('rclick_close', false, { type: 'check', label: '우클릭으로 창 닫기', keywords: '오른쪽 클릭 마우스 닫기 close right click', show: hasWindow,

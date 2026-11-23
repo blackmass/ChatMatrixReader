@@ -37,6 +37,7 @@ let webWins = [];
 const everyBox = () => [...panes.values(), ...webs.values()];
 let lampState = null;                          // the last state of the voice lamp (a pane made later gets it)
 let open = new Set([MAIN]);
+let screens = [];                              // (all the screens, see below: declared before anything can ask for them, a layout that comes early must not find it not made)
 const center = {
   label,
   cfg: () => cfg,
@@ -242,7 +243,6 @@ async function applyScale() {
   }
 }
 // the screens changed (or this is the start): where the page starts is told again; a window that is out of every screen comes back to the main one, once told
-let screens = [];
 function fit() {
   const d = dpr(), moved = [];
   for (const p of everyBox()) {

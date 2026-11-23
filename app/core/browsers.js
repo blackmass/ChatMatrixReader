@@ -17,7 +17,7 @@ export const isWebUrl = text => {
 export const defaultBrowser = id => ({
   id, name: '', mode: 'mobile', start_kind: 'url', start_url: START_URL, last_url: '', persist: false,
   topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1, idle_alpha: 1, hide_ui: false,
-  shift_scroll: false, ctrl_zoom: true, rclick_close: false,
+  shift_scroll: false, ctrl_zoom: true, rclick_close: false, remember_zoom: false,
 });
 
 const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -46,6 +46,7 @@ export function normalizeBrowsers(list) {
     d.hide_ui = flag(it.hide_ui, false);                                                                      // (the bars, the address and the frame are hidden while the mouse is not over the window)
     d.shift_scroll = flag(it.shift_scroll, false);                                                            // (Shift + the wheel scrolls sideways: not by default, it is a plain turn of the wheel)
     d.ctrl_zoom = flag(it.ctrl_zoom, true);                                                                   // (Ctrl + the wheel / + / - / 0 / a pinch make the page larger or smaller)
+    d.remember_zoom = flag(it.remember_zoom, false);                                                          // (the size of the page is kept for the next time: not by default, every window opens at 100 %)
     d.rclick_close = flag(it.rclick_close, false);                                                            // (the right button on the page closes the window)
     d.idle_alpha = Number.isFinite(it.idle_alpha) ? Math.min(1, Math.max(0.2, Math.round(it.idle_alpha * 20) / 20)) : 1;        // (how solid the window is while the mouse is away: 20 % .. 100 %; 100 % = it stays as it is)
     out.push(d);

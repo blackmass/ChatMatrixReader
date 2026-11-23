@@ -1010,7 +1010,20 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     // the size of the page: the program tells it ('web-zoom'): the line shows it a moment, the window keeps it
     await cm.evaluate(() => window.__TAURI__.event.emit('web-zoom', { label: 'web_b1', zoom: 1.2 }));
     await until(async () => (await cp.locator('.webpane .pzoom').textContent()) === '120%', 'the size is shown in the address line');
-    await until(() => cfgFile().browser_windows[0].zoom === 1.2, 'the window keeps the size', 3000);
+    await cp.waitForTimeout(1500);
+    ok(cfgFile().browser_windows[0].zoom === 1, 'browser/zoom: the size is not kept unless the user chose it');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, remember_zoom: true } : b)) })));
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-zoom', { label: 'web_b1', zoom: 1.2 }));
+    await until(() => cfgFile().browser_windows[0].zoom === 1.2, 'the window keeps the size when asked to', 3000);
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, remember_zoom: false } : b)) })));
+    await until(() => cfgFile().browser_windows[0].zoom === 1, 'turning it off puts the kept size back to 100 %', 3000);
+    // the menu of the window opens from its bars, not from the page (where the page is, the center only has it while a menu is open)
+    await cp.locator('.webpane .pbody').dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 });
+    await cp.waitForTimeout(200);
+    ok(!(await cp.locator('#ctx').isVisible()), 'center/web: a right click on the page does not open the menu of the window');
+    await cp.locator('.webpane .pbar').dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 });
+    await until(async () => (await cp.locator('#ctx').isVisible()), 'and one on the bar does');
+    await cp.keyboard.press('Escape');
     ok(opens().at(-1)[1].zoom === 1, 'browser/zoom: (the window was opened at 100 %)');
     ok(opens().at(-1)[1].ctrl_zoom === true && opens().at(-1)[1].shift_scroll === false, 'browser/keys: the window is opened with the zoom on and the sideways wheel off (the way it was)');
     // the right button on the page: nothing, unless the user chose it for the window (read at the moment of the click)

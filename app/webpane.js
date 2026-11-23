@@ -30,7 +30,8 @@ export class WebPane {
       e.preventDefault(); e.stopImmediatePropagation();
       invoke('web_cmd', { label: this.label, cmd: 'external' }).catch(() => {});
     }, true);
-    this.el.addEventListener('contextmenu', e => { e.preventDefault(); this.center.menu(e, this); });
+    // the menu opens from the bars only: a right click on the page is the page's (it closes the window when the user chose that; while a menu of ours is open the page takes the mouse, and then it only closes the menu)
+    this.el.addEventListener('contextmenu', e => { e.preventDefault(); if (e.target.closest && e.target.closest('.pbar, .paddrbar')) this.center.menu(e, this); });
     if (this.kind === 'browser') { this.address(); this.setMode(info.mode); }
     this.place();
     dragFrame(this, this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.lock && !e.target.closest('button'));

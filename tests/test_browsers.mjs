@@ -17,6 +17,7 @@ check(b.isWebUrl('https://m.dcinside.com') && b.isWebUrl('http://a.b/c?d=1') && 
   check(b.normalizeBrowsers([{ id: 2, zoom: 1.26 }, { id: 3, zoom: 9 }, { id: 4, zoom: 'x' }, { id: 5, zoom: 0.01 }]).filter(x => x.id > 1).map(x => x.zoom).join() === '1.3,3,1,0.3', 'zoom: a step of 10 %, 30 % .. 300 %, a wrong value is 100 %');
   check(b.normalizeBrowsers([{ id: 2, idle_alpha: 0.5 }, { id: 3, idle_alpha: 0 }, { id: 4, idle_alpha: 'x' }]).filter(x => x.id > 1).map(x => x.idle_alpha).join() === '0.5,0.2,1', 'idle_alpha: 20 % .. 100 %, a wrong value is 100 %');
   check(b.normalizeBrowsers([{ id: 2 }, { id: 3, shift_scroll: true, ctrl_zoom: false, rclick_close: true }, { id: 4, shift_scroll: 'x', ctrl_zoom: 'x', rclick_close: 'x' }]).filter(x => x.id > 1).map(x => [x.shift_scroll, x.ctrl_zoom, x.rclick_close].join()).join('|') === 'false,true,false|true,false,true|false,true,false', 'keys: the sideways wheel and the right button are off, the zoom is on, unless the user said otherwise');
+  check(b.normalizeBrowsers([{ id: 2 }, { id: 3, remember_zoom: true }, { id: 4, remember_zoom: 'x' }]).filter(x => x.id > 1).map(x => x.remember_zoom).join() === 'false,true,false', 'remember_zoom: not unless the user said so');
   check(b.normalizeBrowsers([{ id: 2, hide_ui: true }, { id: 3, hide_ui: 'x' }]).filter(x => x.id > 1).map(x => x.hide_ui).join() === 'true,false', 'hide_ui: a yes or a no, anything else is no');
   check(w2.mode === 'mobile' && w2.start_kind === 'url' && w2.start_url === b.START_URL && w2.persist === false, 'a wrong value is the default');
 }
