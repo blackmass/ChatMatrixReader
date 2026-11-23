@@ -46,5 +46,5 @@ DIRTY=""; [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] &&
 ditto -c -k --keepParent "$OUT/ChatMatrixReader" "$NAME.zip" || exit 1
 echo
 echo "Done: $(pwd)/$NAME.zip"
-shasum -a 256 "$NAME.zip"
-echo "(upload this file to the release; the SHA-256 above goes into the notes)"
+shasum -a 256 "$NAME.zip" | tee "$OUT/SHA256SUMS-macos.txt"          # (the same line as in the file of the Windows release: SHA-256, two spaces, the name)
+echo "(upload the zip to the release, and with it $(pwd)/$OUT/SHA256SUMS-macos.txt; the SHA-256 above may also go into the notes)"
