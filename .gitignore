@@ -35,7 +35,7 @@ mac_no_panel
 fonts/*
 !fonts/README.txt
 
-#plugin
+# plugins: the folders people put in stay on their PC; only plugins/README.txt (where they go) is published
 plugin-data/
 plugins/*
 !plugins/README.txt
@@ -47,7 +47,7 @@ extensions/
 addon/
 *.part
 
-# ---- docs: only what users read is published (the plugin guide). The notes of the maintainer are kept by him, not in this repository ----
+# ---- docs: only what users read is published (the plugin guide, the LM Studio guide). The notes of the maintainer are kept by him, not in this repository ----
 docs/*
 !docs/README.md
 !docs/plugin-guide*.md
