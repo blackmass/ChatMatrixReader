@@ -162,7 +162,16 @@ fn sync_webs(app: &AppHandle, center: &str, panes: &[Pane]) {
             if changed { moves.push((k, r)); }
         }
     }
-    for (k, r) in moves { if let Some(w) = app.get_webview_window(&k) { let _ = crate::webwin::set_outer(&w, Some(r[0]), Some(r[1]), r[2] as u32, r[3] as u32); } }
+    for (k, r) in &moves { if let Some(w) = app.get_webview_window(k) { let _ = crate::webwin::set_outer(&w, Some(r[0]), Some(r[1]), r[2] as u32, r[3] as u32); } }
+    // (Windows: a window that was put on a screen of another scale is made larger or smaller by the system a moment after it arrived; it is put right again once, so that the page fills the place the center draws)
+    #[cfg(windows)]
+    if !moves.is_empty() {
+        let app2 = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            for (k, r) in moves { if let Some(w) = app2.get_webview_window(&k) { let _ = crate::webwin::set_outer(&w, Some(r[0]), Some(r[1]), r[2] as u32, r[3] as u32); } }
+        });
+    }
 }
 
 /// The title the window of the game has (the setting "와우 창 제목"; the program name is looked at first): told by the center page.

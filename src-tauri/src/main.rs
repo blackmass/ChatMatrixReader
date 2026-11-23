@@ -452,16 +452,17 @@ fn monitor_at(win: &WebviewWindow, x: i32, y: i32) -> (placement::Area, f64) {
 #[tauri::command]
 fn set_window_rect(window: WebviewWindow, x: Option<i32>, y: Option<i32>, w: u32, h: u32) -> Result<(), String> {
     let e = |e: tauri::Error| e.to_string();
+    // The place first, then the size: a window that is put on a screen of another scale (125 % next to 100 %) is made larger or smaller by the system as it arrives (it keeps its size in the units
+    // of the screen it came from). The size that was asked for must be set after that, or the window comes out smaller (or larger) by the difference of the scales at every start.
+    if let (Some(x), Some(y)) = (x, y) { window.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?; }
     // `w`, `h` are the OUTER size (what os_state reports and the config keeps: the frame and the title bar included); set_size sets the INNER
-    // size, so the frame is taken off first. (Without it a window with a frame grew by the frame at every close and open.)
+    // size, so the frame is taken off first (looked at after the move: the frame is another size on another scale). (Without it a window with a frame grew by the frame at every close and open.)
     let (dx, dy) = match (window.inner_size(), window.outer_size()) {
         (Ok(i), Ok(o)) => (o.width.saturating_sub(i.width), o.height.saturating_sub(i.height)),
         _ => (0, 0),
     };
     window.set_size(tauri::PhysicalSize::new(w.saturating_sub(dx).max(120), h.saturating_sub(dy).max(60))).map_err(e)?;
-    if let (Some(x), Some(y)) = (x, y) {
-        window.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?;
-    }
+    if let (Some(x), Some(y)) = (x, y) { window.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?; }          // (once more: a size that changed the frame may have moved the corner)
     Ok(())
 }
 
