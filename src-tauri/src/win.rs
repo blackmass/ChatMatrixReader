@@ -9,6 +9,9 @@ type Handle = isize; // HWND / HDC / HBITMAP are all pointer-sized
 struct POINT { x: i32, y: i32 }
 
 #[repr(C)]
+struct GuiThreadInfo { size: u32, flags: u32, active: Handle, focus: Handle, capture: Handle, menu_owner: Handle, move_size: Handle, caret: Handle, rc: [i32; 4] }
+
+#[repr(C)]
 #[derive(Default)]
 struct RECT { left: i32, top: i32, right: i32, bottom: i32 }
 
@@ -64,6 +67,9 @@ extern "system" {
     fn IsIconic(hwnd: Handle) -> i32;
     fn GetWindow(hwnd: Handle, cmd: u32) -> Handle;
     fn GetTopWindow(hwnd: Handle) -> Handle;
+    fn WindowFromPoint(p: POINT) -> Handle;
+    fn GetAncestor(hwnd: Handle, flags: u32) -> Handle;
+    fn GetGUIThreadInfo(thread: u32, info: *mut GuiThreadInfo) -> i32;
     fn GetClassNameW(hwnd: Handle, buf: *mut u16, max: i32) -> i32;
     fn GetWindowRect(hwnd: Handle, r: *mut RECT) -> i32;
     fn GetClientRect(hwnd: Handle, r: *mut RECT) -> i32;
@@ -572,6 +578,20 @@ pub fn describe(hwnd: isize) -> String {
     let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
     let class = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
     format!("class {class}, program {}", exe_of(hwnd))          // (no title: it may say what the user reads or does)
+}
+/// (only for the log) The top-level window under a point of the screen (0 = none).
+pub fn window_at(x: i32, y: i32) -> isize {
+    unsafe { let h = WindowFromPoint(POINT { x, y }); if h == 0 { 0 } else { let root = GetAncestor(h, 2); if root == 0 { h } else { root } } }          // GA_ROOT
+}
+/// (only for the log) The window that is active and the one that has the keyboard, in the program that is in front now: (active, focus).
+pub fn focus_owner() -> (isize, isize) {
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg == 0 { return (0, 0); }
+        let mut info = GuiThreadInfo { size: std::mem::size_of::<GuiThreadInfo>() as u32, flags: 0, active: 0, focus: 0, capture: 0, menu_owner: 0, move_size: 0, caret: 0, rc: [0; 4] };
+        if GetGUIThreadInfo(GetWindowThreadProcessId(fg, std::ptr::null_mut()), &mut info) == 0 { return (0, 0); }
+        (info.active, info.focus)
+    }
 }
 /// (only for the log) The owner of a window (0 = none) and whether it is a topmost one.
 pub fn owner_of(hwnd: isize) -> isize { unsafe { GetWindow(hwnd, 4) } }

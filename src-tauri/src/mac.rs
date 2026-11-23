@@ -465,10 +465,12 @@ pub fn guard_z(_hwnd: isize, _label: &str) {}
 pub fn set_not_rude(_hwnd: isize) {}
 pub fn no_transitions(_hwnd: isize) {}
 pub fn show_below(_hwnd: isize, _above: isize) {}
-pub fn describe(_hwnd: isize) -> String { String::new() }
+pub fn describe(hwnd: isize) -> String { if hwnd == 0 { "none".into() } else { format!("program {}", exe_of(hwnd)) } }          // (only for the log)
 pub fn owner_of(_hwnd: isize) -> isize { 0 }
-pub fn is_topmost(_hwnd: isize) -> bool { false }
-pub fn z_order_global(_hwnds: &[isize]) -> Vec<isize> { Vec::new() }
+pub fn is_topmost(hwnd: isize) -> bool { on_main(|| unsafe { let level: isize = msg_send![obj(hwnd), level]; level >= LEVEL_FLOATING }) }
+pub fn z_order_global(hwnds: &[isize]) -> Vec<isize> { z_order(hwnds) }          // (only for the log: the windows of the list that are on the screen, from the front)
+pub fn window_at(_x: i32, _y: i32) -> isize { 0 }
+pub fn focus_owner() -> (isize, isize) { (0, 0) }
 pub fn make_no_key(hwnd: isize) {
     on_main(|| unsafe {
         let mut cls = object_getClass(hwnd as *const AnyObject);

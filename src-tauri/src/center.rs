@@ -181,8 +181,9 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
         };
         let Ok(h) = hwnd_of(&w) else { continue };
         if known.as_ref().map_or(true, |v| v.3 != r) {
-            let _ = w.set_position(tauri::PhysicalPosition::new(r[0], r[1]));
+            // (the size first, the place after: a window on macOS grows from its lower left corner, so a window that is made larger after it was put at its place ends up higher than it; a web window is put the same way, see set_outer)
             let _ = w.set_size(tauri::PhysicalSize::new(r[2] as u32, r[3] as u32));
+            let _ = w.set_position(tauri::PhysicalPosition::new(r[0], r[1]));
         }
         if known.is_none() {
             let _ = w.set_ignore_cursor_events(true);
@@ -322,6 +323,15 @@ fn apply_mode(h: isize, mode: u32, game: isize, last: &mut HashMap<isize, u32>) 
     Some((was, want))
 }
 
+/// (only for the log) Which window of this program a handle is: its label ("center2", "blur_center2_1", "web_b1"), "other" when it is not one of the windows of the centers, "-" for none.
+fn our_name(app: &AppHandle, h: isize) -> String {
+    if h == 0 { return "-".to_string(); }
+    for (label, _) in MODES { if let Some(w) = app.get_webview_window(label) { if hwnd_of(&w).ok() == Some(h) { return label.to_string(); } } }
+    if let Some(k) = BLURS.lock().ok().and_then(|b| b.iter().find(|(_, v)| v.2 == h).map(|(k, _)| k.clone())) { return k; }
+    let keys: Vec<String> = WEBS.lock().map(|m| m.keys().cloned().collect()).unwrap_or_default();
+    for k in keys { if let Some(w) = app.get_webview_window(&k) { if hwnd_of(&w).ok() == Some(h) { return k; } } }
+    "other".to_string()
+}
 /// The blur of a window is put on or off (detailed log, area "blur": what was asked and what came back).
 fn blur_apply(h: isize, key: &str, why: &str, on: bool, level: u32) {
     let ok = win::set_blur(h, on, if level == 2 { 4 } else { 3 }, 0x1e, 0x1f, 0x22, 0.004);
@@ -341,6 +351,8 @@ fn blur_snapshot(label: &str, since_ms: u128, ch: isize, blurs: &[isize], game: 
 fn order_diag(msg: String) { crate::debug_log("order", &msg); }
 
 fn run(app: AppHandle) {
+    let mut prev_down = false;                                             // (the left button at the last look, and the window that was in front: only for the detailed log "focus")
+    let mut last_fg: isize = 0;
     let mut mis: HashMap<String, Instant> = HashMap::new();                // (a center whose blur windows are out of order: since when)
     let mut watch: HashMap<String, (Instant, u8)> = HashMap::new();        // (a center whose state has just changed, and its blur windows are looked at again a moment later: since when, how many looks)
     let mut ignoring: HashMap<&str, bool> = HashMap::new();
@@ -381,6 +393,22 @@ fn run(app: AppHandle) {
                 ignoring.insert(label, want_ignore);
             }
         }
+        // (the detailed log, area "focus": what comes to the front, and what is under the mouse and has the keyboard when the left button goes down; nothing is done with it)
+        if crate::debug_on("focus") {
+            let fg = win::foreground();
+            if fg != last_fg {
+                crate::debug_log("focus", &format!("the window in front changes: {} [{}] -> {} [{}]", win::describe(last_fg), our_name(&app, last_fg), win::describe(fg), our_name(&app, fg)));
+                last_fg = fg;
+            }
+            if down && !prev_down {
+                let under = win::window_at(cx, cy);
+                let (active, focus) = win::focus_owner();
+                let taking: Vec<&str> = ignoring.iter().filter(|(_, v)| !**v).map(|(k, _)| *k).collect();
+                crate::debug_log("focus", &format!("the left button goes down at ({cx}, {cy}): under the cursor {} [{}]; the centers that take the mouse {taking:?}, the owner of the mouse {owner:?}; in front {} [{}]; keyboard: active {} [{}], focus {} [{}]",
+                    win::describe(under), our_name(&app, under), win::describe(fg), our_name(&app, fg), win::describe(active), our_name(&app, active), win::describe(focus), our_name(&app, focus)));
+            }
+        }
+        prev_down = down;
         // a blur window whose page has loaded: its blur is asked for once more (what the blur table holds is copied first: no lock is held while the system is asked)
         let ready: Vec<String> = BLUR_READY.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
         for k in ready {

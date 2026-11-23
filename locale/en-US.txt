@@ -1148,3 +1148,5 @@ Shift+휠로 가로 스크롤 = Scroll sideways with Shift + wheel
 웹창 = Web windows
 웹창 페이지와 프로그램 사이의 연결, 확대·축소 요청을 기록합니다. 확대·축소가 가끔 안 될 때 켜세요. = Records the connection between the page of a web window and the program, and the zoom requests. Turn it on when the zoom sometimes does not work.
 상세 기록 = Detailed record
+창 포커스 = Window focus
+앞에 오는 창이 바뀔 때와, 마우스 왼쪽 버튼을 누르는 순간 커서 아래의 창과 키보드를 받는 창이 무엇인지 기록합니다. 다른 창 위에서 게임을 눌렀는데 게임에 포커스가 안 갈 때 켜세요. = Records which window comes to the front, and, when the left mouse button goes down, which window is under the cursor and which one has the keyboard. Turn it on when a click on the game over another window does not give the game the focus.
