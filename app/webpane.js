@@ -163,7 +163,8 @@ export class WebPane {
     const g = layout.parseGeometry(this.savedGeometry()) || { w: 360, h: 640, x: null, y: null };
     const d = this.center.dpr(), [ox, oy] = this.center.origin();
     const m = this.center.mainScreen && this.center.mainScreen();                       // (no saved place: on the main screen; the area of all the screens has holes)
-    const x = g.x === null ? (m ? m[0] + 120 : ox + 200) : g.x, y = g.y === null ? (m ? m[1] + 100 : oy + 160) : g.y;
+    const spot = g.x === null || g.y === null ? this.center.firstSpot && this.center.firstSpot(this, g.w, g.h, this.head) : null;          // (no saved place: the middle of the screen, a step further when another window stands there)
+    const x = g.x === null ? (spot ? spot[0] : m ? m[0] + 120 : ox + 200) : g.x, y = g.y === null ? (spot ? spot[1] : m ? m[1] + 100 : oy + 160) : g.y;
     this.rect = { x: (x - ox) / d, y: (y - oy) / d, w: g.w / d, h: g.h / d };
     this.geo = this.seenGeo = this.savedGeometry() || '';
     this.layout();

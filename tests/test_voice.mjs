@@ -25,9 +25,9 @@ check(plan(base, { engines: ['cpu', 'vulkan', 'cuda'], models: ['large-v3-turbo'
   const { engineArgs, benchArgs } = await import('../app/core/voice_proto.js');
   const dev = a => a[a.indexOf('--device') + 1];
   check(dev(engineArgs({}, pc)) === 'cpu' && dev(engineArgs({}, pg)) === 'gpu' && dev(benchArgs(pc, 'f.wav')) === 'cpu', 'the device of the plan goes to the engine');
-  const { exePath, exeName, mergeCatalog } = await import('../app/core/voice_catalog.js');
+  const { exePath, exeName, mergeCatalog, BUILTIN } = await import('../app/core/voice_catalog.js');
   check(exePath('metal') === 'extensions/stt/engine-metal/cmr-stt' && exePath('cpu') === 'extensions/stt/engine-cpu/cmr-stt.exe' && exeName('vulkan') === 'cmr-stt.exe', 'the Mac engine has no .exe');
-  check(mergeCatalog('').engines.metal.files.length === 0 && mergeCatalog(JSON.stringify({ engines: { metal: { files: [{ name: 'cmr-stt', url: 'https://x/y' }] } } })).engines.metal.files[0].name === 'cmr-stt', 'the catalog knows metal');
+  check(mergeCatalog('').engines.metal.files.length === BUILTIN.engines.metal.files.length && mergeCatalog(JSON.stringify({ engines: { metal: { files: [{ name: 'cmr-stt', url: 'https://x/y' }] } } })).engines.metal.files[0].name === 'cmr-stt', 'the catalog knows metal');
   const vc = new VoiceControl({ files: memoryFiles(), getCfg: () => base });
   vc.applied = vc.snapshot(base, pg);
   vc.state.installed = mac; vc.updatePending({ ...base, voice_device: 'cpu' });

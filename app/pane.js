@@ -104,9 +104,13 @@ export class Pane {
     const cfg = this.center.cfg(), g = layout.parseGeometry(this.savedGeometry()) || { w: layout.DEFAULT_SIZE[0], h: layout.DEFAULT_SIZE[1], x: null, y: null };
     const d = this.center.dpr(), [ox, oy] = this.center.origin();
     let { x, y } = g;
-    if (x === null || y === null) {                                  // no place saved: next to the main window, a little lower each time (like a window of 3.1.1)
-      const m = layout.parseGeometry(cfg.geometry), n = Math.max(1, cfg.child_windows.findIndex(c => c.id === this.id) + 1);
-      [x, y] = layout.cascade(m && m.x !== null ? [m.x, m.y] : null, this.id === MAIN ? 0 : n);
+    if (x === null || y === null) {                                  // no place saved: the middle of the screen, a step further when another window stands there (never at the top edge: the menu bar)
+      const spot = this.center.firstSpot && this.center.firstSpot(this, g.w, g.h, this.head);
+      if (spot) [x, y] = spot;
+      else {                                                         // (the screens are not known yet: next to the main window, a little lower each time, like a window of 3.1.1)
+        const m = layout.parseGeometry(cfg.geometry), n = Math.max(1, cfg.child_windows.findIndex(c => c.id === this.id) + 1);
+        [x, y] = layout.cascade(m && m.x !== null ? [m.x, m.y] : null, this.id === MAIN ? 0 : n);
+      }
     }
     this.rect = { x: (x - ox) / d, y: (y - oy) / d, w: g.w / d, h: g.h / d };
     this.geo = this.seenGeo = this.savedGeometry() || '';

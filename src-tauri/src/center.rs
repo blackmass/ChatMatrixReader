@@ -35,12 +35,24 @@ fn screens(app: &AppHandle) -> Option<(Vec<[i32; 4]>, [i32; 4])> {
 /// What the centers cover now (the screens and their rectangle); the loop of `run` looks again every 2 s.
 static SCREENS: Mutex<Option<(Vec<[i32; 4]>, [i32; 4])>> = Mutex::new(None);
 
-fn layout_payload(s: &(Vec<[i32; 4]>, [i32; 4])) -> Value { json!({ "origin": [s.1[0], s.1[1]], "monitors": s.0 }) }
+/// The work areas of the screens (what the menu bar, the dock or the task bar leave), in the order of `screens`: where a window that has no place of its own may first appear.
+fn works(app: &AppHandle) -> Vec<[i32; 4]> {
+    let primary = app.primary_monitor().ok().flatten().map(|m| (m.position().x, m.position().y));
+    let mut list: Vec<[i32; 4]> = Vec::new();
+    for m in app.available_monitors().unwrap_or_default() {
+        let a = m.work_area();
+        let one = [a.position.x, a.position.y, a.size.width as i32, a.size.height as i32];
+        if primary == Some((m.position().x, m.position().y)) { list.insert(0, one); } else { list.push(one); }
+    }
+    list
+}
 
-/// The screens (for a page that starts after the change was told): { origin: [x, y], monitors: [[x, y, w, h], ..] } (the main screen first).
+fn layout_payload(app: &AppHandle, s: &(Vec<[i32; 4]>, [i32; 4])) -> Value { json!({ "origin": [s.1[0], s.1[1]], "monitors": s.0, "work": works(app) }) }
+
+/// The screens (for a page that starts after the change was told): { origin: [x, y], monitors: [[x, y, w, h], ..], work: [[x, y, w, h], ..] } (the main screen first; `work` = without the menu bar and the like).
 #[tauri::command]
-pub async fn center_layout() -> Result<Value, String> {
-    Ok(SCREENS.lock().ok().and_then(|s| s.as_ref().map(layout_payload)).unwrap_or(Value::Null))
+pub async fn center_layout(app: AppHandle) -> Result<Value, String> {
+    Ok(SCREENS.lock().ok().and_then(|s| s.as_ref().map(|s| layout_payload(&app, s))).unwrap_or(Value::Null))
 }
 
 /// The size of everything in a center: `scale` 0 = as big as on the main screen (what the system says), else the factor wanted (1.25 = 125%). The page is zoomed so that one pixel of the page
@@ -451,7 +463,7 @@ fn run(app: AppHandle) {
                             let _ = w.set_size(tauri::PhysicalSize::new((r - l) as u32, (b - t) as u32));
                         }
                     }
-                    let payload = layout_payload(&now);
+                    let payload = layout_payload(&app, &now);
                     if let Ok(mut s) = SCREENS.lock() { *s = Some(now); }
                     for (label, _) in MODES { let _ = app.emit_to(label, "center-layout", payload.clone()); }
                 }

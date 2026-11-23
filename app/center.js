@@ -7,6 +7,7 @@ import * as winconf from './core/winconf.js';
 import * as fonts from './fonts.js';
 import { tr } from './core/i18n.js';
 import { Pane } from './pane.js';
+import { firstPlace } from './core/winlayout.js';
 import { WebPane } from './webpane.js';
 import { linkHandler } from './chatview.js';
 import { menuList } from './ctxmenu.js';
@@ -37,6 +38,7 @@ let webWins = [];
 const everyBox = () => [...panes.values(), ...webs.values()];
 let lampState = null;                          // the last state of the voice lamp (a pane made later gets it)
 let open = new Set([MAIN]);
+let works = [];                                // (the same screens without the menu bar, the dock, the task bar: where a new window may go)
 let screens = [];                              // (all the screens, see below: declared before anything can ask for them, a layout that comes early must not find it not made)
 const center = {
   label,
@@ -44,6 +46,13 @@ const center = {
   dpr,
   origin: () => [ox, oy],
   mainScreen: () => screens[0] || null,
+  // where a window with no saved place goes: the middle of the work area of the main screen, a step further when another window stands there (core/winlayout.js firstPlace). Screen pixels, or null (not known yet)
+  firstSpot(self, w, h, headCss) {
+    const a = works[0] || screens[0];
+    if (!a) return null;
+    const d = dpr(), taken = everyBox().filter(p => p !== self && p.rect).map(p => ({ x: Math.round(ox + p.rect.x * d), y: Math.round(oy + p.rect.y * d) }));
+    return firstPlace({ w, h }, a, taken, Math.round(headCss * d));
+  },
   monitors: () => screens,                                      // (all the screens: [x, y, w, h] in screen pixels; a box stays on one of them: frame.js)
   registry: defaultRegistry(),                 // (the widgets: the program's own, and what the plugins register comes by 'widget-defs')
   changed: () => report(),
@@ -275,6 +284,7 @@ function layout(l) {
     ox = nx; oy = ny;
   }
   screens = l.monitors || [];
+  works = l.work || [];
   return applyScale().then(fit);
 }
 await listen('center-layout', e => layout(e.payload));

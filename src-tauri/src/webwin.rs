@@ -461,7 +461,16 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     // the place the window had (outer, screen pixels); else the size that was asked for
     let (w, h) = (args.get("w").and_then(|v| v.as_u64()), args.get("h").and_then(|v| v.as_u64()));
     if let (Some(w), Some(h)) = (w, h) {
-        let _ = set_outer(&win, args.get("x").and_then(|v| v.as_i64()).map(|v| v as i32), args.get("y").and_then(|v| v.as_i64()).map(|v| v as i32), w as u32, h as u32);
+        let (mut x, mut y) = (args.get("x").and_then(|v| v.as_i64()).map(|v| v as i32), args.get("y").and_then(|v| v.as_i64()).map(|v| v as i32));
+        // no place asked for (the hub could not tell the middle of the screen): the middle of the work area of the main screen, never under the menu bar (the bars of the center stand above the page)
+        if x.is_none() || y.is_none() {
+            if let Some(m) = app.primary_monitor().ok().flatten() {
+                let a = m.work_area();
+                x = Some(a.position.x + ((a.size.width as i32 - w as i32) / 2).max(0));
+                y = Some(a.position.y + ((a.size.height as i32 - h as i32) / 2).max(48));
+            }
+        }
+        let _ = set_outer(&win, x, y, w as u32, h as u32);
     }
     // never the keyboard of the game: a window that cannot become the key window (macOS), the "no activate" style (Windows)
     if let Ok(hw) = hwnd_of(&win) {

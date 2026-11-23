@@ -13,6 +13,7 @@ import { tr } from './core/i18n.js';
 import { LIGHT_BLUE, TIP_SEP } from './core/chattext.js';
 import { isMac } from './platform.js';
 import { createWebHost } from './web_host.js';
+import { newWindowPlace } from './core/placer.js';
 import { webPatterns, openPatterns, hostMatches } from './core/plugins.js';
 
 const LOG_KEEP = 200;
@@ -148,7 +149,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     };
   }
 
-  const web = createWebHost({ getEntry: entry, getConf: id => webEntry(id), patchConf: (id, patch) => { const c = webEntry(id); if (c) settings.set({ child_windows: (settings.cfg().child_windows || []).map(x => (x === c || x.id === c.id ? { ...x, ...patch } : x)) }); }, invoke, note, getRender: () => settings.cfg().web_render || 'auto', emit, listen });
+  const web = createWebHost({ getEntry: entry, getConf: id => webEntry(id), patchConf: (id, patch) => { const c = webEntry(id); if (c) settings.set({ child_windows: (settings.cfg().child_windows || []).map(x => (x === c || x.id === c.id ? { ...x, ...patch } : x)) }); }, invoke, note, place: (w, h, top) => newWindowPlace({ invoke, cfg: settings.cfg }, w, h, top), getRender: () => settings.cfg().web_render || 'auto', emit, listen });
 
   // One bridge for a plugin (its background page and its options page in the options window share it: one storage, one set of limits); a new one when the allowed permissions change
   const bridges = new Map();                   // id -> { key, bridge, hooks }

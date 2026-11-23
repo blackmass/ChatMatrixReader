@@ -32,7 +32,7 @@ const INFO_MS = 500, SAVE_MS = 600, DEFAULT_W = 360, DEFAULT_H = 640;
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };
 export const webLabel = id => 'web_' + String(id).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
 
-export function createWebHost({ getEntry, getConf, patchConf, invoke, note, getRender = () => 'auto', emit = () => {}, listen = () => {}, setTimer = setInterval, clearTimer = clearInterval }) {
+export function createWebHost({ getEntry, getConf, patchConf, invoke, note, place = async () => null, getRender = () => 'auto', emit = () => {}, listen = () => {}, setTimer = setInterval, clearTimer = clearInterval }) {
   const open = new Map();                       // id -> { label, title, timers, saveAt, last }
   // what the user chose (the window entry may not be there yet: the defaults of a new window)
   const opts = id => {
@@ -78,7 +78,8 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, getR
       const phone = mobile ? mobileProfile() : {};                    // (the same phone as a window of the mini browser: the user agent and the headers of the browser that say the same)
       const args = { label: webLabel(id), url, title, ua: phone.ua || '', ua_hints: phone.hints || null, allow: patterns, open_allow: openAllow, persist: !!w.cookies, shift_scroll: !!w.shift_scroll, rclick_copy: w.rclick_copy !== false, key: id, render: getRender(),
         w: Number.isFinite(w.w) ? w.w : null, h: Number.isFinite(w.h) ? w.h : null, x: Number.isFinite(w.x) ? w.x : null, y: Number.isFinite(w.y) ? w.y : null };
-      if (args.w === null || args.h === null) { delete args.w; delete args.h; delete args.x; delete args.y; args.w = DEFAULT_W; args.h = DEFAULT_H; }
+      if (args.w === null || args.h === null) { delete args.w; delete args.h; delete args.x; delete args.y; args.w = DEFAULT_W; args.h = DEFAULT_H;
+        const at = await place(DEFAULT_W, DEFAULT_H, 22); if (at) { args.x = at[0]; args.y = at[1]; } }          // (the first time: the middle of the screen, never under the menu bar)
       await invoke('web_open', { args });
       if (!open.has(id)) {
         const o = { label: webLabel(id), title, timers: [], saveAt: 0, last: '', pending: null };
