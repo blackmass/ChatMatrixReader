@@ -933,7 +933,7 @@ fonts 폴더의 글꼴 = Fonts of the fonts folder
 이 창에는 다른 창이 탭으로 붙어 있어서, 다른 창의 탭이 될 수 없습니다. = Other windows are tabs of this one, so it cannot be a tab of another window.
 새 글 알림 (탭) = New-line mark (tab)
 다른 탭을 보는 동안 이 탭에 새 글이 오면 탭 이름 앞에 주황색 점을 띄웁니다. 그 탭을 누르면 사라집니다. = When a new line comes to this tab while another tab is shown, an orange dot appears before its name. It goes away when you click the tab.
-귓속말처럼 놓치기 싫은 글을 따로 탭에 모아 둘 때 쓰세요. 클릭 관통 중에도 탭 줄만 보입니다. = Useful for lines you do not want to miss, such as whispers kept in a tab of their own. While the window is click-through, only the row of tabs is shown.
+귓속말처럼 놓치기 싫은 글을 따로 탭에 모아 둘 때 쓰세요. 알림이 붙은 탭은 "평소에 이름 탭 숨기기"와 클릭 관통에 상관없이 보입니다. = Useful for lines you do not want to miss, such as whispers kept in a tab of their own. A tab with a notice shows whatever "Hide the name tab normally" and click-through say.
 {name} 창의 탭 = Tab of the window {name}
 창 고정 = Lock the window
 마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다. 탭을 누르다가 창이 밀리는 일을 막습니다. = Stops the mouse from moving or resizing the window, so a click on a tab cannot push it.
@@ -1135,3 +1135,5 @@ Shift+휠로 가로 스크롤 = Scroll sideways with Shift + wheel
 채팅에 나온 웹 주소(https://…, discord.gg/… 같은 알려진 곳)를 [discord.gg/abc]처럼 눌러 볼 수 있게 표시합니다. = A web address in the chat (https://…, or a known place such as discord.gg/…) is shown like [discord.gg/abc] and can be clicked.
 누르면 바로 열리지 않고 전체 주소를 보여 주며 "미니 브라우저에서 열기", "내 브라우저에서 열기", "주소 복사" 중에서 고르게 합니다. 끄면 주소가 그냥 글자로 보입니다. 새로 들어오는 줄부터 적용됩니다. = A click does not open it at once: it shows the whole address and lets you choose "Open in the mini browser", "Open in my browser" or "Copy the address". When it is off, an address is plain text. It applies from the lines that come in next.
 주소 복사 = Copy the address
+
+창의 모양(이름 탭, 기능 버튼, 프레임)은 위의 "평소에 … 숨기기" 설정을 따릅니다. 관통 중에는 보이기만 하고 누를 수는 없습니다 (조작 키를 누르면 누를 수 있습니다). = The look of the window (the name tab, the icons, the frame) follows the "Hide … normally" settings above. While the mouse goes through, they can be seen but not clicked (hold the interact key to click them).

@@ -171,6 +171,15 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
         if known.is_none() {
             let _ = w.set_ignore_cursor_events(true);
             win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h);
+            // the same as a web window gets (webwin.rs web_open): the system may not bring it over its center by itself (the order guard: it is put on from the thread that made the window), and it
+            // starts in the band the web windows start in (the loop puts it in its own order a moment later)
+            #[cfg(windows)]
+            {
+                let (hh, lbl) = (h, k.clone());
+                let _ = w.run_on_main_thread(move || win::guard_z(hh, &lbl));
+                win::set_topmost(h, true, 0);
+                win::no_transitions(h);                   // (the blur goes at once with the text: the system fades a window that is hidden or closed)
+            }
         }
         if known.as_ref().map_or(true, |v| v.1 != level) { win::set_blur(h, true, if level == 2 { 4 } else { 3 }, 0x1e, 0x1f, 0x22, 0.004); }
         if known.is_none() { let _ = w.show(); }
@@ -283,7 +292,12 @@ fn apply_mode(h: isize, mode: u32, game: isize, last: &mut HashMap<isize, u32>) 
     }
 }
 
+/// A line in startup.log about the order of a center and its blur windows (the first ones only).
+static ORDER_DIAG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+fn order_diag(msg: String) { if ORDER_DIAG.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 40 { crate::startup_log(&msg); } }
+
 fn run(app: AppHandle) {
+    let mut mis: HashMap<String, Instant> = HashMap::new();                // (a center whose blur windows are out of order: since when)
     let mut ignoring: HashMap<&str, bool> = HashMap::new();
     let mut last: HashMap<isize, u32> = HashMap::new();
     let mut z_at = Instant::now() - Duration::from_secs(1);
@@ -360,6 +374,7 @@ fn run(app: AppHandle) {
             webs.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
             let web_labels: Vec<(isize, String)> = webs.iter().map(|w| (w.1, w.2.clone())).collect();
             // from the front: the center, the blurs of its windows (they blur what is under the windows: the pages too), the web windows
+            let n_blur = blurs.len();
             let mut want: Vec<isize> = vec![ch];
             for bh in blurs.into_iter().map(|b| b.1).chain(webs.iter().map(|w| w.1)) {
                 win::keep_style(bh);
@@ -369,6 +384,21 @@ fn run(app: AppHandle) {
             if want.len() > 1 {
                 let seen = win::z_order(&want);
                 let expected: Vec<isize> = want.iter().copied().filter(|h| seen.contains(h)).collect();
+                // (only written down, nothing is done with it) the center and its blur windows out of order: when it was found, how long it lasted, which window of the system was in front
+                if n_blur > 0 {
+                    let cb: Vec<isize> = want.iter().take(1 + n_blur).copied().collect();
+                    let seen_cb: Vec<isize> = seen.iter().filter(|h| cb.contains(h)).copied().collect();
+                    let exp_cb: Vec<isize> = cb.iter().filter(|h| seen.contains(h)).copied().collect();
+                    match (seen_cb != exp_cb, mis.get(label).copied()) {
+                        (true, None) => {
+                            mis.insert(label.to_string(), Instant::now());
+                            let idx: Vec<usize> = seen_cb.iter().filter_map(|h| cb.iter().position(|c| c == h)).collect();
+                            order_diag(format!("order {label} (mode {mode}): the center and its blur windows are out of order: seen {idx:?} (0 = the center, 1.. = the blur windows); the game is in front: {}, this program is in front: {}", win::foreground() == game, win::self_front()));
+                        }
+                        (false, Some(t)) => { mis.remove(label); order_diag(format!("order {label}: in order again after {} ms", t.elapsed().as_millis())); }
+                        _ => {}
+                    }
+                }
                 let (changed, due) = {
                     let o = ORDER.lock().ok();
                     let prev = o.as_ref().and_then(|m| m.get(label).cloned());

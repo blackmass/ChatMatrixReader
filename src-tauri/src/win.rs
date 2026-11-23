@@ -563,6 +563,14 @@ extern "system" {
     fn DwmSetWindowAttribute(hwnd: Handle, attr: u32, value: *const c_void, size: u32) -> i32;
 }
 
+/// The window is not faded in and out by the system when it is shown or hidden (DWMWA_TRANSITIONS_FORCEDISABLED). The blur windows: the text goes at once, so the blur under it must go at once too.
+pub fn no_transitions(hwnd: isize) {
+    unsafe {
+        let on: i32 = 1;
+        DwmSetWindowAttribute(hwnd, 3, &on as *const i32 as *const c_void, 4);
+    }
+}
+
 /// Dark title bar in the colours of the options window (Windows 10: dark; Windows 11: the exact colours). Anything not supported is skipped.
 pub fn style_caption(hwnd: isize) {
     unsafe {

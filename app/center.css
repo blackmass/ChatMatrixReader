@@ -37,17 +37,16 @@ html, body.center { margin: 0; width: 100%; height: 100%; background: transparen
 /* ---- the state of a window (pane.js tick): the classes through / interactive / outside / hover-clear / has-alert / locked / hide-* are those of the body of a window of 3.1.1 */
 .pane.hover-clear { opacity: 0; }
 .pane .ptabs, .pane .ptools { transition: opacity .15s; }
-/* a window the mouse goes through shows no bar (and no frame); a tab with a new line stays (only the tabs, the icons stay away) */
-.pane.through:not(.interactive) .pbar { visibility: hidden; }
-.pane.through.has-alert:not(.interactive) .pbar { visibility: visible; pointer-events: none; }
-.pane.through.has-alert:not(.interactive) .ptools { display: none; }
+/* A window the mouse goes through (and nobody uses at the moment) looks the way the options "평소에 … 숨기기" say, like any other window: the name tab, the icons and the frame are there unless those hide them.
+   Nothing of it takes the mouse (the clicks go to the game; no place is told to the program for it). A tab with a new line shows always. */
+.pane.through:not(.interactive) .pbar { pointer-events: none; }
 .pane .pbody::after { content: ''; position: absolute; inset: 0; box-sizing: border-box; border: 1px solid #3c3f46; border-radius: 0 4px 4px 4px; pointer-events: none; z-index: 3; display: none; }
 .pane.interactive .pbody::after { display: block; }
-.pane.through:not(.interactive) .pgrip { display: none; }
+.pane.through:not(.interactive) .pbody::after { display: block; }
 /* "평소에 인터페이스 숨기기": hidden while the mouse is out of the window, shown (quickly) when it comes in */
 .pane.outside.hide-tools .ptools, .pane.outside.hide-tabs .ptab { opacity: 0; transition: opacity .4s; }
 .pane.outside.hide-frame .pgrip { display: none; }
-.pane.outside.hide-frame.interactive .pbody::after { border-color: transparent; }
+.pane.outside.hide-frame .pbody::after { border-color: transparent; }
 .pane .ptab.alert { color: #ffb347; border-color: rgba(255, 150, 40, .9); opacity: 1 !important; }
 .pane .ptab.alert::before { content: '●'; font-size: 8px; margin-right: 5px; vertical-align: 1px; }
 .pane.has-alert.hide-tabs.outside .ptab.alert { opacity: 1; transition: none; }

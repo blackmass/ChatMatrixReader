@@ -463,6 +463,7 @@ extern "C" fn can_become_key(this: *mut AnyObject, cmd: Sel) -> Bool {
 /// (Windows: a web window is kept from being brought over its center by a press, see win.rs guard_z. The Mac cannot be kept from it: what is over its center is put back by the loop of center.rs.)
 pub fn guard_z(_hwnd: isize, _label: &str) {}
 pub fn set_not_rude(_hwnd: isize) {}
+pub fn no_transitions(_hwnd: isize) {}
 pub fn make_no_key(hwnd: isize) {
     on_main(|| unsafe {
         let mut cls = object_getClass(hwnd as *const AnyObject);

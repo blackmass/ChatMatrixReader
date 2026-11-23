@@ -191,7 +191,8 @@ export class Pane {
     if (this.inside && !inside) this.leave();
     this.inside = inside;
     const c = this.el.classList;
-    c.toggle('outside', !inside); c.toggle('hover-clear', hover);
+    // ("outside": what the hide options and the dimmed bar go by. A window the mouse goes through counts the mouse as away until the interact key is held: the cursor passing over it shows nothing)
+    c.toggle('outside', !inside || !now); c.toggle('hover-clear', hover);
     const d = this.center.dpr(), [ox, oy] = this.center.origin(), px = (cx - ox) / d, py = (cy - oy) / d;
     this.widgets.pointer(inside && !hover ? px : null, inside && !hover ? py : null);       // (the tip of a widget under the cursor: also while click-through)
     // click-through: the page gets no mouse events, so the tip of a link under the cursor is shown from the cursor position (the option "관통 중 링크 보기 허용");

@@ -907,7 +907,25 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(async () => (await cp.locator('.pane.through:not(.interactive)').count()) > 0 && !hasMain() && (centerRects.at(-1).wheel || []).some(p => p.id === '1'), 'the window is click-through: no place for the mouse, its wheel is asked for');
     ok(await mainPane.evaluate(e => e.classList.contains('through') && !e.classList.contains('interactive')) && !hasMain(), 'center/through: click-through: no place for the mouse, no bar');
     ok((centerRects.at(-1).wheel || []).some(p => p.id === '1'), 'center/wheel: the wheel over a click-through window is taken from the game (its place is told)');
-    const mb = await mainPane.boundingBox(); kb.cx = Math.round(mb.x + 40); kb.cy = Math.round(mb.y + 60); kb.shift = true;
+    // the look of a click-through window is the one the "hide" options say: the tab, the icons and the frame are there unless they hide them; nothing takes the mouse
+    const look = () => mainPane.evaluate(e => { const q = x => e.querySelector(x), cs = (x, pe) => getComputedStyle(q(x), pe); return { bar: cs('.pbar').visibility, bp: cs('.pbar').pointerEvents, tab: cs('.ptab').opacity, tools: cs('.ptools').display, toolsA: cs('.ptools').opacity, grip: cs('.pgrip').display, frame: cs('.pbody', '::after').display, edge: cs('.pbody', '::after').borderTopColor }; });
+    const lk = await look();
+    ok(lk.bar === 'visible' && lk.bp === 'none' && lk.tab !== '0' && lk.tools !== 'none' && lk.toolsA !== '0' && lk.grip !== 'none' && lk.frame === 'block' && lk.edge !== 'rgba(0, 0, 0, 0)' && !hasMain(), 'center/through: the name tab, the icons and the frame are shown (as the hide options say), no place for the mouse: ' + JSON.stringify(lk));
+    await cp.evaluate(() => import('./settings.js').then(m => m.set({ hide_tabs: true, hide_frame: true, hide_tools: true })));
+    await until(async () => { const l = await look(); return l.tab === '0' && l.toolsA === '0'; }, 'center/through: with the hide options on, the tab and the icons are hidden', 4000);
+    const lh = await look();
+    ok(lh.edge === 'rgba(0, 0, 0, 0)', 'center/through: and the frame: ' + JSON.stringify(lh));
+    // the cursor passing over a click-through window shows nothing that is hidden; with the interact key held it all comes
+    const mb = await mainPane.boundingBox(); kb.cx = Math.round(mb.x + 40); kb.cy = Math.round(mb.y + 60);
+    await cp.waitForTimeout(900);
+    const lo = await look();
+    ok(lo.tab === '0' && lo.toolsA === '0' && lo.edge === 'rgba(0, 0, 0, 0)' && await mainPane.evaluate(e => e.classList.contains('outside')), 'center/through: the cursor over a click-through window does not show what is hidden: ' + JSON.stringify(lo));
+    kb.shift = true;
+    await until(async () => { const l = await look(); return l.tab !== '0' && l.toolsA !== '0' && l.edge !== 'rgba(0, 0, 0, 0)'; }, 'center/through: with the interact key held, the hidden shows', 3000);
+    kb.shift = false;
+    await until(async () => (await look()).tab === '0', 'center/through: and the key let go: hidden again', 3000);
+    await cp.evaluate(() => import('./settings.js').then(m => m.set({ hide_tabs: false, hide_frame: false, hide_tools: false })));
+    kb.shift = true;
     await until(() => hasMain(), 'the interact key over the window gives it a place for the mouse', 1000);
     ok(await mainPane.evaluate(e => e.classList.contains('interactive')) && hasMain(), 'center/through: the interact key over the window: it takes the mouse');
     kb.shift = false;
@@ -918,6 +936,16 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   await cp.evaluate(() => import('./settings.js').then(m => m.set({ click_through: false })));
   await until(() => hasMain(), 'the window takes the mouse again');
   ok(hasMain(), 'center/through: not click-through: the window takes the mouse');
+  // the scroll bar of the lines: there while the window is used, away while it cannot be (click-through) or when the frame is hidden and the mouse is out
+  {
+    const sb = () => mainPane.evaluate(e => getComputedStyle(e.querySelector('.cv-scroll')).scrollbarColor);
+    const gone = 'rgba(0, 0, 0, 0)';
+    ok(!(await sb()).startsWith(gone), 'center/scroll bar: a window that is used shows its scroll bar: ' + await sb());
+    await cp.evaluate(() => import('./settings.js').then(m => m.set({ hide_frame: true })));
+    await until(async () => (await sb()).startsWith(gone), 'center/scroll bar: hidden with the frame while the mouse is out');
+    await cp.evaluate(() => import('./settings.js').then(m => m.set({ hide_frame: false })));
+    await until(async () => !(await sb()).startsWith(gone), 'center/scroll bar: and back');
+  }
   // blur: the level goes to the program (it makes a window of the system behind the text area); not while the mouse clears the window
   await cp.evaluate(() => import('./settings.js').then(m => m.set({ blur: 2 })));
   await until(() => centerRects.at(-1).panes.some(p => p.id === '1' && p.blur === 2), 'the level of the blur is told');
