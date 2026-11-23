@@ -51,6 +51,7 @@ function grabBytes(x, y, w, h) {
   return out.toString('base64');
 }
 const pluginFetches = [], pluginOpened = [], webCalls = [], centerRects = [];
+let dataFolders = [];                                        // (the login folders of the web windows: what the program would list)
 const opened = [], watched = [], trayTexts = [];
 let gameGone = false;
 const wheel = [];                                    // wheel turns the fake exe tells (up = positive)
@@ -85,6 +86,7 @@ async function invoke(cmd, a = {}) {
     case 'web_events': return [];
     case 'web_clear': webCalls.push(['clear', a.label]); return null;
     case 'web_forget': webCalls.push(['forget', a.key]); return null;
+    case 'web_data_list': return dataFolders;
     case 'plugin_hash': return { hash: 'abc', files: [] };
     case 'plugin_fetch': pluginFetches.push(a); return { status: 200, body: '<html>list</html>', url: a.url, type: 'text/html' };
     case 'app_folder': return 'C:\\fake\\ChatMatrixReader';
@@ -1174,16 +1176,25 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   await until(async () => (await picker.locator('option').allTextContents()).some(t => t.includes('9 · 플러그인 웹')), 'the web window of the plugin is in the picker');
   const opts = await picker.locator('option').allTextContents();
   ok(opts.some(t => t.includes('플러그인 웹창 ──')) && opts.indexOf(opts.find(t => t.includes('9 ·'))) > opts.findIndex(t => t.includes('──')), 'browser: the web windows of the plugins are below a line in the picker: ' + opts.join('|'));
+  // a web window of a plugin that is not there: what is left of it is told as that, and has a button to take it away (with the login folder of the plugin)
   await picker.selectOption('w9');
-  await until(async () => (await opt.locator('.row b.label', { hasText: /^열리는 때$/ }).count()) === 1, 'the rows of the web window');
-  ok(await opt.locator('.row b.label', { hasText: /^화면$/ }).count() === 0 && await opt.locator('.wintool button', { hasText: '삭제' }).isHidden(), 'browser: a web window of a plugin has its own few rows, and cannot be deleted here');
-  await sw('창 고정').click();
-  await until(async () => cfgFile().child_windows.find(c => c.id === 9).lock_window === true, 'the lock is saved in the entry of the window');
-  await sw('와우 위에만').click();
-  await until(async () => cfgFile().child_windows.find(c => c.id === 9).topmost_wow_only === true, 'above the game only is saved');
-  ok(cfgFile().child_windows.find(c => c.id === 9).topmost === false, 'browser: "above the game only" takes "always on top" off for the web window too');
+  await until(async () => (await opt.locator('.orphan-note').count()) === 1, 'a web window of a plugin that is gone shows a note');
+  ok(opts.some(t => t.includes('9 ·') && t.includes('지워진 플러그인')) && (await opt.locator('.orphan-note').textContent()).includes('"plug"') && await opt.locator('.row b.label', { hasText: /^열리는 때$/ }).count() === 0, 'browser: the web window of a plugin that is gone is marked, with a note and no settings: ' + opts.join('|'));
+  const delW = opt.locator('.wintool button', { hasText: /^(삭제|정말 삭제\?)$/ });
+  ok(await delW.isVisible(), 'browser: the way to delete it is there');
+  await delW.click(); await delW.click();
+  await until(async () => !cfgFile().child_windows.some(c => c.id === 9), 'the window is taken out of the settings', 4000);
+  ok(webCalls.some(c => c[0] === 'forget' && c[1] === 'plug'), 'browser: the login folder of that plugin is taken away with it');
+  // a login folder that no window has: shown, and taken away by hand
+  await until(async () => (await opt.locator('.stored').count()) === 1, 'the card of the logins that are left');
+  ok((await opt.locator('.stored').textContent()).includes('남은 로그인 정보가 없습니다'), 'browser: nothing is left over when no folder is there');
+  dataFolders = ['browser1', 'browser7', 'oldplug', '_private'];
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ web_render: 'cpu' }))); await control.evaluate(() => import('./settings.js').then(m => m.set({ web_render: 'auto' })));
+  await until(async () => (await opt.locator('.stored code').allTextContents()).join() === 'browser7,oldplug', 'the folders that no window has are listed (the ones of a window, and the private one, are not)', 4000);
+  await opt.locator('.stored .bm-row', { hasText: 'oldplug' }).locator('button').click();
+  await until(() => webCalls.some(c => c[0] === 'forget' && c[1] === 'oldplug'), 'a folder that is left over is taken away by hand');
+  dataFolders = [];
   await picker.selectOption('b1');
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ child_windows: m.cfg().child_windows.filter(c => c.id !== 9) })));
 }
 // the tab "기록": the log moved here from "정보", and the table of the processes
 await opt.locator('#tabs li', { hasText: '기록' }).click(); await control.waitForTimeout(1500);
@@ -1585,6 +1596,17 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(400);
   const wl = await control.evaluate(() => import('./settings.js').then(m => m.cfg().child_windows.map(c => c.id)));
   ok(!wl.includes(90) && wl.includes(91), 'plugins/windows: a window the plugin does not declare any more is dropped, a window of a missing plugin is kept: ' + JSON.stringify(wl));
+  // the window of a plugin that is not there: marked in the picker of the tab 창, a note instead of the settings, and the delete button that the windows of a plugin that is there do not have
+  {
+    await opt.locator('#tabs li', { hasText: '창' }).first().click();
+    const pk = opt.locator('.wintool select');
+    await until(async () => (await pk.locator('option').allTextContents()).some(t => t.startsWith('91 ·') && t.includes('지워진 플러그인')), 'the window of the plugin that is gone is marked in the picker');
+    await pk.selectOption('91');
+    await until(async () => (await opt.locator('.orphan-note').count()) === 1, 'it shows the note');
+    const dbg = [(await opt.locator('.orphan-note').textContent()).slice(0, 60), await opt.locator('.wintool button', { hasText: /^삭제$/ }).isVisible(), await opt.locator('.row:not([hidden]) b.label', { hasText: /^배경 진하기$/ }).count(), await opt.locator('.wintool button:not([hidden])').allTextContents()];
+    ok(dbg[0].includes('"ghost-plugin"') && dbg[1] && dbg[2] === 0, 'options/windows: a window of a plugin that is gone: the note, no settings, a delete button: ' + JSON.stringify(dbg));
+    await pk.selectOption('1');
+  }
   await opt.evaluate(() => window.__TAURI__.event.emit('plugin-command', { cmd: 'forget', id: 'ghost-plugin' })); await control.waitForTimeout(500);
   const after = await control.evaluate(() => import('./settings.js').then(m => ({ w: m.cfg().child_windows.map(c => c.id), p: Object.keys(m.cfg().plugins) })));
   ok(!after.w.includes(91) && !after.p.includes('ghost-plugin'), 'plugins: "forget" clears the settings and windows of a plugin that is not there: ' + JSON.stringify(after));
@@ -1600,6 +1622,28 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   ok(w1.ok && wo && wo[1].url === 'https://m.example.com/view?no=3' && wo[1].allow.join() === '*.example.com' && wo[1].ua.includes('Android') && wo[1].ua_hints && wo[1].ua_hints.mobile === true && wo[1].persist === false && wo[1].label.startsWith('web_') && w2.ok === false && w2.error.code === 'denied', 'plugins/web: the address goes to the exe with the domain pattern, a mobile agent and no cookies; another host is denied');
   const wc = await asked('web.close', {});
   ok(wc.ok && webCalls.some(c => c[0] === 'close'), 'plugins/web: close goes to the exe');
+  // the login of its web window: a setting of the window (Options > 미니 브라우저); what was chosen for the plugin in 3.1 moves there once
+  {
+    await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { ...m.cfg().plugins, [id]: { ...m.cfg().plugins[id], web: { cookies: true } } } })), PID);
+    await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(600);
+    const cw = await control.evaluate(id => import('./settings.js').then(m => ({ win: (m.cfg().child_windows.find(c => c.owner === id && c.kind === 'web') || {}).cookies, old: 'web' in (m.cfg().plugins[id] || {}) })), PID);
+    ok(cw.win === true && cw.old === false, 'plugins/web: the login chosen for the plugin moves to its web window, the old value goes: ' + JSON.stringify(cw));
+    const wid = await control.evaluate(id => import('./settings.js').then(m => m.cfg().child_windows.find(c => c.owner === id && c.kind === 'web').id), PID);
+    await opt.locator('#tabs li', { hasText: '미니 브라우저' }).click();
+    await opt.locator('.subtabs button', { hasText: '미니 브라우저 설정' }).click();
+    const pk = opt.locator('.wintool select');
+    await until(async () => (await pk.locator('option').allTextContents()).some(t => t.startsWith(wid + ' ·') && !t.includes('지워진')), 'the web window of the plugin is in the picker, and the plugin is not called gone');
+    await pk.selectOption('w' + wid);
+    const loginRow = opt.locator('.row', { has: opt.locator('b.label', { hasText: /^로그인 유지$/ }) });
+    await until(async () => (await loginRow.count()) === 1, 'the web window of a plugin has the row of the login');
+    ok(await loginRow.locator('input[type=checkbox]').isChecked(), 'options: the row shows what moved from the plugin');
+    await loginRow.locator('input[type=checkbox]').uncheck();
+    await until(async () => (await control.evaluate(id => import('./settings.js').then(m => m.cfg().child_windows.find(c => c.owner === id && c.kind === 'web').cookies), PID)) === false, 'the login is switched off in the window');
+    await opt.locator('.row', { has: opt.locator('b.label', { hasText: /^로그인 정보$/ }) }).locator('button.btn').click();
+    await until(() => webCalls.some(c => c[0] === 'forget' && c[1] === PID), 'the login of the web window of a plugin that is not open: its folder is taken away');
+    ok(await opt.locator('.wintool button', { hasText: /^삭제$/ }).isHidden(), 'options: the web window of a plugin that is there is not deleted here');
+    await pk.selectOption('b1');
+  }
   // openUrl: an address goes to the browser of the user, only for an allowed host over https
   const ou = await asked('openUrl', { url: 'https://example.com/view?no=3' }); const ou2 = await asked('openUrl', { url: 'https://evil.org/' });
   ok(ou.ok && pluginOpened.at(-1).url === 'https://example.com/view?no=3' && pluginOpened.at(-1).hosts.includes('example.com') && ou2.ok === false && ou2.error.code === 'denied', 'plugins/openUrl: an address of an allowed host goes to the exe command, another one is denied');

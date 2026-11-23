@@ -4,6 +4,8 @@ import { tr } from '../core/i18n.js';
 import * as B from '../core/browsers.js';
 import { nameFor } from '../winname.js';
 import * as settings from '../settings.js';
+import { without } from '../core/winconf.js';
+import { goneOwner, onGoneChange, goneNote } from './orphans.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const btn = (text, cls = '') => el('button', cls, text);
@@ -19,6 +21,7 @@ const mine = (key, dflt, extra = {}) => ({
   key: 'browser_' + key, def: dflt, get: cfg => cur(cfg)[key], patch: (cfg, v) => ({ browser_windows: list(cfg).map(b => (b.id === cur(cfg).id ? { ...b, [key]: v } : b)) }), ...extra,
 });
 const hasWindow = () => true;
+const goneNow = () => { if (isBrowser()) return false; const c = (settings.cfg().child_windows || []).find(x => x.id === curNum()); return !!(c && goneOwner(c.owner)); };          // (the chosen web window is a plugin's that is not there)
 // a row of the chosen web window of a plugin: its entry in the list of windows
 const webConf = cfg => (cfg.child_windows || []).find(c => c.id === curNum()) || {};
 const webRow = (key, dflt, extra = {}, change = v => ({ [key]: v })) => ({
@@ -75,7 +78,16 @@ const webCard =
       webRow('topmost_wow_only', false, { type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
         note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.' }, v => ({ topmost_wow_only: v, ...(v ? { topmost: false } : {}) })),
       webRow('lock_window', false, { type: 'check', label: '창 고정', keywords: '이동 크기 조절 잠금 드래그 고정 lock', note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다.' }),
+      webRow('cookies', false, { type: 'check', label: '로그인 유지', keywords: '쿠키 로그인 저장 세션 계정',
+        note: ['켜면 이 창에서 로그인한 정보(쿠키)를 프로그램 폴더에 보관해서 다음에 열어도 로그인이 유지됩니다.', '끄면(기본) 창을 닫을 때마다 모두 잊습니다. 플러그인마다 따로 보관됩니다.'] }),
+      { type: 'button', label: '로그인 정보', button: '로그인 정보 지우기', keywords: '쿠키 로그인 지우기 삭제 세션 초기화',
+        note: '이 창이 보관한 로그인 정보(쿠키)를 지웁니다. 창이 열려 있으면 그 창의 것을 지우고, 닫혀 있으면 보관 폴더를 지웁니다.',
+        action: ctx => { const o = webConf(ctx.cfg()).owner; if (o) emit('plugin-command', { cmd: 'webClear', id: o }); } },
     ] };
+
+// a web window of a plugin that is gone: only the note (the picker above has the delete button)
+const goneCard =
+    { title: '지워진 플러그인의 웹창', rows: [{ type: 'custom', block: true, label: '', keywords: '', build: ctx => goneNote(webConf(ctx.cfg()).owner || '') }] };
 
 // the bookmarks (the other page of this tab)
 const bookmarkCard =
@@ -83,17 +95,24 @@ const bookmarkCard =
       { type: 'custom', block: true, label: '', keywords: '즐겨찾기 북마크 bookmark 주소 목록 추가 삭제', build: ctx => bookmarksPanel(ctx) },
     ] };
 
+// the folders where web windows keep a login (Windows: webview-data/web/<name>/): the ones no window has now are shown, one by one, to be taken away
+const storedCard =
+    { title: '남은 로그인 정보', rows: [
+      { type: 'custom', block: true, label: '', keywords: '쿠키 로그인 저장 폴더 남은 데이터 삭제 지워진 창', build: ctx => storedPanel(ctx) },
+    ] };
+
 const tab = {
   id: 'browser', title: '미니 브라우저', subtitle: '공략이나 영상 같은 웹 페이지를 게임 위에 작은 창으로 띄워 봅니다',
-  cards: [browserCard, webCard, commonCard, bookmarkCard],                  // (all of them: the search and the list of what was changed look at these)
+  cards: [browserCard, webCard, goneCard, commonCard, storedCard, bookmarkCard],                  // (all of them: the search and the list of what was changed look at these)
   // what is shown now: the page chosen above, and for the page of the settings the kind of window that is chosen
-  visibleCards: () => (page === 'bookmarks' ? [bookmarkCard] : [isBrowser() ? browserCard : webCard, commonCard]),
+  visibleCards: () => (page === 'bookmarks' ? [bookmarkCard] : [isBrowser() ? browserCard : (goneNow() ? goneCard : webCard), commonCard, storedCard]),
 
   // above the cards: the two pages of the tab, and (settings) the picker of the window. env = { cfg(), sel(), select(id) }
   toolbar(env) {
     const wrap = el('div', 'bt');
     const pages = el('div', 'subtabs'), pSettings = btn('미니 브라우저 설정'), pBook = btn('즐겨찾기 설정');
     pages.append(pSettings, pBook);
+    onGoneChange(() => { if (wrap.isConnected) refresh(); });
     const bar = el('div', 'wintool');
     const pick = el('select'), add = btn('새 창'), del = btn('삭제'), toggle = btn('열기'), note = el('span', 'winstate');
     bar.append(pick, note, toggle, add, del);
@@ -121,6 +140,12 @@ const tab = {
     del.onclick = () => {
       if (!armed) { armed = true; del.textContent = '정말 삭제?'; del.classList.add('on'); setTimeout(() => { armed = false; refresh(); }, 3000); return; }
       armed = false;
+      if (!isBrowser()) {                                                       // (a web window of a plugin that is gone: what is left of it, and the login folder of the plugin)
+        const id = curNum(), c = (env.cfg().child_windows || []).find(x => x.id === id);
+        current = 'b' + B.DEFAULT_ID; rerender();
+        if (c && goneOwner(c.owner)) { invoke('web_forget', { key: c.owner }).catch(() => {}); request({ child_windows: without(env.cfg().child_windows, [id]) }); }
+        return;
+      }
       const l = list(env.cfg()), id = curNum();
       current = 'b' + B.DEFAULT_ID; rerender();
       request({ browser_windows: l.filter(b => b.id !== id || id === B.DEFAULT_ID) });
@@ -135,20 +160,43 @@ const tab = {
       for (const b of l) { const o = el('option', '', `${b.id} · ${B.browserName(l, b.id, tr)}`); o.value = 'b' + b.id; pick.append(o); }
       if (webs.length) {                                                          // (the web windows of the plugins: below ours, after a line, like the windows of the plugins in the tab 창)
         const line = el('option', '', '── ' + tr('플러그인 웹창') + ' ──'); line.disabled = true; pick.append(line);
-        for (const c of webs) { const o = el('option', '', `${c.id} · ${nameFor(env.cfg(), c.id)}`); o.value = 'w' + c.id; pick.append(o); }
+        for (const c of webs) { const o = el('option', '', `${c.id} · ${nameFor(env.cfg(), c.id)}` + (goneOwner(c.owner) ? ' · ' + tr('지워진 플러그인') : '')); o.value = 'w' + c.id; pick.append(o); }
       }
       pick.value = current;
       add.disabled = !B.canAddBrowser(l);
       add.title = add.disabled ? tr('브라우저 창은 {n}개까지 만들 수 있습니다', { n: B.MAX_BROWSERS }) : '';
-      note.textContent = isBrowser() ? (opened.has(curNum()) ? tr('열려 있음') : curNum() === B.DEFAULT_ID ? tr('기본 창 (삭제할 수 없음)') : '') : tr('플러그인이 엽니다');
+      note.textContent = isBrowser() ? (opened.has(curNum()) ? tr('열려 있음') : curNum() === B.DEFAULT_ID ? tr('기본 창 (삭제할 수 없음)') : '') : goneNow() ? tr('지워진 플러그인의 설정') : tr('플러그인이 엽니다');
       toggle.hidden = !isBrowser(); toggle.textContent = opened.has(curNum()) ? '닫기' : '열기';
-      del.hidden = !isBrowser() || curNum() === B.DEFAULT_ID;
+      del.hidden = isBrowser() ? curNum() === B.DEFAULT_ID : !goneNow();
       if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
     }
     return { el: wrap, refresh };
   },
 };
 export default tab;
+
+// ---- what the web windows left: a login folder (Windows) whose window is not there (it was deleted, or the plugin was taken away): shown with a button to take it away
+function storedPanel(ctx) {
+  const root = el('div', 'stored');
+  const draw = async () => {
+    let names = [];
+    try { names = (await invoke('web_data_list')) || []; } catch { /* no list */ }
+    const cfg = ctx.cfg();
+    const known = new Set([...(cfg.browser_windows || []).map(b => 'browser' + b.id), ...(cfg.child_windows || []).filter(c => c.kind === 'web' && c.owner).map(c => c.owner)]);
+    const left = names.filter(n => !n.startsWith('_') && !known.has(n));
+    root.textContent = '';
+    if (!left.length) { root.append(el('small', 'note', tr('남은 로그인 정보가 없습니다. 지워진 창이나 지워진 플러그인의 로그인 정보가 남아 있으면 여기에 보입니다.'))); return; }
+    root.append(el('small', 'note', tr('아래는 지금 없는 창이나 플러그인이 보관했던 로그인 정보입니다. 더는 필요 없으면 지울 수 있습니다.')));
+    for (const n of left) {
+      const line = el('div', 'bm-row'), rm = btn(tr('지우기'));
+      rm.onclick = async () => { await invoke('web_forget', { key: n }).catch(() => {}); draw(); };
+      line.append(el('code', '', n), rm); root.append(line);
+    }
+  };
+  draw();
+  settings.onChange(() => { if (root.isConnected) draw(); });
+  return root;
+}
 
 // ---- the bookmarks: a list (name, address), moved up and down and taken away; one more is added at the bottom
 function bookmarksPanel(ctx) {

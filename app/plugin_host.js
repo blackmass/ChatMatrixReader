@@ -33,6 +33,21 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   const base = isMac ? 'cmrplug://localhost/' : 'http://cmrplug.localhost/';
   const holder = doc.createElement('div'); holder.hidden = true; holder.id = 'plugin-frames'; doc.body.append(holder);
 
+  // Until 3.2.0 the login of a plugin's web window was a setting of the plugin (plugins[id].web.cookies); it is a setting of the window now. What was chosen moves to the window once, and the old value goes.
+  function moveWebCookies() {
+    const have = Object.entries(entries()).filter(([, e]) => e && typeof e === 'object' && 'web' in e);
+    if (!have.length) return;
+    let list = settings.cfg().child_windows || [], plugins = { ...entries() }, changed = false;
+    for (const [id, e] of have) {
+      const w = list.find(c => c.owner === id && c.kind === 'web');
+      if (!w && registry.has(id)) { const { web, ...rest } = e; plugins[id] = rest; changed = true; continue; }       // (the plugin is there and has no web window: nothing to keep)
+      if (!w) continue;                                                              // (not made yet: it is made with the value, see ensureWindows; or the plugin is away for a moment)
+      if (e.web && e.web.cookies) list = list.map(c => (c === w ? { ...c, cookies: true } : c));
+      const { web, ...rest } = e; plugins[id] = rest; changed = true;
+    }
+    if (changed) settings.set({ plugins, child_windows: list });
+  }
+
   const chatLinks = new Map();                 // the id of a link in a chat line -> { owner, url, target } (the window sends the id back when the user clicks it)
   let linkSeq = 0;
   const svgCache = new Map();                  // 'plugin/path' -> the text of an .svg file the plugin asked for
@@ -49,7 +64,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
   function summary(id) {
     const r = registry.get(id), e = entry(id);
     return { id, ok: !!(r && r.ok), errors: r ? r.errors : [], warnings: r ? r.warnings : [], manifest: r ? r.manifest : null, enabled: !!e.enabled, running: running.has(id),
-      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, gone: !registry.has(id), requested: Array.isArray(e.requested) ? e.requested : [], web: { cookies: !!(e.web && e.web.cookies) }, webOpen: web.isOpen(id), options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
+      missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, gone: !registry.has(id), requested: Array.isArray(e.requested) ? e.requested : [], web: { cookies: !!(webEntry(id) || {}).cookies }, webOpen: web.isOpen(id), options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
       review: !!(r && r.ok && e.asked !== permsKey(r.manifest)) };       // review: nobody has decided about what it asks for yet (the options window asks the user, one plugin after the other)
   }
   const allIds = () => [...new Set([...registry.keys(), ...Object.keys(entries())])].sort();
@@ -70,6 +85,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     }
     for (const id of [...registry.keys()]) if (!found.has(id)) registry.delete(id);
     pruneWindows();
+    moveWebCookies();
     await reconcile();
     publishState();
     // a plugin nobody has decided about yet: the options window is opened once, it asks the user (api.askedOpen: only once in a run of the program)
@@ -158,17 +174,17 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     if (!r || !r.ok || !run) return;
     let list = settings.cfg().child_windows || [], changed = false;
     if (run.bridge.eff.web && !webEntry(id)) {                          // the web window has its entry too (Options > Window): a fixed name; what the user chooses there is used when the plugin opens it
-      list = [...list, { ...winconf.newConf(winconf.nextId(list), []), owner: id, owner_win: 'web', kind: 'web', name: r.manifest.name + " · " + "웹 창", open_mode: 'never', geometry: '360x640', topmost: true }];
+      list = [...list, { ...winconf.newConf(winconf.nextId(list), []), owner: id, owner_win: 'web', kind: 'web', name: r.manifest.name + " · " + "웹 창", open_mode: 'never', geometry: '360x640', topmost: true, cookies: !!(entry(id).web && entry(id).web.cookies) }];
       changed = true;
     }
-    if (!run.bridge.eff.windows) { if (changed) settings.set({ child_windows: list }); return; }
+    if (!run.bridge.eff.windows) { if (changed) { settings.set({ child_windows: list }); moveWebCookies(); } return; }
     for (const w of r.manifest.windows || []) {
       if (list.some(c => c.owner === id && c.owner_win === w.id)) continue;
       const wid = winconf.nextId(list);
       list = [...list, { ...winconf.newConf(wid, []), owner: id, owner_win: w.id, kind: 'page', page: w.page, name: w.title, open_mode: 'never', geometry: `${w.width}x${w.height}` }];
       changed = true;
     }
-    if (changed) settings.set({ child_windows: list });
+    if (changed) { settings.set({ child_windows: list }); moveWebCookies(); }
   }
 
   // The windows of a plugin that the plugin does not have any more (it was changed: a window it declared is gone, it does not ask for the web window now) leave the list of windows.
@@ -310,19 +326,17 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
         else patchEntry(id, { requested });
         return reply({});
       }
-      if (cmd === 'web') {                                                 // what the user chose for the web window: topmost, wow, through, lock, cookies (only these keys)
-        const k = String(ev.payload.key || '');
-        if (k !== 'cookies') return reply({ error: 'no such setting' });
-        patchEntry(id, { web: { ...(entry(id).web || {}), [k]: !!ev.payload.value } });
-        return reply({});
+      if (cmd === 'webClear') {                                            // the login the web window of this plugin kept: of the open window, or the folder of a closed one
+        if (web.isOpen(id)) await web.clearData(id); else await invoke('web_forget', { key: id }).catch(() => {});
+        note(id, 'cookies and stored data of the web window cleared'); return reply({});
       }
-      if (cmd === 'webClear') { if (!web.isOpen(id)) return reply({ error: 'open' }); await web.clearData(id); note(id, 'cookies and stored data of the web window cleared'); return reply({}); }
       if (cmd === 'forget') {                                              // the settings, windows and stored data of a plugin whose folder is not there (the user asked)
         if (registry.has(id)) return reply({ error: 'the plugin is there' });
         const rest = { ...entries() }; delete rest[id];
         bridges.delete(id);
         settings.set({ plugins: rest, child_windows: winconf.without(settings.cfg().child_windows || [], (settings.cfg().child_windows || []).filter(c => c.owner === id).map(c => c.id)) });
         await files.remove(storePath(id)).catch(() => {});
+        await invoke('web_forget', { key: id }).catch(() => {});                 // (the login its web window kept)
         publishState();
         return reply({});
       }

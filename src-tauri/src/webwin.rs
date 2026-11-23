@@ -536,6 +536,22 @@ pub async fn web_alpha(app: AppHandle, label: String, alpha: f64, ms: Option<u64
     Ok(())
 }
 
+/// The folders where web windows keep their login (Windows: webview-data/web/<name>/): their names, for the options to show the ones no window has any more. Elsewhere: none (the data is in the
+/// store of the system's web view).
+#[tauri::command]
+pub async fn web_data_list() -> Result<Vec<String>, String> {
+    #[cfg(windows)]
+    {
+        let dir = crate::data_dir().join("web");
+        let mut out: Vec<String> = std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()).filter_map(|e| e.file_name().into_string().ok()).collect()).unwrap_or_default();
+        out.sort();
+        out.truncate(200);
+        Ok(out)
+    }
+    #[cfg(not(windows))]
+    { Ok(Vec::new()) }
+}
+
 #[tauri::command]
 pub async fn web_close(app: AppHandle, label: String) -> Result<(), String> {
     match get(&app, &label) { Ok(w) => { forget(&w); w.close().map_err(|e| e.to_string()) } Err(_) => Ok(()) }

@@ -342,3 +342,7 @@ input.colortext.follow-input { width: 150px; }
 .bm-row input.bad { border-color: var(--bad); }
 .bm-empty { color: var(--dim); margin: 4px 0; }
 .bm-add { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* what is left of a plugin that is gone (options/orphans.js) and the logins that no window has (tab 미니 브라우저) */
+.orphan-note p { margin: 4px 2px; line-height: 1.6; color: #c9ccd1; }
+.stored code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

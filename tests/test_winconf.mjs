@@ -67,3 +67,10 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   const again = w.normalize([...rest, { ...w.newConf(w.nextId(rest), []) }]);
   eq(again.every(c => c.dock_to === 0), true, 'a window that takes the number of a deleted one starts clean: nothing is its host');
 }
+
+// the login of a web window of a plugin (3.2.0): a setting of the window; no other window has it
+{
+  const l = w.normalize([{ id: 5, owner: 'p', owner_win: 'web', kind: 'web', cookies: true }, { id: 6, owner: 'p', owner_win: 'web', kind: 'web' }, { id: 7, cookies: true }, { id: 8, owner: 'p', owner_win: 'x', kind: 'page', page: 'a.html', cookies: true }]);
+  const by = id => l.find(c => c.id === id);
+  eq([by(5).cookies, by(6).cookies, 'cookies' in by(7), 'cookies' in by(8)], [true, false, false, false], 'winconf: cookies are a setting of a web window only');
+}

@@ -3,7 +3,8 @@
 // The key of a row is the name an extra window uses; the main window's differs for a few (options.js: MAIN_KEY).
 import { nameFor } from '../winname.js';
 import { ALL } from '../winmanager.js';
-import { VOICE_ID, dockHost, dockedOf } from '../core/winconf.js';
+import { VOICE_ID, dockHost, dockedOf, without } from '../core/winconf.js';
+import { goneOwner, onGoneChange, goneNote } from './orphans.js';
 import { entries as fontItems } from '../fonts.js';
 import { registry as widgetRegistry } from '../widgets/defaults.js';
 import { widgetsRow } from './widget_row.js';
@@ -163,6 +164,7 @@ const tab = {
 
   // the window picker above the cards. env = { cfg(), sel(), select(id) }
   toolbar(env) {
+    onGoneChange(() => { if (el.isConnected) refresh(); });
     const el = document.createElement('div'); el.className = 'wintool';
     const pick = document.createElement('select');
     const add = btn('새 창'), toggle = btn('열기'), del = btn('삭제'), state = document.createElement('span'); state.className = 'winstate';
@@ -176,7 +178,9 @@ const tab = {
     toggle.onclick = () => emit('win-command', { cmd: open.has(env.sel()) ? 'close' : 'open', id: env.sel() });
     del.onclick = () => {
       if (!armed) { armed = true; del.textContent = '정말 삭제?'; del.classList.add('on'); setTimeout(() => { armed = false; refresh(); }, 3000); return; }
-      armed = false; const id = env.sel(); env.select(1); emit('win-command', { cmd: 'remove', id });
+      armed = false; const id = env.sel(), c = env.cfg().child_windows.find(w => w.id === id); env.select(1);
+      if (c && c.owner && goneOwner(c.owner)) emit('cfg-patch', { patch: { child_windows: without(env.cfg().child_windows, [id]) } });          // (what is left of a plugin that is gone: the window manager does not delete the windows of a plugin)
+      else emit('win-command', { cmd: 'remove', id });
     };
     function refresh() {
       const kids = env.cfg().child_windows, sel = env.sel();
@@ -188,14 +192,14 @@ const tab = {
       }
       if (plug.length) {                                                                // (the windows of the plugins: below ours, after a line)
         const line = document.createElement('option'); line.disabled = true; line.textContent = '── ' + tr('플러그인 창') + ' ──'; pick.append(line);
-        for (const c of plug) { const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.id} · ${nameFor(env.cfg(), c.id)}`; pick.append(o); }
+        for (const c of plug) { const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.id} · ${nameFor(env.cfg(), c.id)}` + (goneOwner(c.owner) ? ' · ' + tr('지워진 플러그인') : ''); pick.append(o); }
       }
       pick.value = String(kids.some(c => c.id === sel && c.kind !== 'web') || sel === 1 ? sel : 1);
       const dh = dockHost(kids, sel), isOpen = sel === 1 || open.has(sel), mine = kids.find(c => c.id === sel), owned = !!(mine && mine.owner);
-      const off = owned && !((env.cfg().plugins || {})[mine.owner] || {}).enabled;
-      state.textContent = off ? tr('플러그인이 꺼져 있습니다')  : dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
-      toggle.hidden = sel === 1 || !!dh || off; toggle.textContent = isOpen ? '닫기' : '열기';
-      del.hidden = sel === 1 || sel === VOICE_ID || owned;                                  // (the window of a plugin is not deleted here: it goes with its plugin) if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
+      const orphan = owned && goneOwner(mine.owner), off = owned && !orphan && !((env.cfg().plugins || {})[mine.owner] || {}).enabled;
+      state.textContent = orphan ? tr('지워진 플러그인의 설정') : off ? tr('플러그인이 꺼져 있습니다')  : dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
+      toggle.hidden = sel === 1 || !!dh || off || orphan; toggle.textContent = isOpen ? '닫기' : '열기';
+      del.hidden = sel === 1 || sel === VOICE_ID || (owned && !orphan);                                  // (the window of a plugin is not deleted here: it goes with its plugin) if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
     }
     return { el, refresh };
   },
@@ -204,11 +208,13 @@ const tab = {
 // The windows of a plugin show only the basic settings (the order of the windows, the background, the mouse, the lock ...): what is inside the window is the plugin's
 const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
 const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
+const goneWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner && c.kind !== 'web' && goneOwner(c.owner)); };          // (the window of a plugin that is not there: only a note and the way to delete it)
 for (const card of tab.cards) for (const row of card.rows) {
   const was = row.show;
-  if (PLUGIN_ROWS.has(row.key)) continue;
-  row.show = (c, x) => !pluginWindow(x) && (!was || was(c, x));
+  row.show = PLUGIN_ROWS.has(row.key) ? (c, x) => !goneWindow(x) && (!was || was(c, x)) : (c, x) => !pluginWindow(x) && (!was || was(c, x));
 }
+// (first in the tab: shown only for such a window)
+tab.cards.unshift({ title: '지워진 플러그인의 창', rows: [{ type: 'custom', block: true, label: '', keywords: '', show: (c, x) => goneWindow(x), build: x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return goneNote(c ? c.owner : ''); } }] });
 export default tab;
 
 function btn(text) { const b = document.createElement('button'); b.textContent = text; return b; }

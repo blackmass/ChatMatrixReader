@@ -315,19 +315,10 @@ function panel() {
       addBtn.onclick = async () => { const r = await ask('grantHost', p.id, { host: inp.value.trim() }); if (r.error) { inp.classList.add('bad'); inp.title = r.error; } else inp.value = ''; };
       add.append(inp, addBtn); detail.append(add);
     }
-    // the web window: what the user chose for it (kept per plugin)
+    // the web window: its settings (on top, through, lock, the login that is kept) are those of the window: Options > 미니 브라우저, the plugin's web window in the list
     if (p.manifest.permissions.web && p.granted.web) {
       detail.append(el('h4', 'pl-h', tr('웹 창')));
-      detail.append(el('small', 'note', tr('항상 위, 클릭 통과 같은 창 설정은 옵션 > 창 에서 이 플러그인의 웹 창을 골라 정합니다.')));
-      const rows = [['cookies', tr('로그인 정보(쿠키) 유지 — 켜면 이 플러그인 전용으로 저장됩니다')]];
-      for (const [k, t] of rows) {
-        const lab = el('label', 'pl-webopt'), cb = el('input'); cb.type = 'checkbox'; cb.checked = !!(p.web && p.web[k]); cb.dataset.web = k;
-        cb.onchange = () => ask('web', p.id, { key: k, value: cb.checked });
-        lab.append(cb, el('span', '', ' ' + t)); detail.append(lab);
-      }
-      const clr = el('button', 'btn', tr('저장된 로그인 정보 지우기')); clr.disabled = !p.webOpen; clr.title = p.webOpen ? '' : tr('웹 창이 열려 있을 때 지울 수 있습니다');
-      clr.onclick = async () => { const r = await ask('webClear', p.id, {}); clr.textContent = r && r.error ? tr('지우지 못했습니다') : tr('지웠습니다'); };
-      detail.append(clr);
+      detail.append(el('small', 'note', tr('항상 위, 클릭 통과, 로그인 정보 유지 같은 창 설정은 옵션 > 미니 브라우저 에서 이 플러그인의 웹 창을 골라 정합니다.')));
     }
     if (p.missing.length) detail.append(el('small', 'note pl-missing', tr('요구하는 권한 중 허용하지 않은 것이 있습니다. 허용하지 않은 것은 쓸 수 없습니다.')));
 

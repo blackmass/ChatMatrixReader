@@ -37,7 +37,7 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, getR
   // what the user chose (the window entry may not be there yet: the defaults of a new window)
   const opts = id => {
     const c = getConf(id) || {}, g = parseGeom(c.geometry);
-    return { cookies: !!(((getEntry(id) || {}).web) || {}).cookies, ...(g || {}) };
+    return { cookies: !!c.cookies, ...(g || {}) };                    // (the login is kept when the user chose it for this window: Options > 미니 브라우저)
   };
 
   // the open windows, told to the centers: { win: the number of its entry in the list of windows, label, title, lock }

@@ -116,7 +116,14 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
     o.navT = setTimeout(() => { const b = entry(id); if (b && b.last_url !== url) change(id, { last_url: url }); }, NAV_MS);
   });
   // a window that was deleted in the options goes with its entry
-  settings.onChange(() => { for (const id of [...open.keys()]) if (!entry(id)) closeWindow(id); });
+  // (a window that is deleted in the options takes the login it kept with it: no folder is left behind)
+  let had = new Set(list().map(b => b.id));
+  settings.onChange(() => {
+    for (const id of [...open.keys()]) if (!entry(id)) closeWindow(id);
+    const now = new Set(list().map(b => b.id));
+    for (const id of had) if (!now.has(id)) invoke('web_forget', { key: browserKey(id) }).catch(() => {});
+    had = now;
+  });
 
   return { isOpen: id => open.has(id), openIds: () => [...open.keys()], open: openWindow, close: closeWindow, toggle: id => (open.has(id) ? closeWindow(id) : openWindow(id)), clearData };
 }

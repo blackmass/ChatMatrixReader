@@ -140,7 +140,7 @@ export const DEFAULTS = {
     last_pos: null,   // [x, y] where the matrix was found last time (looked at first, every second)
     full_scan_sec: 30,   // whole-screen search while the matrix is missing: at most this often (seconds)
     // plugins (docs/PLUGINS.md)
-    plugins: {},                           // plugin id -> { enabled: bool, granted: { net: [host], 'chat.inject': bool, storage: bool }, options: { key: value } } (app/plugin_host.js)
+    plugins: {},                           // plugin id -> { enabled: bool, granted: { net: [host], 'chat.inject': bool, storage: bool }, options: { key: value } } (app/plugin_host.js). The login of a web window is a setting of the window (child_windows[].cookies) since 3.2.0
     widgets: {},                           // the widgets of the main window: { 'owner:name': { place, anchor, dx, dy, style, show, scale, opacity, opts } } (docs/WIDGETS.md)
     wheel_through: false,                  // click-through windows: the wheel over them may scroll (reading the earlier chat); off = nothing but the tooltip gets through
     browser_windows: [defaultBrowser(1)],  // the windows of the mini browser (core/browsers.js): window 1 is always there
