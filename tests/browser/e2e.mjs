@@ -1033,15 +1033,25 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     const urlEl = urlSel.first();
     await urlEl.click();
     await until(async () => (await cp.locator('#ctx').isVisible()), 'chat/url: a click asks before it opens');
-    ok((await cp.locator('#ctx div').first().textContent()) === 'https://discord.gg/abc123' && (await cp.locator('#ctx').textContent()).includes('미니 브라우저에서 열기'), 'chat/url: the question shows the whole address and the mini browser');
+    const asks = (await cp.locator('#ctx div').allTextContents());
+    ok(asks[0] === 'https://discord.gg/abc123' && ['미니 브라우저에서 열기', '내 브라우저에서 열기', '주소 복사', '취소'].every(t => asks.includes(t)), 'chat/url: the question shows the whole address and the places to choose: ' + JSON.stringify(asks));
     await cp.locator('#ctx div', { hasText: '미니 브라우저에서 열기' }).click();
     await until(() => webCalls.some(c => c[0] === 'cmd' && c[1] === 'web_b1' && c[2] === 'goto' && c[3] === 'https://discord.gg/abc123'), 'chat/url: the mini browser goes to it');
-    await urlEl.click({ modifiers: ['Control'] });
-    await until(async () => (await cp.locator('#ctx').textContent()).includes('내 브라우저에서 열기'), 'chat/url: with Ctrl the other one is offered');
+    await urlEl.click({ modifiers: ['Control'] });                                  // (no key is looked at: the same question)
+    await until(async () => (await cp.locator('#ctx').isVisible()), 'chat/url: the question again');
     await cp.locator('#ctx div', { hasText: '내 브라우저에서 열기' }).click();
     await until(() => chatOpened.includes('https://discord.gg/abc123'), 'chat/url: the user\'s browser is asked to open it');
+    const c1 = clip.length;
+    await urlEl.click(); await cp.locator('#ctx div', { hasText: '주소 복사' }).click();
+    await until(() => clip.length === c1 + 1 && clip.at(-1) === 'https://discord.gg/abc123', 'chat/url: the address is copied');
     await urlEl.click(); await cp.locator('#ctx div', { hasText: '취소' }).click();
-    ok(chatOpened.length === 1, 'chat/url: cancel opens nothing');
+    ok(chatOpened.length === 1 && clip.length === c1 + 1, 'chat/url: cancel does nothing');
+    // the option: off, a new line keeps its address as plain text
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ chat_links: false })));
+    await control.evaluate(() => window.cmrHub.fakeLine({ channel: 'party', name: 'Lead', text: 'again discord.gg/zzz999 please' }));
+    await cp.waitForTimeout(700);
+    ok(!(await cp.locator('.cv-url', { hasText: 'zzz999' }).count()), 'chat/url: with the option off a new address is plain text');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ chat_links: true })));
     // the menu of the window opens from its bars, not from the page (where the page is, the center only has it while a menu is open)
     await cp.locator('.webpane .pbody').dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 });
     await cp.waitForTimeout(200);

@@ -107,15 +107,17 @@ function openMenu(list, ev, pane) {
   menuEl.style.left = Math.max(0, Math.min(ev.clientX, innerWidth - menuEl.offsetWidth - 2)) + 'px';
   menuEl.style.top = Math.max(0, Math.min(ev.clientY, innerHeight - menuEl.offsetHeight - 2)) + 'px';
 }
-// A web address in a line was clicked: the question comes first, for every address (the whole address is shown), then it opens in the mini browser (window 1) or, with Ctrl (Cmd) held, in the
-// user's browser; the option "link_open" turns that round. The exe checks the address again (open_chat_url), the mini browser too (a page of its own).
+// A web address in a line was clicked: the question comes first, for every address (the whole address is shown), and the user chooses where it goes: the mini browser (window 1), their own browser,
+// or the clipboard. No key is looked at (a click-through window is used with a key the user chose: it may be Ctrl). The exe checks the address again (open_chat_url), the mini browser too.
+linkHandler.urls = cfg.chat_links !== false;
 linkHandler.url = (url, ev) => {
-  const system = (cfg.link_open === 'system') !== !!(ev.ctrlKey || ev.metaKey);
   const pane = [...panes.values()].find(p => p.el.contains(ev.target)) || null;
   openMenu([
     { text: url.length > 90 ? url.slice(0, 89) + '…' : url, cls: 'off' }, { text: '', cls: 'sep' },
-    { text: system ? tr('내 브라우저에서 열기') : tr('미니 브라우저에서 열기'), fn: () => { if (system) invoke('open_chat_url', { url }).catch(() => {}); else emit('browser-command', { cmd: 'url', id: 1, url }); } },
-    { text: tr('취소'), fn: () => {} },
+    { text: tr('미니 브라우저에서 열기'), fn: () => emit('browser-command', { cmd: 'url', id: 1, url }) },
+    { text: tr('내 브라우저에서 열기'), fn: () => invoke('open_chat_url', { url }).catch(() => {}) },
+    { text: tr('주소 복사'), fn: () => { try { window.__TAURI__.clipboardManager.writeText(url); } catch { /* no clipboard */ } } },
+    { text: '', cls: 'sep' }, { text: tr('취소'), fn: () => {} },
   ], ev, pane);
 };
 addEventListener('mousedown', ev => { if (!menuEl.contains(ev.target)) hideMenu(); }, true);
@@ -229,7 +231,7 @@ addEventListener('wheel', e => {
   c.lines.scrollTop += e.deltaMode === 1 ? d * 40 : d;
 }, { passive: false });
 
-settings.onChange(c => { const was = cfg.center_scale, wasTitle = cfg.wow_window_title; cfg = c; if (c.center_scale !== was) applyScale(); if (c.wow_window_title !== wasTitle) gameTitle(); for (const p of panes.values()) p.update(); for (const p of webs.values()) p.update(); sync(); });
+settings.onChange(c => { const was = cfg.center_scale, wasTitle = cfg.wow_window_title; cfg = c; linkHandler.urls = c.chat_links !== false; if (c.center_scale !== was) applyScale(); if (c.wow_window_title !== wasTitle) gameTitle(); for (const p of panes.values()) p.update(); for (const p of webs.values()) p.update(); sync(); });
 await listen('win-state', e => { open = new Set([MAIN, ...(e.payload.open || [])]); sync(); });
 await listen('feed', e => { for (const p of panes.values()) p.take(e.payload.seq, e.payload.event, false); });
 await listen('feed-replay', e => { for (const p of panes.values()) p.takeReplay(e.payload.label, e.payload.events); });

@@ -12,7 +12,7 @@ import { add as perfAdd } from './core/perf.js';
 import * as urls from './core/urls.js';
 
 // A click on a link of a line (a plugin put it there): `linkHandler.fn(id)`; on a web address in the text: `linkHandler.url(address, event)`. Both are set by the window page.
-export const linkHandler = { fn: null, url: null };
+export const linkHandler = { fn: null, url: null, urls: true };           // (urls: false = the addresses stay plain text: the option "채팅 주소를 링크로 표시")
 export const FADE_MS = 3000;           // (defaults, the values in use are T.*; see core/timings.js) how long a line takes to fade out once its time is up (tuning.py)
 export const FADE_TICK_MS = 33;        // how often fading lines are drawn
 export const FADE_IDLE_MS = 250;       // how often the age of the lines is looked at while none is fading
@@ -152,7 +152,7 @@ export class ChatView {
     for (const p of b.pieces) {
       const text = p.text.replace(/️/g, '');
       // the plain text of a line (not an item, a name, a link of a plugin): a web address in it is a link of its own, "[discord.gg/abc]"; the click asks before anything opens (center.js)
-      const plain = p.role == null && p.quality == null && !(p.tip && p.tip.length) && !p.link;
+      const plain = linkHandler.urls && p.role == null && p.quality == null && !(p.tip && p.tip.length) && !p.link;
       for (const part of plain ? urls.split(text) : [{ text }]) {
         const span = document.createElement('span');
         span.textContent = part.text;

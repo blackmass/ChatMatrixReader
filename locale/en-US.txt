@@ -1130,6 +1130,8 @@ Shift+휠로 가로 스크롤 = Scroll sideways with Shift + wheel
 프로그램을 끝내고 바로 다시 켭니다 (번역창도 모두 닫혔다가 다시 열립니다) = Quits the program and starts it again at once (all translation windows close and open again)
 내 브라우저에서 열기 = Open in my browser
 미니 브라우저에서 열기 = Open in the mini browser
-채팅 주소를 누르면 = When a web address in the chat is clicked
-채팅에 나온 웹 주소는 [discord.gg/abc]처럼 눌러 볼 수 있게 표시되고, 누르면 먼저 주소를 보여 주며 열지 물어봅니다. 이 설정은 열 곳을 고릅니다. = A web address in the chat is shown like [discord.gg/abc] and can be clicked; a click first shows the address and asks whether to open it. This setting chooses where it opens.
-Ctrl(맥은 Cmd)을 누른 채 누르면 다른 쪽으로 열립니다. 이 설정은 기본 창(창 1)에서만 보이고 모든 창에 적용됩니다. = Hold Ctrl (Cmd on a Mac) while clicking to open it in the other one. This setting is shown only for the default window (window 1) and applies to all windows.
+
+채팅 주소를 링크로 표시 = Show web addresses in the chat as links
+채팅에 나온 웹 주소(https://…, discord.gg/… 같은 알려진 곳)를 [discord.gg/abc]처럼 눌러 볼 수 있게 표시합니다. = A web address in the chat (https://…, or a known place such as discord.gg/…) is shown like [discord.gg/abc] and can be clicked.
+누르면 바로 열리지 않고 전체 주소를 보여 주며 "미니 브라우저에서 열기", "내 브라우저에서 열기", "주소 복사" 중에서 고르게 합니다. 끄면 주소가 그냥 글자로 보입니다. 새로 들어오는 줄부터 적용됩니다. = A click does not open it at once: it shows the whole address and lets you choose "Open in the mini browser", "Open in my browser" or "Copy the address". When it is off, an address is plain text. It applies from the lines that come in next.
+주소 복사 = Copy the address
