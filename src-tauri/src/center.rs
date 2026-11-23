@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::{hwnd_of, make_window, win};
 
 #[derive(Clone, Debug)]
-pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, hit: bool, blur: u32, web: String, z: i64 }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar; `hit`: it takes the mouse: a window that is click-through only has a place)
+pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, below: bool, hit: bool, blur: u32, web: String, z: i64 }             // (the place of a pane in screen pixels, the bar above its text included; `bar`: the height of the bar; `hit`: it takes the mouse: a window that is click-through only has a place)
 
 static RECTS: LazyLock<Mutex<HashMap<String, Vec<Pane>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static LOCK: Mutex<Option<String>> = Mutex::new(None);                    // the center that holds the mouse while a button is down
@@ -116,7 +116,7 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Op
     let f = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
     let list: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane {
         id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").chars().filter(|c| c.is_ascii_alphanumeric()).collect(),
-        x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"), bar: f(v, "bar"), hit: v.get("hit").and_then(|x| x.as_bool()).unwrap_or(true), blur: v.get("blur").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+        x: f(v, "x") + ox, y: f(v, "y") + oy, w: f(v, "w"), h: f(v, "h"), bar: f(v, "bar"), below: v.get("below").and_then(|x| x.as_bool()).unwrap_or(false), hit: v.get("hit").and_then(|x| x.as_bool()).unwrap_or(true), blur: v.get("blur").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
         web: v.get("web").and_then(|x| x.as_str()).unwrap_or("").to_string(),
         z: v.get("z").and_then(|x| x.as_i64()).unwrap_or(0),
     }).filter(|p| !p.id.is_empty()).collect()).unwrap_or_default();
@@ -140,7 +140,7 @@ static BLURS: LazyLock<Mutex<HashMap<String, (String, u32, isize, [i32; 4])>>> =
 fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
     let want: HashMap<String, (u32, [i32; 4])> = panes.iter().filter(|p| p.blur > 0).map(|p| (
         format!("blur_{}_{}", center, p.id),
-        (p.blur, [p.x.round() as i32, (p.y + p.bar).round() as i32, p.w.round().max(1.0) as i32, (p.h - p.bar).round().max(1.0) as i32]),
+        (p.blur, [p.x.round() as i32, (p.y + if p.below { 0.0 } else { p.bar }).round() as i32, p.w.round().max(1.0) as i32, (p.h - p.bar).round().max(1.0) as i32]),
     )).collect();
     let mut have = match BLURS.lock() { Ok(h) => h, Err(_) => return };
     // gone: the pane has no blur any more (or is not there)
@@ -198,7 +198,11 @@ fn sync_webs(app: &AppHandle, center: &str, panes: &[Pane]) {
         let app2 = app.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(150));
-            for (k, r) in moves { if let Some(w) = app2.get_webview_window(&k) { let _ = crate::webwin::set_outer(&w, Some(r[0]), Some(r[1]), r[2] as u32, r[3] as u32); } }
+            for (k, r) in moves {
+                // only a window that has not been moved since (a drag changes the place every few milliseconds: the old place must never be put back over a newer one: the window followed the hand late)
+                let still = WEBS.lock().ok().and_then(|m| m.get(&k).map(|v| v.1)) == Some(r);
+                if still { if let Some(w) = app2.get_webview_window(&k) { let _ = crate::webwin::set_outer(&w, Some(r[0]), Some(r[1]), r[2] as u32, r[3] as u32); } }
+            }
         });
     }
 }
@@ -240,7 +244,7 @@ pub fn pane_rect(label: &str) -> Option<(i32, i32, u32, u32)> {
     let id = if label == "main" { "1".to_string() } else { label.strip_prefix("win")?.to_string() };
     let rects = RECTS.lock().ok()?;
     for (_, panes) in rects.iter() {
-        if let Some(p) = panes.iter().find(|p| p.id == id) { return Some((p.x.round() as i32, (p.y + p.bar).round() as i32, p.w.round().max(1.0) as u32, (p.h - p.bar).round().max(1.0) as u32)); }
+        if let Some(p) = panes.iter().find(|p| p.id == id) { return Some((p.x.round() as i32, (p.y + if p.below { 0.0 } else { p.bar }).round() as i32, p.w.round().max(1.0) as u32, (p.h - p.bar).round().max(1.0) as u32)); }
     }
     None
 }

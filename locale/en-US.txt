@@ -1105,3 +1105,5 @@ PC 화면입니다. 누르면 모바일 화면으로 바꿉니다. = This is the
 지우기 = Remove
 항상 위, 클릭 통과, 로그인 정보 유지 같은 창 설정은 옵션 > 미니 브라우저 에서 이 플러그인의 웹 창을 골라 정합니다. = Window settings such as always on top, click-through and keeping the login are chosen in Options > Mini browser, by choosing this plugin's web window.
 끄면(기본) 창을 닫을 때마다 모두 잊습니다. 플러그인마다 따로 보관됩니다. = When off (the default), everything is forgotten whenever the window is closed. It is kept separately for each plugin.
+모니터 가장자리 저항 = Monitor edge resistance
+창을 끌어서 모니터 가장자리(옆에 다른 모니터가 있는 쪽)에 닿으면 걸려서 멈추고, 이 거리(px)보다 더 끌면 옆 모니터로 넘어갑니다. 옆 모니터가 없는 쪽은 넘어가지 않습니다 = When a window is dragged to the edge of a monitor (on the side that has another monitor next to it) it stops there, and it moves on to the next monitor when it is dragged further than this distance (px). On a side with no other monitor it does not go over.

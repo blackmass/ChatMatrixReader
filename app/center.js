@@ -43,6 +43,7 @@ const center = {
   dpr,
   origin: () => [ox, oy],
   mainScreen: () => screens[0] || null,
+  monitors: () => screens,                                      // (all the screens: [x, y, w, h] in screen pixels; a box stays on one of them: frame.js)
   registry: defaultRegistry(),                 // (the widgets: the program's own, and what the plugins register comes by 'widget-defs')
   changed: () => report(),
   menu: (ev, pane) => showMenu(ev, pane),
@@ -203,7 +204,7 @@ function visibleParts(whole, covers) {
 }
 const clipKey = new WeakMap();
 function applyClips() {
-  const list = [...webs.values()].map(p => ({ p, z: Number(p.el.style.zIndex) || 0, b: { x: p.rect.x, y: p.rect.y - p.head, w: p.rect.w, h: p.rect.h + p.head } }));
+  const list = [...webs.values()].map(p => ({ p, z: Number(p.el.style.zIndex) || 0, b: { x: p.rect.x, y: p.boxY(), w: p.rect.w, h: p.rect.h + p.head } }));
   for (const { p, z, b } of list) {
     const covers = list.filter(o => o.p !== p && o.z > z).map(o => ({ x: o.b.x - b.x, y: o.b.y - b.y, w: o.b.w, h: o.b.h }));
     const parts = covers.length ? visibleParts({ x: 0, y: 0, w: b.w, h: b.h }, covers) : null;

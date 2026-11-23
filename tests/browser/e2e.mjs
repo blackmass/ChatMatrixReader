@@ -72,7 +72,7 @@ async function invoke(cmd, a = {}) {
     case 'center_rects': centerRects.push(a); return null;
     case 'center_wheel': return { seq: wheel.length, turns: wheel.slice(a.seq).map(d => ({ id: '1', delta: d })) };
     case 'center_zoom': return a.scale || 1;
-    case 'center_layout': return { origin: [0, 0], monitors: [[0, 0, 1920, 1080]] };
+    case 'center_layout': return { origin: [0, 0], monitors: [[0, 0, 3840, 2160]] };
     case 'center_ready': centerReady.push(a.label); return null;
     case 'process_stats': return { os: 'windows', self: 10, note: '', procs: [{ pid: 10, parent: 1, name: 'ChatMatrix Reader.exe', kind: 'main', sub: '', ws: 104857600, private: 83886080, cpu_ms: 1000, handles: 300, gdi: 40, user: 60 }, { pid: 11, parent: 10, name: 'msedgewebview2.exe', kind: 'renderer', sub: '', ws: 52428800, private: 31457280, cpu_ms: 500, handles: 150, gdi: 10, user: 10 }] };
     case 'web_open': webCalls.push(['open', a.args]); return null;
@@ -1057,13 +1057,13 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(async () => (await cp.locator('.webpane').count()) === 1, 'the second window is closed');
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.filter(b => b.id !== 2) })));
     // the right button on the bar: the bookmarks, adding the page, the settings
-    await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 4, y: 10 } });
+    await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 40, y: 10 } });
     await until(async () => (await cp.locator('#ctx').isVisible()), 'the menu of the bar');
     const items = await cp.locator('#ctx div:not(.sep)').allTextContents();
     ok(items[0] === '지도' && items.includes('현재 페이지를 즐겨찾기에 추가') && items.includes('현재 페이지를 내 브라우저에서 열기') && items.includes('이 창의 설정…'), 'browser/menu: the bookmarks, adding the page, the settings: ' + items.join('|'));
     await cp.locator('#ctx div', { hasText: '지도' }).click();
     await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'goto' && c[3] === 'https://map.kakao.com/'), 'a bookmark takes this window there');
-    await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 4, y: 10 } });
+    await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 40, y: 10 } });
     await cp.locator('#ctx div', { hasText: '현재 페이지를 즐겨찾기에 추가' }).click();
     await until(() => (cfgFile().bookmarks || []).some(m => m.url === 'https://a.b/c'), 'the page is added to the bookmarks');
     // the menu of a translation window lists the windows of the mini browser
@@ -1096,9 +1096,39 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   const mb2 = await cp.locator('.pane').first().boundingBox();
   const dp = await cp.evaluate(() => window.devicePixelRatio);
   ok(mb2.x >= 3000 / dp - 5 && (await cp.locator('.pane .cv-list').first().textContent()).includes('모니터 환경이 바뀌어'), 'center/screens: a window that is out of every screen comes to the main one, with a notice: ' + mb2.x);
-  await control.evaluate(() => window.__TAURI__.event.emit('center-layout', { origin: [0, 0], monitors: [[0, 0, 1920, 1080]] }));
+  await control.evaluate(() => window.__TAURI__.event.emit('center-layout', { origin: [0, 0], monitors: [[0, 0, 3840, 2160]] }));
   await control.evaluate(([g, g3]) => import('./settings.js').then(m => m.set({ geometry: g, child_windows: m.cfg().child_windows.map(c => (c.id === 3 ? { ...c, geometry: g3 || '' } : c)) })), geoBefore); await control.waitForTimeout(400);
   await cp.close();
+}
+// ---- where a window may stand: the bar goes below the text when there is no room above, a monitor edge with another monitor behind it is a speed bump, an edge with nothing behind it is a wall
+{
+  const geo0 = cfgFile().geometry;
+  const readyBefore = centerReady.length;
+  const cpm = await open('center.html?label=center1m&mode=1&ox=0&oy=0', { width: 1200, height: 800 });
+  const pane = () => cpm.locator('.pane[data-id="1"]');
+  await until(async () => (await cpm.locator('.pane[data-id="1"] .cv-list').count()) > 0, 'a pane to move', 4000);
+  await until(() => centerReady.length > readyBefore, 'the page is ready (its own start is over: the screens it asks for come last)');
+  const layoutOf = monitors => control.evaluate(m => window.__TAURI__.event.emit('center-layout', { origin: [0, 0], monitors: m }), monitors);
+  const setGeo = g => control.evaluate(x => import('./settings.js').then(m => m.set({ geometry: x })), g);
+  const drag = async (dx, dy) => { const bar = await cpm.locator('.pane[data-id="1"] .pbar').boundingBox(); await cpm.mouse.move(bar.x + 30, bar.y + 10); await cpm.mouse.down(); await cpm.mouse.move(bar.x + 30 + dx, bar.y + 10 + dy, { steps: 8 }); await cpm.mouse.up(); };
+  await layoutOf([[0, 0, 1000, 1600], [1000, 0, 1000, 1600]]);           // (two monitors side by side; 1 css pixel = 2 screen pixels here)
+  // the bar: above the text while it fits above, below when the text touches the top of the monitor
+  await setGeo('500x300+200+400'); await until(async () => !(await pane().getAttribute('class')).includes('flip'), 'in the middle of the monitor the bar is above the text');
+  await setGeo('500x300+200+30'); await until(async () => (await pane().getAttribute('class')).includes('flip'), 'no room above: the bar goes below the text');
+  { const t = await pane().boundingBox(), b = await cpm.locator('.pane[data-id="1"] .pbar').boundingBox(); ok(b.y > t.y + t.height - 30 && Math.abs(t.y - 15) < 3, 'window/bar below: the text keeps its place (15 css px from the top), the bar is under it: ' + JSON.stringify([t, b])); }
+  ok(centerRects.at(-1).panes.some(p => p.id === '1' && p.below === true), 'window/bar below: the program is told (the text area starts at the top of the box)');
+  await setGeo('500x300+200+400'); await until(async () => !(await pane().getAttribute('class')).includes('flip'), 'back above when there is room');
+  // a wall: the left edge of the first monitor has no monitor behind it
+  await drag(-400, 0);
+  await until(async () => Math.abs((await pane().boundingBox()).x) < 2, 'the left edge of the first monitor is a wall: the text stops at it');
+  await setGeo('500x300+200+400'); await until(async () => Math.abs((await pane().boundingBox()).x - 100) < 3, 'the window is put back');
+  // the speed bump between the monitors (the edge is at 500 css px; the text is 250 wide): a little past it stays at the edge, much more goes over
+  await drag(180, 0);
+  await until(async () => Math.abs((await pane().boundingBox()).x - 250) < 3, 'a little past the edge to the next monitor: it stays at the edge');
+  await drag(150, 0);
+  await until(async () => Math.abs((await pane().boundingBox()).x - 400) < 3, 'much more (past 100 px): it goes over to the next monitor, after the mouse', 4000);
+  await setGeo(geo0); await layoutOf([[0, 0, 3840, 2160]]);
+  await cpm.close();
 }
 // ---- the tab 미니 브라우저: the browser windows (window 1 is always there), the bookmarks, how a web window is drawn
 {

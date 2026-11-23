@@ -12,7 +12,7 @@ import { isMac } from './platform.js';
 import { T } from './core/timings.js';
 import { PageView } from './pageview.js';
 import * as settings from './settings.js';
-import { BAR_H, dragFrame, sizeEdges } from './frame.js';
+import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow } from './frame.js';
 
 export { BAR_H };
 
@@ -20,6 +20,7 @@ export class Pane {
   // center: { cfg(), dpr(), origin() -> [ox, oy] in pixels, changed(pane) }
   constructor(id, center) {
     this.id = id; this.center = center; this.label = `c${id}`;
+    this.head = BAR_H; this.flip = false;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
     this.lags = []; this.lmbAt = 0; this.lastDown = -1e9; this.wheelCount = 0;                  // (how long a click takes to reach the page: for the diagnosis in the options)
     this.review = false; this.reviewIdle = 0; this.reviewShown = false; this.zone = false; this.lastInput = -1e9;      // (reading the old chat: see userScrolled)
     this.interactive = true; this.outside = true; this.hover = false; this.wasThrough = null;      // (the state of the mouse: see tick)
@@ -46,7 +47,7 @@ export class Pane {
     }, true);         // (touched: this pane comes to the front of the center)
     this.place();
     // the bar moves the window (a tab only changes the chat when there are several: like 3.1.1)
-    this.drag(this.el.querySelector('.pbar'), (s, dx, dy) => { this.rect.x = s.x + dx; this.rect.y = Math.max(BAR_H, s.y + dy); }, e => !this.opt('lock_window', false) && !e.target.closest('button') && !(this.chats.size > 1 && e.target.closest('.ptab')));
+    this.drag(this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.opt('lock_window', false) && !e.target.closest('button') && !(this.chats.size > 1 && e.target.closest('.ptab')));
     this.tools();
     sizeEdges(this, () => !this.opt('lock_window', false));         // (the corner at the bottom right and the edges left, right, bottom and the corner bottom left; the top is the bar)
     this.update();
@@ -107,20 +108,23 @@ export class Pane {
       const m = layout.parseGeometry(cfg.geometry), n = Math.max(1, cfg.child_windows.findIndex(c => c.id === this.id) + 1);
       [x, y] = layout.cascade(m && m.x !== null ? [m.x, m.y] : null, this.id === MAIN ? 0 : n);
     }
-    this.rect = { x: (x - ox) / d, y: Math.max(BAR_H, (y - oy) / d), w: g.w / d, h: g.h / d };
+    this.rect = { x: (x - ox) / d, y: (y - oy) / d, w: g.w / d, h: g.h / d };
     this.geo = this.seenGeo = this.savedGeometry() || '';
     this.layout();
   }
   layout() {
     const r = this.rect;
-    this.el.style.left = r.x + 'px'; this.el.style.top = (r.y - BAR_H) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + BAR_H) + 'px';
+    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip);                              // (touching the top of a monitor: the bar goes below the text)
+    const grip = this.el.querySelector('.pgrip'); if (grip) grip.style.bottom = this.flip ? BAR_H + 'px' : '';          // (the corner to resize by stays at the corner of the text, over the bar)
+    this.el.style.left = r.x + 'px'; this.el.style.top = (this.flip ? r.y : r.y - BAR_H) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + BAR_H) + 'px';
   }
   // the blur behind the text area (0 off | 1 weak | 2 strong): the center makes a window of the system for it. While the window is cleared by the mouse or resized, the blur behind it goes too.
   blurLevel() { return Number(this.opt('blur', 0)) && !this.hover && !this.resizing ? Number(this.opt('blur', 0)) : 0; }
   // the box (the bar included) in pixels of the page, for the center
   // where it is on the screen (pixels): the page's origin plus the box
   screenBox() { const b = this.box(), [ox, oy] = this.center.origin(); return { x: ox + b.x, y: oy + b.y, w: b.w, h: b.h }; }
-  box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: (r.y - BAR_H) * d, w: r.w * d, h: (r.h + BAR_H) * d, bar: BAR_H * d }; }
+  boxY() { return this.flip ? this.rect.y : this.rect.y - BAR_H; }
+  box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: this.boxY() * d, w: r.w * d, h: (r.h + BAR_H) * d, bar: BAR_H * d, below: this.flip }; }
   // where the text area is on the screen now: told to the hub, which keeps it in the settings (a window of 3.1.1 did the same)
   save() {
     const r = this.rect, d = this.center.dpr(), [ox, oy] = this.center.origin();

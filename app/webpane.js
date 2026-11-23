@@ -4,7 +4,7 @@
 import * as winconf from './core/winconf.js';
 import * as layout from './core/winlayout.js';
 import * as B from './core/browsers.js';
-import { BAR_H, dragFrame, sizeEdges } from './frame.js';
+import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow } from './frame.js';
 import { tr } from './core/i18n.js';
 
 const EDGE = 5, GRIP = 16;                                           // (css pixels: the width of the strips, the size of the corner)
@@ -18,7 +18,8 @@ export class WebPane {
     this.el = document.createElement('div'); this.el.className = 'pane webpane'; this.el.dataset.web = this.label;
     const head = '<span class="ptabs"><span class="ptab on"></span></span>';
     const row = this.kind === 'browser' ? '<div class="paddrbar"><button class="phome" tabindex="-1" title="처음 주소로">⌂</button><div class="paddr"><span class="phold">주소 또는 검색어</span><span class="ptxt"></span></div><button class="pmode" tabindex="-1"></button><span class="pzoom"></span></div>' : '';       // (the second line of a window of the mini browser: the address)
-    this.head = this.kind === 'browser' ? BAR_H * 2 : BAR_H;                   // (how much of the window is above the page, css pixels)
+    this.head = this.kind === 'browser' ? BAR_H * 2 : BAR_H;                   // (how much of the window is above the page, css pixels: below it when `flip`)
+    this.flip = false;
     this.el.innerHTML = '<div class="pbar">' + head + '<span class="pspace"></span><span class="ptools"><button class="pback" tabindex="-1" title="뒤로">‹</button><button class="preload" tabindex="-1" title="새로고침">↻</button><button class="pclose" tabindex="-1" title="닫기">✕</button></span></div>' + row + '<div class="pbody"><div class="pscroll"></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div>';
     document.body.append(this.el);
     this.el.style.zIndex = String(this.center.nextWebZ());                       // (a new web window is in front of the web windows; all of them are below every translation window)
@@ -32,7 +33,7 @@ export class WebPane {
     this.el.addEventListener('contextmenu', e => { e.preventDefault(); this.center.menu(e, this); });
     if (this.kind === 'browser') { this.address(); this.setMode(info.mode); }
     this.place();
-    dragFrame(this, this.el.querySelector('.pbar'), (s, dx, dy) => { this.rect.x = s.x + dx; this.rect.y = Math.max(this.head, s.y + dy); }, e => !this.lock && !e.target.closest('button'));
+    dragFrame(this, this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.lock && !e.target.closest('button'));
     sizeEdges(this, () => !this.lock, [190, 320]);                      // (the smallest a web window can be: a window made too small by mistake is hard to get back)
     const q = s => this.el.querySelector(s);
     q('.pback').onclick = () => invoke('web_cmd', { label: this.label, cmd: 'back' }).catch(() => {});
@@ -149,25 +150,28 @@ export class WebPane {
     const d = this.center.dpr(), [ox, oy] = this.center.origin();
     const m = this.center.mainScreen && this.center.mainScreen();                       // (no saved place: on the main screen; the area of all the screens has holes)
     const x = g.x === null ? (m ? m[0] + 120 : ox + 200) : g.x, y = g.y === null ? (m ? m[1] + 100 : oy + 160) : g.y;
-    this.rect = { x: (x - ox) / d, y: Math.max(this.head, (y - oy) / d), w: g.w / d, h: g.h / d };
+    this.rect = { x: (x - ox) / d, y: (y - oy) / d, w: g.w / d, h: g.h / d };
     this.geo = this.seenGeo = this.savedGeometry() || '';
     this.layout();
   }
   layout() {
     const r = this.rect;
-    this.el.style.left = r.x + 'px'; this.el.style.top = (r.y - this.head) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + this.head) + 'px';
+    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip);
+    const grip = this.el.querySelector('.pgrip'); if (grip) grip.style.bottom = this.flip ? this.head + 'px' : '';          // (the corner to resize by stays at the corner of the page, over the bars)
+    this.el.style.left = r.x + 'px'; this.el.style.top = this.boxY() + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + this.head) + 'px';
   }
   // the boxes for the center, in pixels of the page: the bar and the strips take the mouse (`hit`); the page itself is `web`: the window of the system is put there, and the mouse goes through
   boxes() {
-    const r = this.rect, d = this.center.dpr(), id = 'w' + this.win, b = (suffix, x, y, w, h, extra) => ({ id: id + suffix, x: x * d, y: y * d, w: w * d, h: h * d, bar: 0, hit: true, ...extra });
+    const r = this.rect, d = this.center.dpr(), id = 'w' + this.win, bot = this.flip ? r.y + r.h + this.head : r.y + r.h, b = (suffix, x, y, w, h, extra) => ({ id: id + suffix, x: x * d, y: y * d, w: w * d, h: h * d, bar: 0, hit: true, ...extra });
     return [
       { id, x: r.x * d, y: r.y * d, w: r.w * d, h: r.h * d, bar: 0, hit: false, web: this.label, z: Number(this.el.style.zIndex) || 0 },
-      b('b', r.x, r.y - this.head, r.w, BAR_H),
-      ...(this.kind === 'browser' ? [b('a', r.x, r.y - BAR_H, r.w, BAR_H)] : []),
-      ...(this.lock ? [] : [b('l', r.x, r.y, EDGE, r.h), b('r', r.x + r.w - EDGE, r.y, EDGE, r.h), b('s', r.x, r.y + r.h - EDGE, r.w, EDGE), b('g', r.x + r.w - GRIP, r.y + r.h - GRIP, GRIP, GRIP)]),
+      b('b', r.x, this.flip ? r.y + r.h + this.head - BAR_H : r.y - this.head, r.w, BAR_H),                  // (the title bar: the first line above the page; the last line below it)
+      ...(this.kind === 'browser' ? [b('a', r.x, this.flip ? r.y + r.h : r.y - BAR_H, r.w, BAR_H)] : []),   // (the address: the line next to the page)
+      ...(this.lock ? [] : [b('l', r.x, r.y, EDGE, r.h), b('r', r.x + r.w - EDGE, r.y, EDGE, r.h), b('s', r.x, bot - EDGE, r.w, EDGE), b('g', r.x + r.w - GRIP, r.y + r.h - GRIP, GRIP, GRIP)]),
     ];
   }
-  box() { const r = this.rect, d = this.center.dpr(); return { id: 'w' + this.win, x: r.x * d, y: (r.y - this.head) * d, w: r.w * d, h: (r.h + this.head) * d, bar: this.head * d }; }
+  boxY() { return this.flip ? this.rect.y : this.rect.y - this.head; }
+  box() { const r = this.rect, d = this.center.dpr(); return { id: 'w' + this.win, x: r.x * d, y: this.boxY() * d, w: r.w * d, h: (r.h + this.head) * d, bar: this.head * d, below: this.flip }; }
   screenBox() { const b = this.box(), [ox, oy] = this.center.origin(); return { x: ox + b.x, y: oy + b.y, w: b.w, h: b.h }; }
   save() {
     const r = this.rect, d = this.center.dpr(), [ox, oy] = this.center.origin();

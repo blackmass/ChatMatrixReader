@@ -112,3 +112,12 @@ html, body.center { margin: 0; width: 100%; height: 100%; background: transparen
 .webpane .paddr.editing { border-color: #e0b84a; background: #14181a; }
 body.mac .webpane .paddr.editing { background: rgba(20, 24, 26, .35); }          /* (macOS: the box is put over it a moment late the first time: what is behind may show through) */
 .webpane .paddr.editing .ptxt, .webpane .paddr.editing .phold { visibility: hidden; }
+
+/* the bar below the text (a box that touches the top of its monitor: frame.js barBelow): the same bar, turned over */
+.pane.flip { flex-direction: column-reverse; }
+.pane.flip .pbar { align-items: flex-start; }
+.pane.flip .ptab { border: 1px solid rgba(138, 106, 48, var(--tab-alpha, 1)); border-top: 0; border-radius: 0 0 4px 4px; }
+.pane.flip .ptab.on { border-color: rgba(217, 164, 65, var(--tab-alpha, 1)); }
+.webpane.flip .pbar { align-items: center; border-top: 0; border-bottom: 1px solid #8a6a30; }
+.webpane.flip .paddrbar { border-top: 0; border-bottom: 1px solid #5b4a22; }
+.webpane.flip .pbody::after { border-top: 1px solid #8a6a30; border-bottom: 0; }
