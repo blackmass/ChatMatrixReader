@@ -40,7 +40,6 @@ fn new_token() -> String {
     format!("{:016x}{:016x}", part(), part())
 }
 /// A line of the detailed log, area "web" (Options > 기록 > 상세 기록): the channel of the pages and the zoom, where a zoom is lost when it does not work.
-fn diag_in(_zoom: bool, msg: String) { crate::debug_log("web", &msg); }
 fn diag(msg: String) { crate::debug_log("web", &msg); }
 /// A command of a page: `raw` = "<secret>/<command>?<query>". Only the one that carries the secret of this window is carried out.
 fn dispatch(app: &AppHandle, label: &str, raw: &str) {
@@ -246,20 +245,20 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
             if let Some(url) = url { let _ = crate::plugin_open_url(url, allow); }       // (a refused address: nothing happens)
         }
         "hello" => diag(format!("{label}: the script of the page ran ({})", query.unwrap_or(""))),
-        "zseen" => diag_in(true, format!("{label}: the page saw a zoom input ({})", query.unwrap_or(""))),
+        "zseen" => diag(format!("{label}: the page saw a zoom input ({})", query.unwrap_or(""))),
         "copy" => {                                     // the user's right button with a text selected on the page: the text goes to the clipboard (the center puts it there and says so)
             let text = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "t").map(|(_, v)| v.into_owned()));
             if let Some(t) = text.map(|t| t.chars().take(1000).collect::<String>()).filter(|t| !t.trim().is_empty()) { let _ = app.emit("web-copy", json!({ "label": label, "text": t })); }
         }
         "rclick" => { let _ = app.emit("web-rclick", json!({ "label": label })); }          // (the center closes the window when the user chose that for it)
         "zoom" => {                                     // the page asks for a larger / smaller size (d = 1, -1; 0 = 100 %): only a window the user opened
-            if !is_free(label) { diag_in(true, format!("{label}: zoom refused, not a window of the mini browser")); return; }
+            if !is_free(label) { diag(format!("{label}: zoom refused, not a window of the mini browser")); return; }
             let d = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "d").and_then(|(_, v)| v.parse::<i32>().ok())).unwrap_or(0);
             let cur = ZOOM.lock().ok().and_then(|m| m.get(label).copied()).unwrap_or(1.0);
             let new = if d == 0 { 1.0 } else { ((cur + 0.1 * d.signum() as f64) * 10.0).round() / 10.0 }.clamp(0.3, 3.0);
             let applied = (new - cur).abs() > 0.001 || d == 0;
             let done = if applied { Some(win.set_zoom(new).is_ok()) } else { None };
-            diag_in(true, format!("{label}: zoom request d={d}, was {cur:.1}, now {new:.1}, {}", match done { Some(true) => "set", Some(false) => "NOT set (the web view refused)", None => "no change (the limit)" }));
+            diag(format!("{label}: zoom request d={d}, was {cur:.1}, now {new:.1}, {}", match done { Some(true) => "set", Some(false) => "NOT set (the web view refused)", None => "no change (the limit)" }));
             if applied {
                 if let Ok(mut m) = ZOOM.lock() { m.insert(label.to_string(), new); }
                 let _ = app.emit("web-zoom", json!({ "label": label, "zoom": new }));

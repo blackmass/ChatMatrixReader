@@ -737,7 +737,7 @@ pub fn raise_above_all(hwnd: isize) {
 pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
     unsafe {
         let after = if on { -1 } else if game != 0 && IsWindow(game) != 0 { after_game(game) } else { -2 }; // HWND_TOPMOST / above the game / HWND_NOTOPMOST
-        SetWindowPos(hwnd, after, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+        SetWindowPos(hwnd, after, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200);          // NOMOVE | NOSIZE | NOACTIVATE | NOOWNERZORDER (the owner of a window, the game, is not moved with it)
     }
 }
 
@@ -765,31 +765,6 @@ unsafe extern "system" fn z_guard(hwnd: Handle, msg: u32, wparam: usize, lparam:
     }
     DefSubclassProc(hwnd, msg, wparam, lparam)
 }
-/// The last window of ANOTHER program that was in front when a window of ours was made active (see quiet_guard).
-static LAST_FOREIGN: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
-/// A window that is never to be the active one (a center, a blur window: they show and never take the keyboard). The system's own ways of making a window active are shut:
-/// a position change always carries "do not activate" (the system raises the windows that a window owns together with it, and did not say so), a click does not activate it, and when it
-/// IS made active in spite of that (the web view inside takes the focus by itself when it starts) the activation goes back at once to the window of another program that had it.
-unsafe extern "system" fn quiet_guard(hwnd: Handle, msg: u32, wparam: usize, lparam: isize, _id: usize, _data: usize) -> isize {
-    match msg {
-        0x0046 if lparam != 0 => { let p = &mut *(lparam as *mut WindowPos); p.flags |= 0x0010; }          // WM_WINDOWPOSCHANGING: SWP_NOACTIVATE
-        0x0021 => return 3,                                                                              // WM_MOUSEACTIVATE: MA_NOACTIVATE
-        0x0006 if (wparam & 0xffff) != 0 => {                                                            // WM_ACTIVATE: WA_ACTIVE / WA_CLICKACTIVE; lparam = the window that had it
-            let prev = lparam;
-            if prev != 0 && IsWindow(prev) != 0 && !is_mine(prev) { LAST_FOREIGN.store(prev, std::sync::atomic::Ordering::Relaxed); }
-            let back = LAST_FOREIGN.load(std::sync::atomic::Ordering::Relaxed);
-            let target = if prev != 0 && IsWindow(prev) != 0 && !is_mine(prev) { prev } else if back != 0 && IsWindow(back) != 0 && !is_mine(back) { back } else { 0 };
-            if target != 0 { SetForegroundWindow(target); }
-        }
-        _ => {}
-    }
-    DefSubclassProc(hwnd, msg, wparam, lparam)
-}
-/// Call it from the thread that made the window.
-pub fn guard_noactivate(hwnd: isize) {
-    let ok = unsafe { SetWindowSubclass(hwnd, quiet_guard, hwnd as usize, 0) };
-    if ok == 0 { crate::startup_log("a window could not be made unactivatable"); }
-}
 /// Call it from the thread that made the window.
 pub fn guard_z(hwnd: isize, label: &str) {
     let data = Box::into_raw(Box::new(label.to_string())) as usize;
@@ -816,23 +791,25 @@ pub fn set_client_rect(hwnd: isize, x: i32, y: i32, w: i32, h: i32) -> bool {
 
 /// `hwnd` goes directly below `above` (and stays in its band: topmost or not) without taking the focus.
 pub fn place_below(hwnd: isize, above: isize) {
-    unsafe { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); }          // NOMOVE | NOSIZE | NOACTIVATE
+    unsafe { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200); }          // NOMOVE | NOSIZE | NOACTIVATE | NOOWNERZORDER
 }
 
 /// A center, its blur windows and its web windows (`group`, from the front) are put in the state of the mode, one behind the other, in the order in which no window is ever over the one that is to be
 /// over it, not even between two calls: going UP (topmost, or the top of the ordinary windows) the front one goes first and each next one directly behind it; going DOWN (22: directly over the
-/// game) the one at the back goes first and each next one directly over it. State: 0 ordinary, 1 / 21 / 23 on top, 22 over the game (the order first, the owner after). `_was`: the state before (not used now).
-pub fn place_group(group: &[isize], state: u32, _was: u32, game: isize) {
+/// game) the one at the back goes first and each next one directly over it. State: 0 ordinary, 1 / 21 / 23 on top, 22 over the game; `was`: the state before (23 -> 22 puts the order first, then the owner).
+pub fn place_group(group: &[isize], state: u32, was: u32, game: isize) {
     if group.is_empty() { return; }
     let own = |owner: isize| { for h in group { set_owner(*h, owner); } };
-    let flags = 0x0001 | 0x0002 | 0x0010;                                                  // NOMOVE | NOSIZE | NOACTIVATE
+    let flags = 0x0001 | 0x0002 | 0x0010 | 0x0200;                                         // NOMOVE | NOSIZE | NOACTIVATE | NOOWNERZORDER
     if state == 22 {
-        // the order first, the owner after: a window that is owned must be over its owner, and when the owner is set while the window is over everything the system lifts the owner (the game) under it,
-        // over the windows of the user that were over the game
+        // the order first, the owner after, when the windows come from over everything (this program was in front: 23; or the windows are put for the first time: 99): an owner that is set
+        // while its window is over everything is lifted by the system under the window, over the windows of the user that were over it
+        let first = was == 23 || was == 99;
+        if !first { own(game); }
         let n = group.len();
         set_topmost(group[n - 1], false, game);
         for i in (0..n - 1).rev() { set_topmost(group[i], false, group[i + 1]); }
-        own(game);
+        if first { own(game); }
     } else {
         own(0);                                                                            // (the owner goes first: a window that is owned is not asked to be topmost)
         unsafe {
@@ -842,9 +819,12 @@ pub fn place_group(group: &[isize], state: u32, _was: u32, game: isize) {
     }
 }
 
+/// Can the window be seen now (shown, not hidden)?
+pub fn is_visible(hwnd: isize) -> bool { unsafe { IsWindowVisible(hwnd) != 0 } }
+
 /// The window is shown and put directly below `above` in one call, without taking the focus (shown first and put there after, it would be at the top for a moment).
 pub fn show_below(hwnd: isize, above: isize) {
-    unsafe { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040); }          // NOMOVE | NOSIZE | NOACTIVATE | SHOWWINDOW
+    unsafe { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040 | 0x0200); }          // NOMOVE | NOSIZE | NOACTIVATE | SHOWWINDOW | NOOWNERZORDER
 }
 
 /// The window goes to the top of the ordinary windows without taking the focus (what a click does to a normal window; ours do not take the focus).

@@ -82,11 +82,7 @@ pub fn start(app: AppHandle) {
                 let _ = w.set_position(tauri::PhysicalPosition::new(l, t));
                 let _ = w.set_size(tauri::PhysicalSize::new((r - l) as u32, (b - t) as u32));
                 let _ = w.set_ignore_cursor_events(true);
-                if let Ok(h) = hwnd_of(&w) {
-                    win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h);
-                    #[cfg(windows)]
-                    { let _ = w.run_on_main_thread(move || win::guard_noactivate(h)); }          // (it is never to be the active window: see win.rs quiet_guard)
-                }
+                if let Ok(h) = hwnd_of(&w) { win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h); }
                 if cfg!(target_os = "macos") { let _ = w.show(); }
             }
         }
@@ -110,6 +106,8 @@ pub fn start(app: AppHandle) {
         for (label, _) in MODES {
             if let Some(w) = app.get_webview_window(label) {
                 if let Ok(h) = hwnd_of(&w) { win::set_alpha(h, 0.0); hwnds.push(h); }
+                // (the window library's show(): the library keeps its own idea of whether a window is shown, and hides a window it thinks is hidden at the next change of a flag of the window, such as when
+                // the mouse comes over a pane. The center is not owned yet while it is shown: it is put in its place and owned after, see the loop)
                 let _ = w.show();
             }
         }
@@ -196,14 +194,12 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
             // (no order guard, unlike a web window: nobody presses a blur window, and the guard would refuse what the loop asks of it, the top of a band or a place over the game: it is the center's
             // backdrop and is put in the state of the center, like the center)
             #[cfg(windows)]
-            {
-                win::no_transitions(h);                   // (the blur goes at once with the text: the system fades a window that is hidden or closed)
-                let _ = w.run_on_main_thread(move || win::guard_noactivate(h));          // (never the active window: its web view takes the focus when it starts)
-            }
+            win::no_transitions(h);                       // (the blur goes at once with the text: the system fades a window that is hidden or closed)
         }
         let woke = known.as_ref().map_or(false, |v| v.4.is_some());                 // (it was kept with its blur off: on again, nothing is made)
         if known.is_none() {
-            // shown and put directly under its center in one call (a window that is shown is put at the top by the system: over the text for a moment)
+            // shown and put directly under its center in one call (a window that is shown is put at the top by the system: over the text for a moment). (The window library does not know it is shown: its
+            // calls that change a flag of the window hide it, so none is made for a blur window after this: the one that makes it click-through is above, before it is shown.)
             #[cfg(windows)]
             { match app.get_webview_window(center).and_then(|c| hwnd_of(&c).ok()) { Some(ch) => win::show_below(h, ch), None => { let _ = w.show(); } } }
             #[cfg(not(windows))]
@@ -335,8 +331,9 @@ fn apply_mode(h: isize, mode: u32, game: isize, last: &mut HashMap<isize, u32>) 
 fn focus_watch(app: AppHandle) {
     let mut last: isize = 0;
     loop {
-        std::thread::sleep(Duration::from_millis(20));
-        if !crate::debug_on("focus") { continue; }
+        let on = crate::debug_on("focus");
+        std::thread::sleep(Duration::from_millis(if on { 20 } else { 250 }));          // (off: it only looks now and then whether it was turned on)
+        if !on { continue; }
         let fg = win::foreground();
         if fg != last {
             crate::debug_log("focus", &format!("the window in front changes: {} [{}] -> {} [{}]", win::describe(last), our_name(&app, last), win::describe(fg), our_name(&app, fg)));
@@ -483,7 +480,8 @@ fn run(app: AppHandle) {
             #[cfg(windows)]
             {
                 let was = last.get(&ch).copied().unwrap_or(99);
-                if was != state || want.iter().any(|h| !last.contains_key(h)) {
+                // (a center that is not shown yet is not put: it is owned only after it is shown, an owned window that is shown lifts its owner, the game, over the windows of the user)
+                if win::is_visible(ch) && (was != state || want.iter().any(|h| !last.contains_key(h))) {
                     let before = if crate::debug_on("order") { Some(stack_names(&app, 8)) } else { None };
                     win::place_group(&want, state, was, game);
                     for h in &want { last.insert(*h, state); }
