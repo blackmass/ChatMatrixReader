@@ -1029,6 +1029,13 @@ pub(crate) fn debug_log(area: &str, msg: &str) {
         let _ = writeln!(f, "{}.{:03} [{area}] {msg}", t.0, t.1);
     }
 }
+/// At the start of the program the settings are read here for the areas that are on, so that what happens before the pages are running is written down too.
+fn debug_from_config() {
+    let Ok(text) = std::fs::read_to_string(base_dir().join("config.json")) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(&text) else { return };
+    let areas: Vec<String> = v.get("debug_log").and_then(|d| d.as_object()).map(|o| o.iter().filter(|(_, x)| x.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect()).unwrap_or_default();
+    set_debug_areas(areas);
+}
 /// The areas of the detailed log that the user has turned on (the hub tells at the start and at every change).
 #[tauri::command]
 fn set_debug_areas(areas: Vec<String>) {
@@ -1191,6 +1198,7 @@ fn main() {
         })
         .setup(|app| {
             startup_log("setup");
+            debug_from_config();                                          // (the detailed log is on from the very start when the settings say so: the hub tells later)
             let handle = app.handle().clone();
             #[cfg(target_os = "macos")]
             {

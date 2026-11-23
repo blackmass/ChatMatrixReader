@@ -67,6 +67,7 @@ pub async fn center_ready(label: String) -> Result<(), String> {
 /// are ready and the loop has set their order (a little time more), or after FALLBACK at the latest (a page that never says it is ready must not leave the program without its windows).
 /// (macOS: shown at once as before: a page of a hidden window is slowed down there, and nothing has been seen of this problem.)
 pub fn start(app: AppHandle) {
+    { let a = app.clone(); std::thread::spawn(move || focus_watch(a)); }          // (the detailed log "focus": from the start of the program, before the centers are there)
     tauri::async_runtime::spawn(async move {
         let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(3000))).await;
         // the rectangle of all the screens together (physical pixels)
@@ -81,7 +82,11 @@ pub fn start(app: AppHandle) {
                 let _ = w.set_position(tauri::PhysicalPosition::new(l, t));
                 let _ = w.set_size(tauri::PhysicalSize::new((r - l) as u32, (b - t) as u32));
                 let _ = w.set_ignore_cursor_events(true);
-                if let Ok(h) = hwnd_of(&w) { win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h); }
+                if let Ok(h) = hwnd_of(&w) {
+                    win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h);
+                    #[cfg(windows)]
+                    { let _ = w.run_on_main_thread(move || win::guard_noactivate(h)); }          // (it is never to be the active window: see win.rs quiet_guard)
+                }
                 if cfg!(target_os = "macos") { let _ = w.show(); }
             }
         }
@@ -191,7 +196,10 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
             // (no order guard, unlike a web window: nobody presses a blur window, and the guard would refuse what the loop asks of it, the top of a band or a place over the game: it is the center's
             // backdrop and is put in the state of the center, like the center)
             #[cfg(windows)]
-            win::no_transitions(h);                       // (the blur goes at once with the text: the system fades a window that is hidden or closed)
+            {
+                win::no_transitions(h);                   // (the blur goes at once with the text: the system fades a window that is hidden or closed)
+                let _ = w.run_on_main_thread(move || win::guard_noactivate(h));          // (never the active window: its web view takes the focus when it starts)
+            }
         }
         let woke = known.as_ref().map_or(false, |v| v.4.is_some());                 // (it was kept with its blur off: on again, nothing is made)
         if known.is_none() {
@@ -323,6 +331,23 @@ fn apply_mode(h: isize, mode: u32, game: isize, last: &mut HashMap<isize, u32>) 
     Some((was, want))
 }
 
+/// The detailed log "focus": which window comes to the front, from the start of the program (a thread of its own: the loop of the centers starts three seconds after the program does).
+fn focus_watch(app: AppHandle) {
+    let mut last: isize = 0;
+    loop {
+        std::thread::sleep(Duration::from_millis(20));
+        if !crate::debug_on("focus") { continue; }
+        let fg = win::foreground();
+        if fg != last {
+            crate::debug_log("focus", &format!("the window in front changes: {} [{}] -> {} [{}]", win::describe(last), our_name(&app, last), win::describe(fg), our_name(&app, fg)));
+            last = fg;
+        }
+    }
+}
+/// (only for the log) The top of the stack of windows, from the front: our windows by their labels, the others by class and program.
+fn stack_names(app: &AppHandle, n: usize) -> Vec<String> {
+    win::top_windows(n).into_iter().map(|h| { let o = our_name(app, h); if o == "other" { win::short(h) } else { o } }).collect()
+}
 /// (only for the log) Which window of this program a handle is: its label ("center2", "blur_center2_1", "web_b1"), "other" when it is not one of the windows of the centers, "-" for none.
 fn our_name(app: &AppHandle, h: isize) -> String {
     if h == 0 { return "-".to_string(); }
@@ -352,7 +377,6 @@ fn order_diag(msg: String) { crate::debug_log("order", &msg); }
 
 fn run(app: AppHandle) {
     let mut prev_down = false;                                             // (the left button at the last look, and the window that was in front: only for the detailed log "focus")
-    let mut last_fg: isize = 0;
     let mut mis: HashMap<String, Instant> = HashMap::new();                // (a center whose blur windows are out of order: since when)
     let mut watch: HashMap<String, (Instant, u8)> = HashMap::new();        // (a center whose state has just changed, and its blur windows are looked at again a moment later: since when, how many looks)
     let mut ignoring: HashMap<&str, bool> = HashMap::new();
@@ -396,10 +420,6 @@ fn run(app: AppHandle) {
         // (the detailed log, area "focus": what comes to the front, and what is under the mouse and has the keyboard when the left button goes down; nothing is done with it)
         if crate::debug_on("focus") {
             let fg = win::foreground();
-            if fg != last_fg {
-                crate::debug_log("focus", &format!("the window in front changes: {} [{}] -> {} [{}]", win::describe(last_fg), our_name(&app, last_fg), win::describe(fg), our_name(&app, fg)));
-                last_fg = fg;
-            }
             if down && !prev_down {
                 let under = win::window_at(cx, cy);
                 let (active, focus) = win::focus_owner();
@@ -464,9 +484,11 @@ fn run(app: AppHandle) {
             {
                 let was = last.get(&ch).copied().unwrap_or(99);
                 if was != state || want.iter().any(|h| !last.contains_key(h)) {
+                    let before = if crate::debug_on("order") { Some(stack_names(&app, 8)) } else { None };
                     win::place_group(&want, state, was, game);
                     for h in &want { last.insert(*h, state); }
                     if was != state { switched = Some((was, state)); }
+                    if let Some(b) = before { order_diag(format!("placed {label} (mode {mode}): state {was} to {state}; the top of the stack before {b:?}; after {:?}", stack_names(&app, 8))); }
                 }
             }
             // (elsewhere: one window after the other, in the order that leaves them right: a window put "to the top" goes over what is there, so the last one is the front one; a window put directly

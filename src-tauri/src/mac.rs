@@ -470,6 +470,9 @@ pub fn owner_of(_hwnd: isize) -> isize { 0 }
 pub fn is_topmost(hwnd: isize) -> bool { on_main(|| unsafe { let level: isize = msg_send![obj(hwnd), level]; level >= LEVEL_FLOATING }) }
 pub fn z_order_global(hwnds: &[isize]) -> Vec<isize> { z_order(hwnds) }          // (only for the log: the windows of the list that are on the screen, from the front)
 pub fn window_at(_x: i32, _y: i32) -> isize { 0 }
+pub fn guard_noactivate(_hwnd: isize) {}
+pub fn short(hwnd: isize) -> String { exe_of(hwnd) }
+pub fn top_windows(_n: usize) -> Vec<isize> { Vec::new() }
 pub fn focus_owner() -> (isize, isize) { (0, 0) }
 pub fn make_no_key(hwnd: isize) {
     on_main(|| unsafe {
