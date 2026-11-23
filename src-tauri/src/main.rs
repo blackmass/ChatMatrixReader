@@ -1040,6 +1040,7 @@ fn main() {
             center::center_rects,
             center::center_wheel,
             center::center_layout,
+            center::center_ready,
             center::center_title,
             center::center_zoom,
             center::center_raise,

@@ -54,7 +54,18 @@ pub async fn center_zoom(app: AppHandle, label: String, scale: f64) -> Result<f6
     Ok(want)
 }
 
-/// Makes the three centers (a few seconds after the start) and runs the loop that serves them.
+/// The centers whose page has said that it is ready (center_ready): its settings are read, it is zoomed, it has drawn its windows. A center is shown only when all three are (see start).
+static READY: LazyLock<Mutex<std::collections::HashSet<String>>> = LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+#[tauri::command]
+pub async fn center_ready(label: String) -> Result<(), String> {
+    if MODES.iter().any(|(l, _)| *l == label) { if let Ok(mut r) = READY.lock() { r.insert(label); } }
+    Ok(())
+}
+
+/// Makes the three centers (a few seconds after the start) and runs the loop that serves them. The centers are made HIDDEN: a transparent window over all the screens that is shown before its page
+/// has drawn anything (or while its order and its style are still being set) shows a frame or two of the default background / a redraw over every screen. They are shown together when all three pages
+/// are ready and the loop has set their order (a little time more), or after FALLBACK at the latest (a page that never says it is ready must not leave the program without its windows).
+/// (macOS: shown at once as before: a page of a hidden window is slowed down there, and nothing has been seen of this problem.)
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(3000))).await;
@@ -71,11 +82,29 @@ pub fn start(app: AppHandle) {
                 let _ = w.set_size(tauri::PhysicalSize::new((r - l) as u32, (b - t) as u32));
                 let _ = w.set_ignore_cursor_events(true);
                 if let Ok(h) = hwnd_of(&w) { win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h); }
-                let _ = w.show();
+                if cfg!(target_os = "macos") { let _ = w.show(); }
             }
         }
         let app2 = app.clone();
         std::thread::spawn(move || run(app2));
+        if cfg!(target_os = "macos") { return; }
+        // wait for the three pages (the loop works on the hidden windows meanwhile: order, style), then show them all
+        const FALLBACK: Duration = Duration::from_millis(6000);
+        const SETTLE: Duration = Duration::from_millis(400);
+        let t0 = Instant::now();
+        let ready_at = loop {
+            let n = READY.lock().map(|r| r.len()).unwrap_or(0);
+            if n >= MODES.len() { break Some(t0.elapsed()); }
+            if t0.elapsed() >= FALLBACK { break None; }
+            let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(30))).await;
+        };
+        let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(SETTLE)).await;
+        for (label, _) in MODES { if let Some(w) = app.get_webview_window(label) { let _ = w.show(); } }
+        let ready: Vec<String> = READY.lock().map(|r| { let mut v: Vec<String> = r.iter().cloned().collect(); v.sort(); v }).unwrap_or_default();
+        match ready_at {
+            Some(t) => crate::startup_log(&format!("centers: ready after {} ms, shown after {} ms", t.as_millis(), t0.elapsed().as_millis())),
+            None => crate::startup_log(&format!("centers: NOT all ready after {} ms ({:?}): shown anyway", t0.elapsed().as_millis(), ready)),
+        }
     });
 }
 

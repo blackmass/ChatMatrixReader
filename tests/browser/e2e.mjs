@@ -51,6 +51,7 @@ function grabBytes(x, y, w, h) {
   return out.toString('base64');
 }
 const pluginFetches = [], pluginOpened = [], webCalls = [], centerRects = [];
+const centerReady = [];                                      // (the centers that said they are ready: the program shows them then)
 let dataFolders = [];                                        // (the login folders of the web windows: what the program would list)
 const opened = [], watched = [], trayTexts = [];
 let gameGone = false;
@@ -72,6 +73,7 @@ async function invoke(cmd, a = {}) {
     case 'center_wheel': return { seq: wheel.length, turns: wheel.slice(a.seq).map(d => ({ id: '1', delta: d })) };
     case 'center_zoom': return a.scale || 1;
     case 'center_layout': return { origin: [0, 0], monitors: [[0, 0, 1920, 1080]] };
+    case 'center_ready': centerReady.push(a.label); return null;
     case 'process_stats': return { os: 'windows', self: 10, note: '', procs: [{ pid: 10, parent: 1, name: 'ChatMatrix Reader.exe', kind: 'main', sub: '', ws: 104857600, private: 83886080, cpu_ms: 1000, handles: 300, gdi: 40, user: 60 }, { pid: 11, parent: 10, name: 'msedgewebview2.exe', kind: 'renderer', sub: '', ws: 52428800, private: 31457280, cpu_ms: 500, handles: 150, gdi: 10, user: 10 }] };
     case 'web_open': webCalls.push(['open', a.args]); return null;
     case 'web_close': webCalls.push(['close', a.label]); return null;
@@ -235,6 +237,7 @@ const paneOf = (page, id) => {
   };
 };
 const cm = await open('center.html?label=center1&mode=1&ox=0&oy=0', { width: 1200, height: 800 });
+await until(() => centerReady.includes('center1'), 'a center says that it is ready (after it has read its settings, zoomed and drawn)');
 const main = paneOf(cm, 1);
 const newId = await control.evaluate(() => 0);
 await control.waitForFunction(() => window.cmrHub && window.cmrHub.windows);

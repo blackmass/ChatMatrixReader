@@ -296,7 +296,7 @@ function layout(l) {
     ox = nx; oy = ny;
   }
   screens = l.monitors || [];
-  applyScale().then(fit);
+  return applyScale().then(fit);
 }
 await listen('center-layout', e => layout(e.payload));
 // the web windows: which are open (the hub), the title and the address of the page, how far it has scrolled (the program: webwin.rs)
@@ -324,6 +324,8 @@ emit('voice-lamp-hello', {});
 emit('win-state-hello', {});
 sync();
 await applyScale();
-layout(await invoke('center_layout').catch(() => null));
+await layout(await invoke('center_layout').catch(() => null));
+report();
+invoke('center_ready', { label }).catch(() => {});                    // (the program shows the three centers when all of them have said this: nothing is seen before it is drawn)
 setInterval(report, 1000);
 perfReport('center' + mode, emit);                                  // (how long the jobs of this page take: the options show it)
