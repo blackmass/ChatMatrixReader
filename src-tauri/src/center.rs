@@ -145,18 +145,30 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Op
 }
 
 /// The blur windows of the panes (the option "블러"): one empty transparent window for each pane that has it, the size of its text area, directly under its center (see `run`);
-/// the system blurs what is behind it. key: its label -> (the center's label, the level, its handle, where it is).
-static BLURS: LazyLock<Mutex<HashMap<String, (String, u32, isize, [i32; 4])>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// the system blurs what is behind it. key: its label -> (the center's label, the level, its handle, where it is, since when its blur is off for the moment).
+/// (Windows) A window whose pane has no blur for a moment (the mouse clears the window, it is resized) is NOT closed: only the blur is taken off, and put on again when the pane wants it. A window that is
+/// made again every time came up over its center for a moment (the system puts a new window at the top) and took a moment to load: the blur and the text flickered twice. It is closed when the pane
+/// is gone, or when the blur has been off for BLUR_KEEP (the option is off for good: no empty web view is kept).
+static BLURS: LazyLock<Mutex<HashMap<String, (String, u32, isize, [i32; 4], Option<Instant>)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+const BLUR_KEEP: Duration = Duration::from_secs(30);
 
 fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
+    let key = |id: &str| format!("blur_{}_{}", center, id);
+    let present: std::collections::HashSet<String> = panes.iter().map(|p| key(&p.id)).collect();
     let want: HashMap<String, (u32, [i32; 4])> = panes.iter().filter(|p| p.blur > 0).map(|p| (
-        format!("blur_{}_{}", center, p.id),
+        key(&p.id),
         (p.blur, [p.x.round() as i32, (p.y + if p.below { 0.0 } else { p.bar }).round() as i32, p.w.round().max(1.0) as i32, (p.h - p.bar).round().max(1.0) as i32]),
     )).collect();
     let mut have = match BLURS.lock() { Ok(h) => h, Err(_) => return };
-    // gone: the pane has no blur any more (or is not there)
-    let gone: Vec<String> = have.iter().filter(|(k, v)| v.0 == center && !want.contains_key(*k)).map(|(k, _)| k.clone()).collect();
-    for k in gone { have.remove(&k); if let Some(w) = app.get_webview_window(&k) { let _ = w.destroy(); } }
+    // the windows of this center whose pane has no blur at the moment
+    let none: Vec<(String, Option<Instant>)> = have.iter().filter(|(k, v)| v.0 == center && !want.contains_key(*k)).map(|(k, v)| (k.clone(), v.4)).collect();
+    for (k, since) in none {
+        let close = !cfg!(windows) || !present.contains(&k) || since.map_or(false, |t| t.elapsed() > BLUR_KEEP);
+        if close { have.remove(&k); if let Some(w) = app.get_webview_window(&k) { let _ = w.destroy(); } continue; }
+        if since.is_none() {                                                       // (the blur goes, the window stays where it is)
+            if let Some(v) = have.get_mut(&k) { v.4 = Some(Instant::now()); win::set_blur(v.2, false, 0, 0, 0, 0, 0.0); }
+        }
+    }
     for (k, (level, r)) in want {
         let known = have.get(&k).cloned();
         let w = match app.get_webview_window(&k) {
@@ -171,19 +183,20 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
         if known.is_none() {
             let _ = w.set_ignore_cursor_events(true);
             win::make_no_key(h); win::set_noactivate_light(h, true); win::set_not_rude(h);
-            // the same as a web window gets (webwin.rs web_open): the system may not bring it over its center by itself (the order guard: it is put on from the thread that made the window), and it
-            // starts in the band the web windows start in (the loop puts it in its own order a moment later)
+            // the same as a web window gets (webwin.rs web_open): the system may not bring it over its center by itself (the order guard: it is put on from the thread that made the window)
             #[cfg(windows)]
             {
                 let (hh, lbl) = (h, k.clone());
                 let _ = w.run_on_main_thread(move || win::guard_z(hh, &lbl));
-                win::set_topmost(h, true, 0);
                 win::no_transitions(h);                   // (the blur goes at once with the text: the system fades a window that is hidden or closed)
+                // directly under its center before it is shown (a new window is put at the top by the system: over the text for a moment); else in the band the web windows start in
+                match app.get_webview_window(center).and_then(|c| hwnd_of(&c).ok()) { Some(ch) => win::place_below(h, ch), None => win::set_topmost(h, true, 0) }
             }
         }
-        if known.as_ref().map_or(true, |v| v.1 != level) { win::set_blur(h, true, if level == 2 { 4 } else { 3 }, 0x1e, 0x1f, 0x22, 0.004); }
+        let woke = known.as_ref().map_or(false, |v| v.4.is_some());                 // (it was kept with its blur off: on again, nothing is made)
+        if known.as_ref().map_or(true, |v| v.1 != level) || woke { win::set_blur(h, true, if level == 2 { 4 } else { 3 }, 0x1e, 0x1f, 0x22, 0.004); }
         if known.is_none() { let _ = w.show(); }
-        have.insert(k, (center.to_string(), level, h, r));
+        have.insert(k, (center.to_string(), level, h, r, None));
     }
 }
 
