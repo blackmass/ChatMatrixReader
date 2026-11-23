@@ -3,6 +3,7 @@
 // the windows (what the menus and the options ask: 'browser-command'), keeps where each window is and the address it was at, and tells the centers which are open ('web-state').
 import * as B from './core/browsers.js';
 import { mobileProfile, desktopProfile } from './web_host.js';
+import { safeUrl } from './core/urls.js';
 
 const INFO_MS = 500, SAVE_MS = 600, NAV_MS = 800;
 const parseGeom = t => { const m = /^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$/.exec(String(t || '')); return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null; };
@@ -81,6 +82,16 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
     }
   }
 
+  // An address of a line of the chat, chosen by the user (the center asked them first): the window goes to it, or is opened at it. Only an address the program may send a browser to.
+  async function openUrl(id, text) {
+    const url = safeUrl(text), b = entry(id);
+    if (!url || !b) return;
+    const o = open.get(id);
+    if (o) { await invoke('web_cmd', { label: o.label, cmd: 'goto', url }).catch(() => {}); return; }
+    once.set(id, { mode: b.mode, url });
+    await openWindow(id);
+  }
+
   // cookies and the rest: a window that is open does it itself, a window that is not has its folder taken away
   async function clearData(id) {
     const o = open.get(id);
@@ -88,13 +99,14 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
   }
 
   listen('browser-command', e => {
-    const { cmd, id } = e.payload || {};
+    const { cmd, id, url } = e.payload || {};
     if (!Number.isInteger(id)) return;
     if (cmd === 'open') openWindow(id);
     else if (cmd === 'close') closeWindow(id);
     else if (cmd === 'toggle') (open.has(id) ? closeWindow(id) : openWindow(id));
     else if (cmd === 'clear') clearData(id);
     else if (cmd === 'mode') switchMode(id);
+    else if (cmd === 'url') openUrl(id, url);
   });
   listen('web-close', e => { const hit = [...open].find(([, o]) => o.label === (e.payload || {}).label); if (hit) closeWindow(hit[0]); });
   listen('web-hello', publish);

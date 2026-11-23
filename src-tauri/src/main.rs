@@ -937,6 +937,26 @@ fn open_url(url: String) -> Result<(), String> {
     launch_url(&url)
 }
 
+/// A web address in a line of the chat, that the user chose to open in their own browser (the page asked them first). Any site, but only the ones a person would type: http or https, a name
+/// with a dot written with the plain letters of its language (no number, no disguised name "xn--"), no user name or password, the usual port, short, no hidden characters. (The page checks
+/// it too, core/urls.js: this is the check that counts.) The address is not given to a shell: the system's own opener gets it as it is, so a "&" in a query is fine.
+#[tauri::command]
+fn open_chat_url(url: String) -> Result<(), String> {
+    use tauri_plugin_http::reqwest;
+    let u = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
+    let host = u.host_str().unwrap_or("").to_ascii_lowercase();
+    let last_has_letter = host.rsplit('.').next().map_or(false, |l| l.bytes().any(|c| c.is_ascii_lowercase()));
+    let ok = (u.scheme() == "https" || u.scheme() == "http") && u.username().is_empty() && u.password().is_none() && u.port().is_none() && url.len() <= 500
+        && host.contains('.') && !host.starts_with('.') && !host.ends_with('.') && !host.starts_with("0x") && last_has_letter
+        && host.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'.' || c == b'-')
+        && !host.split('.').any(|p| p.starts_with("xn--"));
+    let text = u.as_str();
+    if !ok || text.len() > 500 || text.chars().any(|c| c.is_control() || c == ' ' || c == '"' || c == '^' || c == '<' || c == '>') {
+        return Err("address not allowed".into());
+    }
+    launch_url(text)
+}
+
 /// Opens an address in the default browser of the system (nothing is checked here: the callers check).
 fn launch_url(url: &str) -> Result<(), String> {
     #[cfg(windows)]
@@ -1068,6 +1088,7 @@ fn main() {
             capture,
             open_options,
             open_url,
+            open_chat_url,
             set_window_rect,
             show_input,
             address_show,

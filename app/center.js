@@ -95,8 +95,8 @@ const menuEl = document.createElement('div');
 menuEl.id = 'ctx'; menuEl.hidden = true; menuEl.dataset.notr = ''; document.body.append(menuEl);
 let menuPane = null;
 function hideMenu() { if (menuEl.hidden) return; menuPane = null; menuEl.hidden = true; lastKey = ''; report(); }
-function showMenu(ev, pane) {
-  const list = menuList({ cfg, pane, ev, open, browsersOpen: new Set(webBy.browser.map(w => w.win)) });
+function showMenu(ev, pane) { openMenu(menuList({ cfg, pane, ev, open, browsersOpen: new Set(webBy.browser.map(w => w.win)) }), ev, pane); }
+function openMenu(list, ev, pane) {
   menuEl.replaceChildren();
   for (const e of list) {
     const d = document.createElement('div'); d.className = e.cls || '';
@@ -107,6 +107,17 @@ function showMenu(ev, pane) {
   menuEl.style.left = Math.max(0, Math.min(ev.clientX, innerWidth - menuEl.offsetWidth - 2)) + 'px';
   menuEl.style.top = Math.max(0, Math.min(ev.clientY, innerHeight - menuEl.offsetHeight - 2)) + 'px';
 }
+// A web address in a line was clicked: the question comes first, for every address (the whole address is shown), then it opens in the mini browser (window 1) or, with Ctrl (Cmd) held, in the
+// user's browser; the option "link_open" turns that round. The exe checks the address again (open_chat_url), the mini browser too (a page of its own).
+linkHandler.url = (url, ev) => {
+  const system = (cfg.link_open === 'system') !== !!(ev.ctrlKey || ev.metaKey);
+  const pane = [...panes.values()].find(p => p.el.contains(ev.target)) || null;
+  openMenu([
+    { text: url.length > 90 ? url.slice(0, 89) + '…' : url, cls: 'off' }, { text: '', cls: 'sep' },
+    { text: system ? tr('내 브라우저에서 열기') : tr('미니 브라우저에서 열기'), fn: () => { if (system) invoke('open_chat_url', { url }).catch(() => {}); else emit('browser-command', { cmd: 'url', id: 1, url }); } },
+    { text: tr('취소'), fn: () => {} },
+  ], ev, pane);
+};
 addEventListener('mousedown', ev => { if (!menuEl.contains(ev.target)) hideMenu(); }, true);
 // (the menu of the web view - back, reload, print ... - never shows over a center: a right click anywhere else, with our menu open or not, only closes ours; only a text box keeps its own cut / paste)
 addEventListener('contextmenu', ev => { if (!(ev.target.closest && ev.target.closest('input, textarea'))) ev.preventDefault(); }, true);

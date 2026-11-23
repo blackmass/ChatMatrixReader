@@ -32,7 +32,7 @@ const files = new Map([['Glossary.sample.txt', 'LFM = 구인\n'], ['fonts/나눔
 // the version of the program (app/core/version.js) and the next patch version: the fake release list of GitHub is made from them, so the test does not change at every release
 const THIS_VERSION = /VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'app', 'core', 'version.js'), 'utf8'))[1];
 const NEXT_VERSION = THIS_VERSION.replace(/\d+$/, n => String(Number(n) + 1));
-const requests = [], calls = [], clip = [], modelAsks = [];
+const requests = [], calls = [], clip = [], modelAsks = [], chatOpened = [];
 let lastInputOpen = null;                            // the arguments of the last show_input
 let aiMode = 'ok';                                   // what the fake AI server answers to the model list: ok | down | 401 | bad
 let osVersion = '14.5';                                    // what the command os_version answers (macOS only)
@@ -69,6 +69,7 @@ async function invoke(cmd, a = {}) {
     case 'plugin_token': return 'tok-' + a.id;
     case 'plugin_forget': return null;
     case 'plugin_open_url': pluginOpened.push(a); return null;
+    case 'open_chat_url': chatOpened.push(a.url); return null;
     case 'center_rects': centerRects.push(a); return null;
     case 'center_wheel': return { seq: wheel.length, turns: wheel.slice(a.seq).map(d => ({ id: '1', delta: d })) };
     case 'center_zoom': return a.scale || 1;
@@ -1023,6 +1024,24 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(() => clip.length === clip0 + 1 && clip.at(-1) === '/console reload', 'browser/copy: the selected text is on the clipboard');
     await until(async () => (await cp.locator('.webpane .pcopied').evaluate(e => e.style.opacity)) === '1', 'and the bar says it was copied');
     ok(opens().at(-1)[1].rclick_copy === true, 'browser/copy: the right button copies by default');
+    // a web address in the chat: shown as [host/path]; a click asks first (the whole address), then it goes to the mini browser; with Ctrl, to the user's own browser
+    await control.evaluate(() => window.cmrHub.fakeLine({ channel: 'party', name: 'Lead', text: 'join discord.gg/abc123로 오세요 and https://10.0.0.1/x' }));
+    const urlSel = cp.locator('.cv-url', { hasText: 'discord.gg' });
+    await until(async () => (await urlSel.count()) >= 1, 'chat/url: an address in a line is a link');
+    const shown = await urlSel.allTextContents(), allUrls = await cp.locator('.cv-url').allTextContents();
+    ok(shown.every(t => t === '[discord.gg/abc123]') && !allUrls.some(t => t.includes('10.0.0.1')), 'chat/url: shown as [host/path] (a number address is not a link): ' + JSON.stringify(allUrls));
+    const urlEl = urlSel.first();
+    await urlEl.click();
+    await until(async () => (await cp.locator('#ctx').isVisible()), 'chat/url: a click asks before it opens');
+    ok((await cp.locator('#ctx div').first().textContent()) === 'https://discord.gg/abc123' && (await cp.locator('#ctx').textContent()).includes('미니 브라우저에서 열기'), 'chat/url: the question shows the whole address and the mini browser');
+    await cp.locator('#ctx div', { hasText: '미니 브라우저에서 열기' }).click();
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[1] === 'web_b1' && c[2] === 'goto' && c[3] === 'https://discord.gg/abc123'), 'chat/url: the mini browser goes to it');
+    await urlEl.click({ modifiers: ['Control'] });
+    await until(async () => (await cp.locator('#ctx').textContent()).includes('내 브라우저에서 열기'), 'chat/url: with Ctrl the other one is offered');
+    await cp.locator('#ctx div', { hasText: '내 브라우저에서 열기' }).click();
+    await until(() => chatOpened.includes('https://discord.gg/abc123'), 'chat/url: the user\'s browser is asked to open it');
+    await urlEl.click(); await cp.locator('#ctx div', { hasText: '취소' }).click();
+    ok(chatOpened.length === 1, 'chat/url: cancel opens nothing');
     // the menu of the window opens from its bars, not from the page (where the page is, the center only has it while a menu is open)
     await cp.locator('.webpane .pbody').dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 });
     await cp.waitForTimeout(200);

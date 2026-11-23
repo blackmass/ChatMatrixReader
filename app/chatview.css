@@ -17,4 +17,6 @@
 body:not(.interactive) .cv-scroll, body.outside.hide-frame .cv-scroll { scrollbar-color: transparent transparent; }   /* (invisible, but its room stays: the text must not move when it shows) */
 
 .cv-link { cursor: pointer; }
+.cv-url { color: #6fb7ff; text-decoration: underline; cursor: pointer; }
+.cv-url:hover { filter: brightness(1.25); }
 .cv-link:hover { filter: brightness(1.25); }
