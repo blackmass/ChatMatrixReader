@@ -63,6 +63,8 @@ extern "system" {
     fn IsWindowVisible(hwnd: Handle) -> i32;
     fn IsIconic(hwnd: Handle) -> i32;
     fn GetWindow(hwnd: Handle, cmd: u32) -> Handle;
+    fn GetTopWindow(hwnd: Handle) -> Handle;
+    fn GetClassNameW(hwnd: Handle, buf: *mut u16, max: i32) -> i32;
     fn GetWindowRect(hwnd: Handle, r: *mut RECT) -> i32;
     fn GetClientRect(hwnd: Handle, r: *mut RECT) -> i32;
     fn ClientToScreen(hwnd: Handle, p: *mut POINT) -> i32;
@@ -561,6 +563,46 @@ pub fn wheel_since_panes(seq: u64) -> (u64, Vec<(isize, i16)>) {
 #[link(name = "dwmapi")]
 extern "system" {
     fn DwmSetWindowAttribute(hwnd: Handle, attr: u32, value: *const c_void, size: u32) -> i32;
+}
+
+/// (only for the log) The blur the system says a window has now: 0 = none, 3 = blur, 4 = acrylic, -1 = cannot be read.
+pub fn blur_state(hwnd: isize) -> i32 {
+    unsafe {
+        let name: Vec<u16> = "user32.dll\0".encode_utf16().collect();
+        let module = GetModuleHandleW(name.as_ptr());
+        if module == 0 { return -1; }
+        let p = GetProcAddress(module, b"GetWindowCompositionAttribute\0".as_ptr());
+        if p.is_null() { return -1; }
+        let f = std::mem::transmute::<*const c_void, CompositionFn>(p);
+        let mut accent = AccentPolicy { state: -2, flags: 0, gradient: 0, animation: 0 };
+        let mut data = CompositionData { attribute: 19, data: &mut accent as *mut AccentPolicy as *mut c_void, size: std::mem::size_of::<AccentPolicy>() };
+        if f(hwnd, &mut data) == 0 { -1 } else { accent.state }
+    }
+}
+/// (only for the log) What a window is: its class, its program and the start of its title.
+pub fn describe(hwnd: isize) -> String {
+    if hwnd == 0 { return "none".into(); }
+    let mut buf = [0u16; 128];
+    let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+    let class = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+    format!("class {class}, program {}, title \"{}\"", exe_of(hwnd), window_title(hwnd).chars().take(30).collect::<String>())
+}
+/// (only for the log) The owner of a window (0 = none) and whether it is a topmost one.
+pub fn owner_of(hwnd: isize) -> isize { unsafe { GetWindow(hwnd, 4) } }
+pub fn is_topmost(hwnd: isize) -> bool { unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & 0x8 != 0 } }
+/// (only for the log) The given windows in the order of the whole stack of windows, from the front (the topmost ones first), so a window of another band is found too.
+pub fn z_order_global(hwnds: &[isize]) -> Vec<isize> {
+    let mut out = Vec::new();
+    unsafe {
+        let mut x = GetTopWindow(0);
+        let mut n = 0;
+        while x != 0 && n < 5000 && out.len() < hwnds.len() {
+            if hwnds.contains(&x) { out.push(x); }
+            x = GetWindow(x, 2);
+            n += 1;
+        }
+    }
+    out
 }
 
 /// The window is not faded in and out by the system when it is shown or hidden (DWMWA_TRANSITIONS_FORCEDISABLED). The blur windows: the text goes at once, so the blur under it must go at once too.
