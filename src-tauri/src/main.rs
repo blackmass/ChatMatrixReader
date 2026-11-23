@@ -918,12 +918,14 @@ fn app_folder() -> String {
     app_dir().display().to_string()
 }
 
-/// Opens a web page in the user's browser. Only the project's own GitHub pages and the official places of the voice recognition (the model
+/// Opens a web page in the user's browser. Only the project's own pages (GitHub, CurseForge, the blog: the links of the options) and the official places of the voice recognition (the model
 /// repository, whisper.cpp, OpenAI Whisper) are allowed: the address is checked here, whatever the web view asks for.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    const ALLOWED: [&str; 4] = [
+    const ALLOWED: [&str; 6] = [
         "https://github.com/blackmass/ChatMatrixReader",
+        "https://www.curseforge.com/wow/addons/chatmatrix",
+        "https://blog.naver.com/eternalguard",
         "https://huggingface.co/ggerganov/whisper.cpp",
         "https://github.com/ggml-org/whisper.cpp",
         "https://github.com/openai/whisper",

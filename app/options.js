@@ -228,6 +228,10 @@ addEventListener('cmr-language', () => show());      // the texts that are put t
 
 // ---------------------------------------------------------------- the end of the program
 $('quitBtn').onclick = () => window.__TAURI__.core.invoke('quit_request').catch(() => {});
+// the project's pages (the program checks the address again: open_url allows only these)
+for (const a of document.querySelectorAll('#links a')) a.onclick = e => { e.preventDefault(); window.__TAURI__.core.invoke('open_url', { url: a.dataset.url }).catch(() => {}); };
+// (the hub saves what is unsaved, then the program starts itself again: restart_app)
+$('restartBtn').onclick = () => window.__TAURI__.event.emit('restart-request', {}).catch(() => {});
 
 // ---------------------------------------------------------------- the translation test (tabs with `test: true`): what the settings do now, and how fast
 {

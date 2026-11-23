@@ -42,3 +42,9 @@ for (const [fn, args, want] of G.theme) {
   else check(true, '');
 }
 check(bad === 0, `theme/fade: ${bad} of ${G.theme.length} differ`);
+{
+  // the 3.x form: a line with no right-hand text is one cell over both columns (the golden form above has an empty second cell)
+  const w = theme.tipHtml(['plain', 'Head\fPlate'], true);
+  check(w.includes('<tr><td colspan=2><span style="color:#ffffff">plain</span></td></tr>') && w.includes('<td align="right">'), 'theme/tipHtml wide: a line of its own spans both columns, a two-sided line keeps its two cells');
+  check(theme.tipHtml(['plain']) === theme.tipHtml(['plain'], false) && theme.tipHtml(['plain']).includes('<td></td>'), 'theme/tipHtml: the golden form is the default');
+}

@@ -25,6 +25,8 @@ export default {
         note: '와우 창이 한 번 보인 뒤 사라지면 5초 뒤에 프로그램을 끝냅니다. 프로그램을 와우보다 먼저 켜 둬도 끝나지 않습니다.' },
     ] },
     { title: '읽기', rows: [
+      { key: 'read_matrix', type: 'check', label: '매트릭스 읽기', keywords: '매트릭스 캡처 화면 읽기 끄기 오버레이만 웹창 채팅',
+        note: '끄면 화면에서 채팅 매트릭스를 읽지 않고, 그에 관한 알림도 나오지 않습니다. 번역은 쓰지 않고 웹창 같은 오버레이만 쓸 때 끄세요. 바꾼 뒤 프로그램을 다시 시작해야 적용됩니다.' },
       { key: 'poll_hz', type: 'number', label: '초당 읽기 횟수', min: 5, max: 60, unit: '회', keywords: 'fps 속도 빈도 캡처' },
       { key: 'full_scan_sec', type: 'number', label: '전체 탐색 간격', min: 5, max: 600, unit: '초', keywords: '찾기 스캔',
         note: '매트릭스가 잡히지 않으면 1초마다 마지막으로 찾은 위치를 다시 확인하고, 거기에 없으면 이 간격마다 화면을 훑습니다. 너무 짧으면 게임에 부담이 됩니다.' },

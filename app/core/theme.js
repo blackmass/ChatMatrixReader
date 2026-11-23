@@ -61,12 +61,15 @@ export function pieceColor(piece, blockColor) {
 const escapeHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
 
 // the tooltip of an item link as small HTML (a table: left text, and the right-hand text some lines have, e.g. "Head   Plate")
-export function tipHtml(lines) {
+// `wide` (the windows of the 3.x program): a line without a right-hand text is one cell over both columns. The empty second cell the 2.x table has (the golden tests keep that form) would take the room of the
+// right-hand column in a line of its own too, and the text of a long line would break far before the right edge of the tip.
+export function tipHtml(lines, wide = false) {
   const spans = text => chattext.tipRuns(text).map(([t, code]) =>
     `<span style="color:${has(chattext.QUALITY_COLORS, code) ? chattext.QUALITY_COLORS[code] : '#ffffff'}">${escapeHtml(t)}</span>`).join('');
   const rows = lines.map(line => {
     const i = line.indexOf(chattext.TIP_RIGHT);
     const left = i < 0 ? line : line.slice(0, i), right = i < 0 ? '' : line.slice(i + 1);
+    if (i < 0 && wide) return `<tr><td colspan=2>${spans(left)}</td></tr>`;
     return `<tr><td>${spans(left)}</td>${i >= 0 ? `<td align="right">${spans(right)}</td>` : '<td></td>'}</tr>`;
   });
   return `<table cellspacing=0 cellpadding=1>${rows.join('')}</table>`;

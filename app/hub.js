@@ -144,7 +144,7 @@ const capture = startCapture({ settings, publish, pipeline });
 $('research').onclick = () => capture.research();
 setInterval(() => {
   const w = capture.worker;
-  $('matrix').textContent = '매트릭스: ' + (w.pos ? `연결됨 @ ${w.pos[0]},${w.pos[1]} (${w.mode}${w.mode === 'v3' && w.v3Wait ? ', 새 대화 대기 중' : ''}) | 순번 ${w.lastSeq ?? '-'}` : '찾는 중...')
+  $('matrix').textContent = '매트릭스: ' + (!capture.reading ? '읽지 않음 (옵션에서 끔)' : w.pos ? `연결됨 @ ${w.pos[0]},${w.pos[1]} (${w.mode}${w.mode === 'v3' && w.v3Wait ? ', 새 대화 대기 중' : ''}) | 순번 ${w.lastSeq ?? '-'}` : '찾는 중...')
     + ' | 게임 창: ' + (capture.game.found ? (capture.game.rect ? `${capture.game.rect[2]}x${capture.game.rect[3]}` : '최소화됨') : '없음');
 }, 500);
 const send = startSend({ settings, translator, capture, system: text => note(text) });
@@ -177,13 +177,14 @@ if (settings.cfg().check_updates ?? true) setTimeout(() => checkUpdate(true), 25
 // ---- the tray icon, the end of the program ("quit" of the tray / the options / the X of the main window / the game was closed)
 startTray();
 let quitting = false;
-async function quit(why) {
+async function quit(why, again = false) {
   if (quitting) return;
-  quitting = true; log.info('프로그램을 끝냅니다: ' + why);
+  quitting = true; log.info((again ? '프로그램을 다시 시작합니다: ' : '프로그램을 끝냅니다: ') + why);
   await new Promise(r => setTimeout(r, 300));
   await settings.flush();                                         // (the position of the window, ... : nothing is lost)
-  invoke('quit_app');
+  invoke(again ? 'restart_app' : 'quit_app');                      // (restart_app: a new copy that waits a moment, and this one ends)
 }
+listen('restart-request', () => quit('restart request', true));
 listen('quit-request', () => quit('quit request'));       // (the windows tell their places at the same moment: a short wait)
 const exitWatch = new ExitWatch();
 let gameFound = null;

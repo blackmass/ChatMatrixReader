@@ -277,11 +277,11 @@ export class ChatView {
     const el = e.target.closest?.('.cv-tipped');
     if (this.sunk()) {
       if (!el || el.parentElement.style.visibility === 'hidden') { if (this._sunkEl) this.hideSunk(); return; }
-      if (el !== this._sunkEl) { this._sunkEl = el; this.sinkShow(el, e.clientX, e.clientY, theme.tipHtml(el._tip)); }
+      if (el !== this._sunkEl) { this._sunkEl = el; this.sinkShow(el, e.clientX, e.clientY, theme.tipHtml(el._tip, true)); }
       return;
     }
     if (!el || el.parentElement.style.visibility === 'hidden') { this.tip.style.display = 'none'; return; }
-    this.tip.innerHTML = theme.tipHtml(el._tip);
+    this.tip.innerHTML = theme.tipHtml(el._tip, true);
     this.tip.style.display = 'block';
     this.moveTip(e);
   }
@@ -298,12 +298,12 @@ export class ChatView {
     const el = x === null || x === undefined ? null : document.elementFromPoint(x, y)?.closest?.('.cv-tipped');
     if (!el || el.parentElement.style.visibility === 'hidden') { this.hideTip(); return false; }
     if (this.sunk()) {
-      if (el !== this._tipEl || !this.polled) { this._tipEl = el; this.polled = true; this.sinkShow(el, x, y, theme.tipHtml(el._tip)); }
+      if (el !== this._tipEl || !this.polled) { this._tipEl = el; this.polled = true; this.sinkShow(el, x, y, theme.tipHtml(el._tip, true)); }
       return true;
     }
     // The tip stays where it first appeared (the 0.1 s pointer poll would make a following tip jerky); it moves only when the pointer goes to another link.
     if (el !== this._tipEl || !this.polled) {
-      this.tip.innerHTML = theme.tipHtml(el._tip); this._tipEl = el;
+      this.tip.innerHTML = theme.tipHtml(el._tip, true); this._tipEl = el;
       this.tip.style.display = 'block'; this.polled = true;
       this.placeTip(x, y);
     }

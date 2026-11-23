@@ -148,6 +148,7 @@ export const DEFAULTS = {
     web_render: 'auto',                    // the web window of a plugin is drawn by: 'auto' (the web view decides: the graphics card when there is one) | 'cpu' (the processor) | 'gpu' (the graphics card, always)
     center_scale: 0,                       // 3.2: the size of the translation windows' contents: 0 = as the main screen has it, else a percent (100 ... 200)
     through_tips: true,                    // click-through windows: the tip of a link (item, quest ...) under the mouse is shown (the page cannot see the mouse: the window loop does)
+    read_matrix: true,                     // 3.2: the screen is read for the chat matrix (off: only the overlay is used; read once at the start)
     auto_copy: false,                      // the text selected in a window is copied when the mouse leaves the window
     tuning: {},                            // options tab 고급: { NAME: value } of the timers in core/timings.js (missing = the default)
 };
@@ -191,6 +192,7 @@ export function normalize(saved) {
   cfg.wheel_through = cfg.wheel_through === true;
   cfg.through_tips = cfg.through_tips !== false;
   cfg.auto_copy = cfg.auto_copy === true;
+  cfg.read_matrix = cfg.read_matrix !== false;
   const gi = cfg.glossary_inline; delete cfg.glossary_inline;
   if (truthy(gi)) cfg.glossary_mode = 'list';                 // (replaced by glossary_mode)
   const mp = cfg.manual_pos; delete cfg.manual_pos;           // (removed option) an old manual position becomes the first guess
