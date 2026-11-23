@@ -61,6 +61,8 @@ export function startCapture({ settings, publish, pipeline }) {
     },
   };
   const worker = new CaptureWorker(io, out, () => settings.cfg());
+  // Off ("매트릭스 읽기", for who uses only the overlay): the screen is never read, nothing about the matrix is said. The game window is still looked for (the order of the windows, "quit with the game"). Read once: a change is for the next start.
+  const reading = settings.cfg().read_matrix !== false;
 
   async function look() {                                       // every second: the game window, the lines waiting in the joiner, the hint
     try {
@@ -76,10 +78,10 @@ export function startCapture({ settings, publish, pipeline }) {
       }
       // the game came back to the front while the matrix is not being read (covered, or the game was away): search again by itself;
       // the game redraws a moment later, so look twice
-      if (game.front && !wasFront && !connected) for (const ms of [400, 1500]) setTimeout(() => { if (!connected) { log.info('게임으로 돌아옴: 매트릭스를 읽고 있지 않아 다시 찾습니다'); worker.research(); } }, ms);
+      if (reading && game.front && !wasFront && !connected) for (const ms of [400, 1500]) setTimeout(() => { if (!connected) { log.info('게임으로 돌아옴: 매트릭스를 읽고 있지 않아 다시 찾습니다'); worker.research(); } }, ms);
       wasFront = game.front;
       publish(pipeline.tick(nowSec()));
-      const act = lost.check(cfg, game.found ? game : null, connected, nowSec());
+      const act = reading ? lost.check(cfg, game.found ? game : null, connected, nowSec()) : null;
       if (act && act[0] === 'show') {
         // act[1] = no position was ever found: the guide of the first start (the game may not even be running)
         const msg = '⚠ ' + (act[1]
@@ -93,11 +95,12 @@ export function startCapture({ settings, publish, pipeline }) {
   }
   const timer = every('GAME_LOOK_MS', look);
   look();
-  worker.run();                                                 // (runs until stop())
+  if (reading) worker.run();                                    // (runs until stop())
+  else log.info('매트릭스 읽기가 꺼져 있어 화면을 읽지 않습니다');
 
   return {
-    worker, game,
-    research() { log.info('매트릭스 다시 찾기 요청'); awaiting = true; worker.research(); system('ℹ ' + tr('매트릭스를 다시 찾습니다...')); },
+    worker, game, reading,
+    research() { if (!reading) { system('ℹ ' + tr('매트릭스 읽기가 꺼져 있습니다. 옵션 > 일반에서 켜고 다시 시작하세요.')); return; } log.info('매트릭스 다시 찾기 요청'); awaiting = true; worker.research(); system('ℹ ' + tr('매트릭스를 다시 찾습니다...')); },
     stop() { worker.stop(); timer.stop(); },
     connected: () => connected,
   };

@@ -5,7 +5,7 @@
 //   row = { key, apply?(ctx, value) (instead of a plain write: a choice that fills other settings too), type, label, note?, keywords?, def?, show?(cfg), validate?(value) -> '' | error text, ...type specific }
 //   types: check | number {min,max,step,unit} | text {placeholder, wide} | select {options: [[value, label]] | () => [...]} | textarea {rows}
 //          | hotkey (Ctrl/Alt/Shift + a key) | combo {list, placeholder} (a list and "직접 입력")
-//          | suggest {items(ctx), blank?, placeholder, needs?(cfg), cacheKey?(cfg), fail?} (ONE text box; its list drops down under it, filtered by what is typed, and a click puts the value in) | percent {min} (a slider, the value is 0..1) | color (#rrggbb or empty) | keys (Shift / Ctrl / Alt) | channels (chat channels) | routes (a choice per channel: { code: value })
+//          | suggest {items(ctx), blank?, placeholder, needs?(cfg), cacheKey?(cfg), fail?} (ONE text box; its list drops down under it, filtered by what is typed, and a click puts the value in) | percent {min, max?} (a slider, the value is 0..1; max default 1) | color (#rrggbb or empty) | keys (Shift / Ctrl / Alt) | channels (chat channels) | routes (a choice per channel: { code: value })
 //          | file {path(cfg), files, rows} (a text file of the program folder with a save button) | info {text(cfg)} | button {label, action(ctx)}
 //          | custom {build(ctx) -> element, block?} (a live part a tab draws itself, e.g. the state of the voice recognition)
 //   ctx = { sel (window id of the row), cfg(), snapshot, get(row, cfg), put(row, value), def(row), reset(row), following(row), known(row) }
@@ -252,7 +252,7 @@ export function buildRow(row, ctx) {
     input.onchange = () => commit(read());
     if (canFollow) followText = () => { if (input.options.length) input.options[0].textContent = tr('창 1을 따름') + ' · ' + label(ctx.mainValue(row)); };
   } else if (row.type === 'percent') {
-    input = el('input'); input.type = 'range'; input.min = Math.round((row.min || 0) * 100); input.max = 100; input.step = 1;
+    input = el('input'); input.type = 'range'; input.min = Math.round((row.min || 0) * 100); input.max = Math.round((row.max || 1) * 100); input.step = 1;
     const out = el('span', 'unit pct');
     ctl.append(input, out);
     read = () => Number(input.value) / 100; write = v => { input.value = Math.round((Number(v) || 0) * 100); out.textContent = input.value + '%'; };

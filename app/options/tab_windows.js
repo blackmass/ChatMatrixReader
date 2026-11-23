@@ -3,7 +3,8 @@
 // The key of a row is the name an extra window uses; the main window's differs for a few (options.js: MAIN_KEY).
 import { nameFor } from '../winname.js';
 import { ALL } from '../winmanager.js';
-import { VOICE_ID, dockHost, dockedOf } from '../core/winconf.js';
+import { VOICE_ID, dockHost, dockedOf, without } from '../core/winconf.js';
+import { goneOwner, onGoneChange, goneNote } from './orphans.js';
 import { entries as fontItems } from '../fonts.js';
 import { registry as widgetRegistry } from '../widgets/defaults.js';
 import { widgetsRow } from './widget_row.js';
@@ -11,8 +12,6 @@ import { widgetsRow } from './widget_row.js';
 const { emit, listen } = window.__TAURI__.event;
 
 import { chName, chColor } from './channels.js';
-// changing the z-order of the other windows can leave this one behind them: it takes the focus back when they are done
-const refocus = () => { window.__cmrRefocus = performance.now(); };     // the window that changes its place gives a sign when it is done (z-done): see options.js
 import { tr } from '../core/i18n.js';
 const FADE_START = 60;                    // an empty "hide old lines" box: the first arrow press gives 60 s (up or down), then one step at a time
 // the size of the upper line of a window (its own, or window 1's when it follows): where an empty "lower line size" starts from
@@ -20,7 +19,7 @@ const upperSize = x => { const r = { win: true, key: 'font_size' }; const n = Nu
 const isMain = ctx => ctx.sel === 1;
 const child = ctx => ctx.sel !== 1;
 
-export default {
+const tab = {
   id: 'windows', title: '창', subtitle: '번역창 목록과 모양',
   cards: [
     { title: '이 창', rows: [
@@ -28,7 +27,7 @@ export default {
         options: x => {
           const l = x.cfg().child_windows;
           if (dockedOf(l, x.sel).length) return [[0, '합치지 않음']];                      // (a window that has tabs cannot be a tab)
-          return [[0, '합치지 않음'], [1, nameFor(x.cfg(), 1)], ...l.filter(c => c.id !== x.sel && c.id !== 1 && !(Number(c.dock_to) > 0)).map(c => [c.id, nameFor(x.cfg(), c.id)])];
+          return [[0, '합치지 않음'], [1, nameFor(x.cfg(), 1)], ...l.filter(c => c.id !== x.sel && c.id !== 1 && c.kind !== 'web' && !(Number(c.dock_to) > 0)).map(c => [c.id, nameFor(x.cfg(), c.id)])];
         },
         note: ['고른 창 안의 탭이 됩니다. 이 창은 따로 열리지 않고, 그 창의 위쪽 탭을 눌러 오갑니다. 글은 탭마다 따로 쌓입니다.',
           '창의 위치, 배경, 클릭 관통 같은 창 자체의 설정은 그 창을 따르고, 글꼴과 채널 같은 글 설정은 이 창의 것을 씁니다 (따르는 옵션은 흐리게 보입니다).'] },
@@ -37,7 +36,7 @@ export default {
       { win: true, key: 'tab_alert', type: 'check', label: '새 글 알림 (탭)', keywords: '알림 새 글 표시 귓말 탭 점',
         show: (c, x) => dockHost(x.cfg().child_windows, x.sel) > 0 || dockedOf(x.cfg().child_windows, x.sel).length > 0,
         note: ['다른 탭을 보는 동안 이 탭에 새 글이 오면 탭 이름 앞에 주황색 점을 띄웁니다. 그 탭을 누르면 사라집니다.',
-          '귓속말처럼 놓치기 싫은 글을 따로 탭에 모아 둘 때 쓰세요. 클릭 관통 중에도 탭 줄만 보입니다.'] },
+          '귓속말처럼 놓치기 싫은 글을 따로 탭에 모아 둘 때 쓰세요. 알림이 붙은 탭은 "평소에 이름 탭 숨기기"와 클릭 관통에 상관없이 보입니다.'] },
       { win: true, key: 'hide_tools', type: 'check', label: '평소에 기능 버튼 숨기기', keywords: '아이콘 버튼 숨김 가리기 인터페이스 설정 닫기',
         note: '창 위쪽 오른쪽의 기능 버튼들(번역·음성·설정·닫기)을 마우스가 창 밖에 있을 때 숨깁니다. 마우스를 창 안으로 가져가면 나타납니다.' },
       { win: true, key: 'hide_tabs', type: 'check', label: '평소에 이름 탭 숨기기', keywords: '탭 이름 숨김 가리기 인터페이스',
@@ -127,19 +126,22 @@ export default {
       { win: true, key: 'lock_window', type: 'check', label: '창 고정', keywords: '이동 크기 조절 잠금 드래그 고정 lock',
         note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다. 탭을 누르다가 창이 밀리는 일을 막습니다.' },
       { win: true, key: 'topmost', type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시',
-        apply: (ctx, v) => { refocus(); ctx.put({ win: true, key: 'topmost' }, v); if (v) ctx.put({ win: true, key: 'topmost_wow_only' }, false); } },
+        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost' }, v); if (v) ctx.put({ win: true, key: 'topmost_wow_only' }, false); } },
       { win: true, key: 'topmost_wow_only', type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
         note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.',
-        apply: (ctx, v) => { refocus(); ctx.put({ win: true, key: 'topmost_wow_only' }, v); if (v) ctx.put({ win: true, key: 'topmost' }, false); } },
+        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost_wow_only' }, v); if (v) ctx.put({ win: true, key: 'topmost' }, false); } },
     ] },
     { title: '배경과 조작', rows: [
-      { win: true, key: 'blur', type: 'select', label: '배경 흐림', options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴' },
-      { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, label: '배경 진하기', keywords: '투명도 불투명' },
+      { win: true, key: 'blur', type: 'select', label: '배경 흐림', options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴',
+        note: '윈도우의 문제로, 흐림을 켠 창이 여러 개 있으면 컴퓨터 전체가 느려질 수 있습니다. 한두 개 창에서만 쓰는 것을 권합니다.' },
+      { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, max: 0.99, label: '배경 진하기', keywords: '투명도 불투명',
+        note: '99%까지 지정할 수 있습니다. 100%로 두면 웹뷰(엔진)가 글자를 그리는 방식이 수시로 바뀌어 글자 굵기와 밝기가 흔들리는 문제가 있어 제한했습니다. 눈으로는 100%와 구분되지 않습니다.' },
       { win: true, key: 'tab_opacity', type: 'percent', min: 0.05, label: '탭 배경 진하기', keywords: '투명도 불투명 탭 상단 바 아이콘 버튼',
         note: '창 위쪽의 이름 탭과 기능 버튼 상자의 배경과 테두리가 얼마나 진한지 정합니다. 100%면 또렷하게 보이고, 낮추면 흐려져 게임 화면 위에서 덜 거슬립니다. 글자는 그대로입니다.' },
       { win: true, key: 'text_opacity', type: 'percent', min: 0.2, label: '글 진하기', keywords: '투명도 불투명' },
       { win: true, key: 'click_through', type: 'check', label: '클릭 관통', keywords: '마우스 관통 클릭 통과 click through',
-        note: '창이 클릭을 받지 않고 뒤의 게임으로 보냅니다. 아래 조작 키를 누르고 있으면 이 창을 조작할 수 있습니다. 옵션은 Ctrl+Alt+O 또는 트레이 아이콘으로 엽니다. 와우가 없을 때는 관통되지 않고 그대로 보입니다.' },
+        note: ['창이 클릭을 받지 않고 뒤의 게임으로 보냅니다. 아래 조작 키를 누르고 있으면 이 창을 조작할 수 있습니다. 옵션은 Ctrl+Alt+O 또는 트레이 아이콘으로 엽니다. 와우가 없을 때는 관통되지 않고 그대로 보입니다.',
+          '창의 모양(이름 탭, 기능 버튼, 프레임)은 위의 "평소에 … 숨기기" 설정을 따릅니다. 관통 중에는 보이기만 하고 누를 수는 없습니다 (조작 키를 누르면 누를 수 있습니다).'] },
       { key: 'auto_copy', type: 'check', label: '자동 복사', keywords: '복사 선택 글 마우스 나갈 때 copy',
         note: '창에서 글을 선택한 뒤 마우스가 창을 벗어나면 선택한 글이 자동으로 복사됩니다. 글이 선택되어 있을 때만 복사합니다.' },
       { key: 'wheel_through', type: 'check', label: '관통 중 휠 스크롤 허용', keywords: '휠 스크롤 이전 대화 관통 wheel',
@@ -153,6 +155,9 @@ export default {
           '클릭 관통 중에도 채팅의 링크(아이템, 퀘스트 등)에 마우스를 올리면 설명이 뜹니다. 마우스는 게임으로 그대로 전달되고, 설명만 창에 그려집니다.',
           '끄면 클릭 관통 중에는 설명이 뜨지 않습니다 (조작 가능한 상태에서는 늘 뜹니다).',
           "'관통 창 숨기기'가 켜진 창에서는 마우스를 올리면 창이 투명해지므로 설명도 뜨지 않습니다."] },
+      { key: 'chat_links', type: 'check', label: '채팅 주소를 링크로 표시', keywords: '링크 주소 url 디스코드 유튜브 클릭 열기 브라우저 미니 채팅 link',
+        note: ['채팅에 나온 웹 주소(https://…, discord.gg/… 같은 알려진 곳)를 [discord.gg/abc]처럼 눌러 볼 수 있게 표시합니다.',
+          '누르면 바로 열리지 않고 전체 주소를 보여 주며 "미니 브라우저에서 열기", "내 브라우저에서 열기", "주소 복사" 중에서 고르게 합니다. 끄면 주소가 그냥 글자로 보입니다. 새로 들어오는 줄부터 적용됩니다.'] },
       { win: true, key: 'hover_clear', type: 'check', label: '관통 창 숨기기', keywords: '마우스 올리면 투명 호버 지우기 가리기 hover',
         show: (c, x) => !!x.get({ win: true, key: 'click_through' }, c), note: [
           '클릭 관통일 때 마우스를 창 위로 가져가면 창이 완전히 투명해져 뒤의 게임이 보입니다. 아래 조작 키를 누르고 있으면 투명해지지 않습니다.',
@@ -164,6 +169,7 @@ export default {
 
   // the window picker above the cards. env = { cfg(), sel(), select(id) }
   toolbar(env) {
+    onGoneChange(() => { if (el.isConnected) refresh(); });
     const el = document.createElement('div'); el.className = 'wintool';
     const pick = document.createElement('select');
     const add = btn('새 창'), toggle = btn('열기'), del = btn('삭제'), state = document.createElement('span'); state.className = 'winstate';
@@ -177,23 +183,43 @@ export default {
     toggle.onclick = () => emit('win-command', { cmd: open.has(env.sel()) ? 'close' : 'open', id: env.sel() });
     del.onclick = () => {
       if (!armed) { armed = true; del.textContent = '정말 삭제?'; del.classList.add('on'); setTimeout(() => { armed = false; refresh(); }, 3000); return; }
-      armed = false; const id = env.sel(); env.select(1); emit('win-command', { cmd: 'remove', id });
+      armed = false; const id = env.sel(), c = env.cfg().child_windows.find(w => w.id === id); env.select(1);
+      if (c && c.owner && goneOwner(c.owner)) emit('cfg-patch', { patch: { child_windows: without(env.cfg().child_windows, [id]) } });          // (what is left of a plugin that is gone: the window manager does not delete the windows of a plugin)
+      else emit('win-command', { cmd: 'remove', id });
     };
     function refresh() {
       const kids = env.cfg().child_windows, sel = env.sel();
-      for (const c of kids) if (!known.has(c.id)) { known.add(c.id); env.select(c.id); return; }       // a window was just made: show it
+      for (const c of kids) if (!known.has(c.id)) { known.add(c.id); if (c.kind !== 'web') { env.select(c.id); return; } }       // a window was just made: show it
       pick.textContent = '';
-      for (const [id, name] of [[1, nameFor(env.cfg(), 1)], ...kids.map(c => [c.id, nameFor(env.cfg(), c.id)])]) {
+      const plug = kids.filter(c => c.owner && c.kind !== 'web');                       // (the web windows of the plugins are in the tab 미니 브라우저)
+      for (const [id, name] of [[1, nameFor(env.cfg(), 1)], ...kids.filter(c => !c.owner).map(c => [c.id, nameFor(env.cfg(), c.id)])]) {
         const o = document.createElement('option'); o.value = id; o.textContent = `${id} · ${name}`; pick.append(o);
       }
-      pick.value = String(kids.some(c => c.id === sel) || sel === 1 ? sel : 1);
-      const dh = dockHost(kids, sel), isOpen = sel === 1 || open.has(sel);
-      state.textContent = dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
-      toggle.hidden = sel === 1 || !!dh; toggle.textContent = isOpen ? '닫기' : '열기';
-      del.hidden = sel === 1 || sel === VOICE_ID; if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
+      if (plug.length) {                                                                // (the windows of the plugins: below ours, after a line)
+        const line = document.createElement('option'); line.disabled = true; line.textContent = '── ' + tr('플러그인 창') + ' ──'; pick.append(line);
+        for (const c of plug) { const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.id} · ${nameFor(env.cfg(), c.id)}` + (goneOwner(c.owner) ? ' · ' + tr('지워진 플러그인') : ''); pick.append(o); }
+      }
+      pick.value = String(kids.some(c => c.id === sel && c.kind !== 'web') || sel === 1 ? sel : 1);
+      const dh = dockHost(kids, sel), isOpen = sel === 1 || open.has(sel), mine = kids.find(c => c.id === sel), owned = !!(mine && mine.owner);
+      const orphan = owned && goneOwner(mine.owner), off = owned && !orphan && !((env.cfg().plugins || {})[mine.owner] || {}).enabled;
+      state.textContent = orphan ? tr('지워진 플러그인의 설정') : off ? tr('플러그인이 꺼져 있습니다')  : dh ? tr('{name} 창의 탭', { name: nameFor(env.cfg(), dh) }) : sel === 1 ? '항상 열려 있음' : isOpen ? '열려 있음' : '닫혀 있음';
+      toggle.hidden = sel === 1 || !!dh || off || orphan; toggle.textContent = isOpen ? '닫기' : '열기';
+      del.hidden = sel === 1 || sel === VOICE_ID || (owned && !orphan);                                  // (the window of a plugin is not deleted here: it goes with its plugin) if (!armed) { del.textContent = '삭제'; del.classList.remove('on'); }
     }
     return { el, refresh };
   },
 };
+
+// The windows of a plugin show only the basic settings (the order of the windows, the background, the mouse, the lock ...): what is inside the window is the plugin's
+const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
+const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
+const goneWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner && c.kind !== 'web' && goneOwner(c.owner)); };          // (the window of a plugin that is not there: only a note and the way to delete it)
+for (const card of tab.cards) for (const row of card.rows) {
+  const was = row.show;
+  row.show = PLUGIN_ROWS.has(row.key) ? (c, x) => !goneWindow(x) && (!was || was(c, x)) : (c, x) => !pluginWindow(x) && (!was || was(c, x));
+}
+// (first in the tab: shown only for such a window)
+tab.cards.unshift({ title: '지워진 플러그인의 창', rows: [{ type: 'custom', block: true, label: '', keywords: '', show: (c, x) => goneWindow(x), build: x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return goneNote(c ? c.owner : ''); } }] });
+export default tab;
 
 function btn(text) { const b = document.createElement('button'); b.textContent = text; return b; }

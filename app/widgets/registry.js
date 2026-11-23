@@ -5,20 +5,25 @@ export const PLACES = ['inside', 'outside'];                                  //
 export const SHOWS = ['always', 'active', 'dim'];
 export const TONES = ['idle', 'busy', 'ok', 'hot', 'warn', 'bad'];            // names, not colours: the colours are the host's (the theme)
 export const SETTING_TYPES = ['number', 'select', 'check', 'color'];
+import { cleanSvg, svgPathOk, MAX_SVG_FILE } from '../core/svg.js';
 export const MAX_WIDGETS = 32;
+export const MAX_MENU = 8;                                                     // the items of the menu of a widget (the right button)
 
 // what the host can draw; an unknown kind is drawn as "text"
 export const KINDS = {
   meter: { styles: ['bar', 'battery'] },
   light: { styles: ['dot'] },
   text: { styles: ['plain'] },
+  icon: { styles: ['icon'] },                    // a picture (SVG) that the plugin gives; the text, if any, is beside it
 };
 
-export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}:[a-z0-9][a-z0-9_.-]{0,47}$/i;          // owner:name
+export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,99}:[a-z0-9][a-z0-9_.-]{0,47}$/i;         // owner:name (the owner of a plugin's widget is the id of the plugin: up to 100)
 
 const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
 const num = (v, lo, hi, d) => { v = Number(v); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
 const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+// the items a plugin gives the menu of its widget: [{ id, label }]
+export const cleanMenu = m => (Array.isArray(m) ? m : []).filter(i => isObj(i) && /^[a-z0-9_-]{1,24}$/i.test(i.id || '') && typeof i.label === 'string' && i.label.trim()).slice(0, MAX_MENU).map(i => ({ id: i.id, label: str(i.label.trim(), 40) }));
 
 // ---- definitions
 // -> a clean definition, or an Error that says what is wrong (the registry refuses a wrong one, so that the options never draw garbage)
@@ -46,7 +51,8 @@ export function checkDef(def) {
     settings.push(e);
   }
   const hint = isObj(def.hint) ? { place: PLACES.includes(def.hint.place) ? def.hint.place : 'inside', anchor: ANCHORS.includes(def.hint.anchor) ? def.hint.anchor : 'bottom-right' } : { place: 'inside', anchor: 'bottom-right' };
-  return { id: def.id, owner, label: str(def.label, 60) || def.id, kind, styles, settings, hint };
+  const menu = cleanMenu(def.menu);
+  return { id: def.id, owner, label: str(def.label, 60) || def.id, kind, styles, settings, hint, menu, clickable: !!def.clickable || menu.length > 0 };
 }
 
 export class Registry {
@@ -58,6 +64,14 @@ export class Registry {
   get(id) { return this.defs.get(id) || null; }
   list() { return [...this.defs.values()]; }
 }
+
+// The definitions the plugins have registered (the hub keeps them and tells every page): the registry of a page gets exactly these besides its own (core:) ones.
+export function syncPluginDefs(registry, defs) {
+  const want = new Map((Array.isArray(defs) ? defs : []).filter(d => d && typeof d.id === 'string' && !d.id.startsWith('core:')).map(d => [d.id, d]));
+  for (const d of registry.list()) if (d.owner !== 'core' && !want.has(d.id)) registry.unregister(d.id);
+  for (const d of want.values()) { const have = registry.get(d.id); if (!have || JSON.stringify(have) !== JSON.stringify(checkSafe(d))) { try { registry.register(d); } catch { /* a wrong definition is not shown */ } } }
+}
+const checkSafe = d => { try { return checkDef(d); } catch { return null; } };
 
 // ---- the settings of a window: { id: entry }
 export function normalizeEntry(e) {
@@ -113,6 +127,9 @@ export function cleanState(p) {
   if ('text' in p) s.text = str(p.text, 40);
   if ('tip' in p) s.tip = str(p.tip, 400);
   if ('count' in p) s.count = Math.round(num(p.count, 0, 99999, 0));
+  if ('svg' in p) s.svg = cleanSvg(p.svg, MAX_SVG_FILE);                                  // (the picture: an SVG text, cleaned; '' takes it away)
+  if ('image' in p && svgPathOk(p.image)) s.image = p.image;                // (the picture of a file of the plugin: the program reads it and turns it into `svg` before it is shown)
+  if ('menu' in p) s.menu = cleanMenu(p.menu);                              // (the items of the menu can change with the state)
   return s;
 }
 export class StateStore {

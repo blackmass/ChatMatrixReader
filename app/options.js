@@ -12,6 +12,8 @@ import { FOLLOW, KEYS, MAIN_KEY, HOST_KEYS, followsMain, followValue, dockHost }
 import { buildCards, isData } from './options/form.js';
 import { TABS } from './options/tabs.js';
 import { noteChannelColor } from './options/channels.js';
+import { registry as widgetRegistry } from './widgets/defaults.js';
+import { syncPluginDefs } from './widgets/registry.js';
 
 await settings.load({ readOnly: true });
 await startI18n(settings);
@@ -127,7 +129,7 @@ function show() {
       const tb = tab.toolbar({ cfg: () => settings.cfg(), sel: () => selected, select: id => { selected = id; show(); } });
       body.append(tb.el); built.push(tb);
     }
-    built.push(...buildCards(tab.cards, ctxNow(), body, { fold: true }));
+    built.push(...buildCards(tab.visibleCards ? tab.visibleCards() : tab.cards, ctxNow(), body, { fold: true }));
   }
   $('sub').textContent = view.mode === 'tab' ? tab.subtitle || '' : '';
   $('tester').hidden = !(view.mode === 'tab' && tab.test);
@@ -183,9 +185,11 @@ $('revertAll').onclick = () => {
 };
 
 settings.onChange(() => refresh());
+{ const { emit, listen } = window.__TAURI__.event; listen('widget-defs', e => syncPluginDefs(widgetRegistry, e.payload.defs)); emit('widget-defs-hello', {}); }          // (the widgets of the plugins are in the list of the widgets)
 const showTitle = () => { try { window.__TAURI__.window.getCurrentWindow().setTitle(tr('ChatMatrix 옵션')).catch(() => {}); } catch { /* no such window function */ } };
 showTitle(); addEventListener('cmr-language', showTitle);
 try { window.__TAURI__.window.getCurrentWindow().setAlwaysOnTop(false).catch(() => {}); } catch { /* no window api */ }   // (an ordinary window: never above the others)
+document.addEventListener('cmr-show-tab', e => { if (TABS.some(t => t.id === e.detail) && !(view.mode === 'tab' && view.tab === e.detail)) go({ mode: 'tab', tab: e.detail }); });       // (a window of a tab asks for its tab: the plugin that wants to be approved)
 addEventListener('cmr-language', () => show());      // the texts that are put together while running
 // ---------------------------------------------------------------- the place and size of this window: restored when it opens, saved when it stood still
 {
@@ -224,6 +228,10 @@ addEventListener('cmr-language', () => show());      // the texts that are put t
 
 // ---------------------------------------------------------------- the end of the program
 $('quitBtn').onclick = () => window.__TAURI__.core.invoke('quit_request').catch(() => {});
+// the project's pages (the program checks the address again: open_url allows only these)
+for (const a of document.querySelectorAll('#links a')) a.onclick = e => { e.preventDefault(); window.__TAURI__.core.invoke('open_url', { url: a.dataset.url }).catch(() => {}); };
+// (the hub saves what is unsaved, then the program starts itself again: restart_app)
+$('restartBtn').onclick = () => window.__TAURI__.event.emit('restart-request', {}).catch(() => {});
 
 // ---------------------------------------------------------------- the translation test (tabs with `test: true`): what the settings do now, and how fast
 {
@@ -241,9 +249,6 @@ $('quitBtn').onclick = () => window.__TAURI__.core.invoke('quit_request').catch(
   $('testBtn').onclick = run;
   input.onkeydown = e => { if (e.key === 'Enter') run(); };
   listen('feed', ev => noteChannelColor(ev.payload && ev.payload.event));                 // (the colours the game has for the channels: the names in the lists)
-  listen('z-done', () => {                                       // a translation window changed its stack place: the window that asked takes the focus back
-    if (performance.now() - (window.__cmrRefocus || -1e9) < 4000) { window.__cmrRefocus = 0; try { window.__TAURI__.window.getCurrentWindow().setFocus().catch(() => {}); } catch { /* no window api */ } }
-  });
   listen('rpc-test-result', ev => {
     const r = ev.payload;
     if (r.id !== testId) return;
@@ -257,11 +262,13 @@ $('quitBtn').onclick = () => window.__TAURI__.core.invoke('quit_request').catch(
 {
   const KEY = 'cmr-options-win';
   const take = () => {
+    let tabKey = ''; try { tabKey = localStorage.getItem('cmr-options-tab') || ''; localStorage.removeItem('cmr-options-tab'); } catch { /* none */ }      // ("plugin settings" of a widget: the tab of the plugins)
+    if (tabKey && TABS.some(t => t.id === tabKey)) go({ mode: 'tab', tab: tabKey });
     let id = 0;
     try { id = parseInt(localStorage.getItem(KEY) || '0', 10) || 0; localStorage.removeItem(KEY); } catch { /* none */ }
     if (id) { selected = id; go({ mode: 'tab', tab: 'windows' }); }
   };
-  addEventListener('storage', e => { if (e.key === KEY && e.newValue) take(); });
+  addEventListener('storage', e => { if ((e.key === KEY || e.key === 'cmr-options-tab') && e.newValue) take(); });
   take();
 }
 addEventListener('contextmenu', e => { if (!['INPUT', 'TEXTAREA'].includes(e.target.tagName)) e.preventDefault(); });

@@ -1,0 +1,9 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>CMR Blur</title><style>html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }</style></head><body>
+<script>
+// The blur window is empty, and a window with nothing in it may get no blur from the system. Windows is given a faint tint with the blur itself (win.rs set_blur); macOS takes none, so the page
+// has one there: so faint that it cannot be seen, but the window is not empty. If the blur is still not there on a Mac, make TINT larger (0.03, 0.05 ...).
+const TINT = 0.02;
+if (/Mac/i.test(navigator.platform || '') || /Mac OS X/i.test(navigator.userAgent || '')) document.body.style.background = `rgba(30, 31, 34, ${TINT})`;
+</script>
+</body></html>

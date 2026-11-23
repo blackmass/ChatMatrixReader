@@ -40,6 +40,7 @@ const fromSegments = seq => seq.map(([text, q, tip]) => piece(text, { quality: O
 export function codePrefix(code, mode) {
   if (mode === 'nochan' || mode === 'body') return '';
   if (code === '!VC') return '[' + tr('음성') + '] ';
+  if (code === '!PLG') return '[' + tr('플러그인') + '] ';
   if (mode === 'detail') return `[${SHOWN_CODE[code] ?? code}] `;
   if (code === 'WT' || code === 'BT') return '→ ';
   if (code.startsWith('C') && /^\d+$/.test(code.slice(1))) return `[${code.slice(1)}] `;
@@ -158,6 +159,7 @@ export class Pipeline {
       const sym = [...first.text][0];
       pieces.splice(0, 1, piece(sym, { role: 'ping' }), piece(first.text.slice(sym.length), { quality: first.quality, tip: first.tip }));
     }
+    if (line.link) for (const p of pieces) if (p.quality === chattext.LIGHT_BLUE && p.tip.length) p.link = String(line.link);          // (a link of a plugin: the id the window sends back when it is clicked)
     const plain = chattext.plain(body);
     const translatable = !protectedText
       && !(code.startsWith('!') && !TRANSLATED_CODES.includes(code) && !chattext.isServerNotice(code, body))

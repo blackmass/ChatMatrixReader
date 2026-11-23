@@ -1,6 +1,6 @@
 // The control window is the HUB of the program: it alone owns config.json, the translation queue (so Google's spacing and pauses
 // exist once) and the pipeline. It turns what it reads into events and sends them to the translation windows ('feed'), which draw
-// them (overlay.js). Today the lines are fake (the test window's button); later the capture loop feeds the same pipeline.
+// them (center.js). Today the lines are fake (the test window's button); later the capture loop feeds the same pipeline.
 import { files } from './fs.js';
 import { transport } from './transport.js';
 import * as settings from './settings.js';
@@ -22,10 +22,13 @@ import { startSend } from './send_host.js';
 import { startTray } from './tray_host.js';
 import { startVoice } from './voice_host.js';
 import { startWidgets } from './widgets/hub.js';
+import { startPlugins } from './plugin_host.js';
+import { startBrowsers } from './browser_host.js';
 import { makeInstaller, makeBackend, makeBencher } from './voice_install.js';
 import { ExitWatch } from './core/exitwatch.js';
 import { every } from './core/timings.js';
 import { report } from './core/perf.js';
+import * as debuglog from './core/debuglog.js';
 
 const { emit, listen } = window.__TAURI__.event;
 const invoke = window.__TAURI__.core.invoke;
@@ -142,7 +145,7 @@ const capture = startCapture({ settings, publish, pipeline });
 $('research').onclick = () => capture.research();
 setInterval(() => {
   const w = capture.worker;
-  $('matrix').textContent = '매트릭스: ' + (w.pos ? `연결됨 @ ${w.pos[0]},${w.pos[1]} (${w.mode}${w.mode === 'v3' && w.v3Wait ? ', 새 대화 대기 중' : ''}) | 순번 ${w.lastSeq ?? '-'}` : '찾는 중...')
+  $('matrix').textContent = '매트릭스: ' + (!capture.reading ? '읽지 않음 (옵션에서 끔)' : w.pos ? `연결됨 @ ${w.pos[0]},${w.pos[1]} (${w.mode}${w.mode === 'v3' && w.v3Wait ? ', 새 대화 대기 중' : ''}) | 순번 ${w.lastSeq ?? '-'}` : '찾는 중...')
     + ' | 게임 창: ' + (capture.game.found ? (capture.game.rect ? `${capture.game.rect[2]}x${capture.game.rect[3]}` : '최소화됨') : '없음');
 }, 500);
 const send = startSend({ settings, translator, capture, system: text => note(text) });
@@ -175,13 +178,14 @@ if (settings.cfg().check_updates ?? true) setTimeout(() => checkUpdate(true), 25
 // ---- the tray icon, the end of the program ("quit" of the tray / the options / the X of the main window / the game was closed)
 startTray();
 let quitting = false;
-async function quit(why) {
+async function quit(why, again = false) {
   if (quitting) return;
-  quitting = true; log.info('프로그램을 끝냅니다: ' + why);
+  quitting = true; log.info((again ? '프로그램을 다시 시작합니다: ' : '프로그램을 끝냅니다: ') + why);
   await new Promise(r => setTimeout(r, 300));
   await settings.flush();                                         // (the position of the window, ... : nothing is lost)
-  invoke('quit_app');
+  invoke(again ? 'restart_app' : 'quit_app');                      // (restart_app: a new copy that waits a moment, and this one ends)
 }
+listen('restart-request', () => quit('restart request', true));
 listen('quit-request', () => quit('quit request'));       // (the windows tell their places at the same moment: a short wait)
 const exitWatch = new ExitWatch();
 let gameFound = null;
@@ -194,4 +198,16 @@ every('HUB_TICK_MS', () => {
 });
 report('hub', emit);
 
-window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice };
+const plugins = startPlugins({ settings, files, publish, pipeline, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen, widgets, windows });        // (the plugins folder: docs/PLUGINS.md)
+
+// the areas of the detailed log that are on (Options > 기록 > 상세 기록): the exe is told at the start and at every change
+{
+  let told = '';
+  const tellDebug = () => { const areas = debuglog.enabled(settings.cfg()); const key = areas.join(','); if (key === told) return; told = key; tauriInvoke('set_debug_areas', { areas }).catch(() => {}); };
+  tellDebug(); settings.onChange(tellDebug);
+}
+const browsers = startBrowsers({ settings, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen, note: hubLog });          // (the windows of the mini browser: core/browsers.js)
+windows.setPluginCheck((owner, name) => plugins.windowAllowed(owner, name));       // (a window of a plugin opens only while its plugin runs and may have it)
+
+
+window.cmrHub = { fakeLine, note, windows, translator, service, pipeline, capture, send, upkeep, voice, plugins, widgets, browsers };

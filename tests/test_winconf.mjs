@@ -6,8 +6,11 @@ import { HERE, eq } from './helpers.mjs';
 for (const [fn, args, want] of JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'winconf.json'), 'utf8'))) {
   // 3.0 differs from 2.0 here on purpose: "only while the voice recognition is on" can be set for every extra window (2.0 allowed it for window 2 only)
   if (fn === 'normalize' && Array.isArray(args[0]) && args[0].length === 1 && args[0][0] && args[0][0].id === 5 && args[0][0].open_mode === 'voice') want.find(c => c.id === 5).open_mode = 'voice';
+  // (the background of a window is at most 99 % now, MAX_BG_OPACITY; the 2.0 answers say 100 %: they are compared as 99 %)
+  const cap = v => { if (Array.isArray(v)) v.forEach(cap); else if (v && typeof v === 'object') { if (typeof v.bg_opacity === 'number') v.bg_opacity = Math.min(0.99, v.bg_opacity); } return v; };
+  cap(want);
   const got = w[fn](...args);
-  const no3 = v => { if (Array.isArray(v)) v.forEach(no3); else if (v && typeof v === 'object') { delete v.clear_on_open; delete v.dock_to; delete v.tab_opacity; } return v; };       // (3.x only: an extra window can start empty)
+  const no3 = v => { if (Array.isArray(v)) v.forEach(no3); else if (v && typeof v === 'object') { delete v.clear_on_open; delete v.dock_to; delete v.tab_opacity; delete v.owner; delete v.owner_win; delete v.kind; delete v.page; } return v; };       // (3.x only: an extra window can start empty)
   eq(no3(got), want, `${fn}(${JSON.stringify(args)})`);
 }
 
@@ -38,4 +41,50 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   check(JSON.stringify([2, 3, 4, 5, 6, 7, 8].map(i => w.dockHost(L, i))) === '[0,1,0,0,0,1,0]', 'dockHost: a tab of window 1 is valid; a tab of a tab, of itself, of a missing window or none is not');
   check(JSON.stringify(w.dockedOf(L, 1)) === '[3,7]' && w.dockedOf(L, 3).length === 0, 'dockedOf: the tabs of a window, in the order of the list');
   check(w.normalize([{ id: 3, dock_to: 3 }]).find(c => c.id === 3).dock_to === 0 && w.normalize([{ id: 3, dock_to: '1' }]).find(c => c.id === 3).dock_to === 1 && w.newConf(3).dock_to === 0, 'dock_to: cleaned (itself = none, text numbers read, default none)');
+}
+
+// ---- a window of a plugin (kind 'page'): it keeps its plugin, its name and its page; without them it is an ordinary window
+{
+  const ok = w.normalize([{ id: 5, owner: 'my-plugin-id', owner_win: 'main', kind: 'page', page: 'ui/window.html' }]).find(c => c.id === 5);
+  check(ok.kind === 'page' && ok.owner === 'my-plugin-id' && ok.owner_win === 'main' && ok.page === 'ui/window.html', 'winconf: a plugin window keeps owner, name and page');
+  for (const bad of [{ page: '../x.html' }, { page: '/x.html' }, { page: 'x.js' }, { owner: 'Bad Owner' }, { owner_win: 'a b' }]) {
+    const c = w.normalize([{ id: 5, owner: 'my-plugin-id', owner_win: 'main', kind: 'page', page: 'w.html', ...bad }]).find(x => x.id === 5);
+    check(c.kind === '' || (c.owner === 'my-plugin-id' && !bad.owner && !bad.page) || c.owner_win === '', 'winconf: a bad ' + JSON.stringify(bad) + ' is cleaned: ' + JSON.stringify([c.kind, c.owner, c.owner_win, c.page]));
+  }
+  const plain = w.normalize([{ id: 5, kind: 'page' }]).find(c => c.id === 5);
+  check(plain.kind === '' && plain.owner === '' && plain.page === '', 'winconf: kind page without an owner and a page is an ordinary window');
+}
+
+// a web window of a plugin: kind 'web' needs its plugin, has no page
+{
+  const l = w.normalize([{ id: 2, name: 'x', owner: 'p-1', owner_win: 'web', kind: 'web', page: 'a.html', geometry: '360x640' }, { id: 3, name: 'y', kind: 'web' }]);
+  eq(l.find(c => c.id === 2).kind === 'web' && l.find(c => c.id === 2).page === '' && l.find(c => c.id === 3).kind === '' && l.find(c => c.id === 3).owner === '', true, 'winconf: a web window keeps its plugin and has no page; without a plugin it is nothing');
+}
+
+// a window that is gone: nothing keeps pointing at its number (a new window may get it)
+{
+  const l = w.normalize([{ id: 3, dock_to: 4 }, { id: 4 }, { id: 5, dock_to: 9 }]);
+  eq(l.find(c => c.id === 5).dock_to, 0, 'dock_to: a missing window (9) is dropped when the list is read');
+  const rest = w.without(l, [4]);
+  eq(rest.map(c => [c.id, c.dock_to]).filter(([i]) => i !== 2), [[3, 0], [5, 0]], 'without: the windows that were tabs of a deleted one are windows of their own again');
+  const again = w.normalize([...rest, { ...w.newConf(w.nextId(rest), []) }]);
+  eq(again.every(c => c.dock_to === 0), true, 'a window that takes the number of a deleted one starts clean: nothing is its host');
+}
+
+// the login of a web window of a plugin (3.2.0): a setting of the window; no other window has it
+{
+  const l = w.normalize([{ id: 5, owner: 'p', owner_win: 'web', kind: 'web', cookies: true }, { id: 6, owner: 'p', owner_win: 'web', kind: 'web' }, { id: 7, cookies: true }, { id: 8, owner: 'p', owner_win: 'x', kind: 'page', page: 'a.html', cookies: true }]);
+  const by = id => l.find(c => c.id === id);
+  eq([by(5).cookies, by(6).cookies, 'cookies' in by(7), 'cookies' in by(8)], [true, false, false, false], 'winconf: cookies are a setting of a web window only');
+  const k = w.normalize([{ id: 5, owner: 'p', owner_win: 'web', kind: 'web', shift_scroll: true, rclick_close: true }, { id: 6, owner: 'p', owner_win: 'web', kind: 'web' }, { id: 8, owner: 'p', owner_win: 'x', kind: 'page', page: 'a.html', shift_scroll: true, rclick_close: true }]);
+  const kk = id => k.find(c => c.id === id);
+  eq([kk(5).rclick_copy, kk(6).rclick_copy, 'rclick_copy' in kk(8)], [true, true, false], 'winconf: a web window copies with the right button unless told not to; the others have no such setting');
+  eq([kk(5).shift_scroll, kk(5).rclick_close, kk(6).shift_scroll, kk(6).rclick_close, 'shift_scroll' in kk(8), 'rclick_close' in kk(8)], [true, true, false, false, false, false], 'winconf: the sideways wheel and the right button are settings of a web window only');
+}
+
+{
+  // the background of a window is at most 99 %: more is brought down, less stays, the default is 99 %
+  const l = w.normalize([{ id: 2, bg_opacity: 1 }, { id: 3, bg_opacity: 5 }, { id: 4, bg_opacity: 0.5 }, { id: 5 }]);
+  eq(l.map(c => c.bg_opacity), [0.99, 0.99, 0.5, 0.99], 'bg_opacity: at most 99 % (a window of 100 % or more is brought down), a lower value stays, the default is 99 %');
+  eq(w.MAX_BG_OPACITY, 0.99, 'bg_opacity: the limit is 99 %');
 }

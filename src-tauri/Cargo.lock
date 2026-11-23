@@ -386,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "chatmatrix-reader"
-version = "3.1.1"
+version = "3.2.0"
 dependencies = [
  "block2",
  "core-foundation 0.10.1",
@@ -406,8 +406,10 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-http",
+ "webview2-com",
  "windows 0.61.3",
  "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]

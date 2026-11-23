@@ -8,21 +8,23 @@ import { DEFAULTS, normalize, migrate, ConfigStore, VERSION } from '../app/core/
 import { Events } from '../app/core/events.js';
 
 log.quiet = true;
-const no3 = c => { for (const w of (c && c.child_windows) || []) { delete w.clear_on_open; delete w.dock_to; delete w.tab_opacity; } if (c) { delete c.whole_groups; delete c.hide_tools; delete c.hide_tabs; delete c.hide_frame; delete c.tab_alert; delete c.lock_window; delete c.tab_opacity; delete c.max_groups; delete c.send_place; delete c.main_name; } return c; };      // (3.x only: an extra window can start empty)
+const no3 = c => { for (const w of (c && c.child_windows) || []) { delete w.clear_on_open; delete w.dock_to; delete w.tab_opacity; delete w.owner; delete w.owner_win; delete w.kind; delete w.page; } if (c) { delete c.whole_groups; delete c.hide_tools; delete c.hide_tabs; delete c.hide_frame; delete c.tab_alert; delete c.lock_window; delete c.tab_opacity; delete c.max_groups; delete c.send_place; delete c.main_name; } return c; };      // (3.x only: an extra window can start empty)
 const G = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config.json'), 'utf8'));
 const D = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config_defaults.json'), 'utf8'));
-const same = (a, b, msg) => { const x = canon(a), y = canon(b); if (x === y) check(true, msg); else { check(false, msg); console.log('   got     ', x.slice(0, 500)); console.log('   expected', y.slice(0, 500)); } };
+// (the background of a window is at most 99 % now, winconf.js MAX_BG_OPACITY; the 2.0 answers say 100 %: they are compared as 99 %)
+const cap = c => { const o = structuredClone(c); const f = w => { if (w && typeof w === 'object' && typeof w.bg_opacity === 'number') w.bg_opacity = Math.min(0.99, w.bg_opacity); }; f(o); for (const w of (o && o.child_windows) || []) f(w); return o; };
+const same = (a, b, msg) => { const x = canon(cap(a)), y = canon(cap(b)); if (x === y) check(true, msg); else { check(false, msg); console.log('   got     ', x.slice(0, 500)); console.log('   expected', y.slice(0, 500)); } };
 
 // the defaults: everything of 2.0, plus the add-on slot
 const mine = { ...DEFAULTS }; no3(mine); const added = Object.keys(mine).filter(k => !(k in D));
-eq(added.slice().sort(), ['auto_copy', 'bold_fix', 'font_weight', 'letter_spacing', 'line_height', 'outline', 'outline_color', 'plain_text', 'plugins', 'through_tips', 'tuning', 'voice_capture', 'voice_min_db', 'voice_prompt', 'wheel_through', 'widgets'], 'only `auto_copy`, `font_weight`, `plugins`, `tuning`, `voice_capture`, `voice_min_db`, `voice_prompt`, `through_tips`, `wheel_through` and `widgets` are new in the defaults');
-delete mine.plugins; delete mine.line_height; delete mine.tuning; delete mine.wheel_through; delete mine.auto_copy; delete mine.font_weight; delete mine.voice_prompt; delete mine.voice_capture; delete mine.voice_min_db; delete mine.widgets; delete mine.through_tips; for (const k of ['bold_fix', 'letter_spacing', 'outline', 'outline_color', 'plain_text']) delete mine[k];
+eq(added.slice().sort(), ['auto_copy', 'bold_fix', 'bookmarks', 'browser_windows', 'center_scale', 'chat_links', 'debug_log', 'font_weight', 'letter_spacing', 'line_height', 'outline', 'outline_color', 'plain_text', 'plugins', 'read_matrix', 'through_tips', 'tuning', 'voice_capture', 'voice_min_db', 'voice_prompt', 'web_render', 'wheel_through', 'widgets'], 'only `auto_copy`, `font_weight`, `plugins`, `tuning`, `voice_capture`, `voice_min_db`, `voice_prompt`, `through_tips`, `wheel_through`, `center_scale`, `browser_windows`, `bookmarks`, `web_render`, `read_matrix`, `chat_links`, `debug_log` and `widgets` are new in the defaults');
+delete mine.plugins; delete mine.line_height; delete mine.tuning; delete mine.wheel_through; delete mine.center_scale; delete mine.browser_windows; delete mine.bookmarks; delete mine.web_render; delete mine.auto_copy; delete mine.read_matrix; delete mine.chat_links; delete mine.debug_log; delete mine.font_weight; delete mine.voice_prompt; delete mine.voice_capture; delete mine.voice_min_db; delete mine.widgets; delete mine.through_tips; for (const k of ['bold_fix', 'letter_spacing', 'outline', 'outline_color', 'plain_text']) delete mine[k];
 same(mine, D, 'defaults equal 2.0');
 
 const noAcrylic = c => { for (const w of c.child_windows || []) if (w.blur === 3) w.blur = 2; if (c.blur === 3) c.blur = 2; return c; };      // 3.0 reads blur 3 as 2
-for (const [saved, want] of G.normalize) { noAcrylic(want); const got = no3(normalize(saved)); got.config_version = 2; delete got.plugins; delete got.line_height; delete got.tuning; delete got.wheel_through; delete got.auto_copy; delete got.font_weight; delete got.voice_prompt; delete got.voice_capture; delete got.voice_min_db; delete got.widgets; delete got.through_tips; for (const k of ['bold_fix', 'letter_spacing', 'outline', 'outline_color', 'plain_text']) delete got[k]; same(got, want, 'normalize ' + JSON.stringify(saved)?.slice(0, 70)); }
+for (const [saved, want] of G.normalize) { noAcrylic(want); const got = no3(normalize(saved)); got.config_version = 2; delete got.plugins; delete got.line_height; delete got.tuning; delete got.wheel_through; delete got.center_scale; delete got.browser_windows; delete got.bookmarks; delete got.web_render; delete got.auto_copy; delete got.read_matrix; delete got.chat_links; delete got.debug_log; delete got.font_weight; delete got.voice_prompt; delete got.voice_capture; delete got.voice_min_db; delete got.widgets; delete got.through_tips; for (const k of ['bold_fix', 'letter_spacing', 'outline', 'outline_color', 'plain_text']) delete got[k]; same(got, want, 'normalize ' + JSON.stringify(saved)?.slice(0, 70)); }
 for (const [old, wantCfg, wantNotes] of G.migrate) {
-  const [cfg, notes] = migrate(old); no3(cfg); cfg.config_version = 2; delete cfg.plugins; delete cfg.line_height; delete cfg.tuning; delete cfg.wheel_through; delete cfg.auto_copy; delete cfg.font_weight; delete cfg.voice_prompt; delete cfg.voice_capture; delete cfg.voice_min_db; delete cfg.widgets; delete cfg.through_tips; for (const k of ['bold_fix', 'letter_spacing', 'outline', 'outline_color', 'plain_text']) delete cfg[k]; noAcrylic(wantCfg);
+  const [cfg, notes] = migrate(old); no3(cfg); cfg.config_version = 2; delete cfg.plugins; delete cfg.line_height; delete cfg.tuning; delete cfg.wheel_through; delete cfg.center_scale; delete cfg.browser_windows; delete cfg.bookmarks; delete cfg.web_render; delete cfg.auto_copy; delete cfg.read_matrix; delete cfg.chat_links; delete cfg.debug_log; delete cfg.font_weight; delete cfg.voice_prompt; delete cfg.voice_capture; delete cfg.voice_min_db; delete cfg.widgets; delete cfg.through_tips; for (const k of ['bold_fix', 'letter_spacing', 'outline', 'outline_color', 'plain_text']) delete cfg[k]; noAcrylic(wantCfg);
   same(cfg, wantCfg, 'migrate settings ' + JSON.stringify(old)?.slice(0, 60));
   same(notes, wantNotes, 'migrate notes ' + JSON.stringify(old)?.slice(0, 60));
 }
@@ -92,3 +94,12 @@ eq(normalize({ tuning: 5 }).tuning, {}, 'a broken tuning entry becomes {}');
   eq(migrate({ line_spacing: 5, font_size: 12 })[0].line_height, 5, 'a 1.x file: line_height takes the old line_spacing too');
   eq(normalize({}).line_height, 0, 'no file: 0');
 }
+
+{
+  const n = o => normalize(o).read_matrix;
+  eq([n({}), n({ read_matrix: false }), n({ read_matrix: 0 }), n({ read_matrix: true })], [true, false, true, true], 'read_matrix: on unless it is exactly false');
+}
+
+eq([normalize({}).chat_links, normalize({ chat_links: false }).chat_links, normalize({ chat_links: 0 }).chat_links], [true, false, true], 'chat_links: on unless it is exactly false');
+
+eq([normalize({ bg_opacity: 1 }).bg_opacity, normalize({ bg_opacity: 0.17 }).bg_opacity, normalize({}).bg_opacity], [0.99, 0.17, 0.99], 'bg_opacity (window 1): at most 99 %, a lower value stays, the default is 99 %');

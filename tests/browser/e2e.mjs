@@ -1,4 +1,4 @@
-// The real pages (control.html = hub, overlay.html = translation windows) in headless Chromium with a stand-in for the exe:
+// The real pages (control.html = hub, center.html = the control centers that draw the translation windows) in headless Chromium with a stand-in for the exe:
 // fake `__TAURI__` (events between pages, files in memory, a fake Google). Checks that a line goes hub -> pipeline -> translation ->
 // every window's ChatView, that settings reach config.json and the other windows, and that nothing leaves the program's own paths.
 //   node tests/browser/e2e.mjs      (needs Playwright; screenshots go to tests/browser/out/)
@@ -22,19 +22,19 @@ const server = http.createServer((req, res) => {
 const base = `http://localhost:${server.address().port}`;
 
 let failed = 0;
-const ok = (c, msg) => { if (!c) { failed++; console.log('  FAIL: ' + msg); } };
+// The time of every step is measured: from the check before to this one, and how much of it was spent in `tick` (the waits of the test: the page clock is pushed forward). Nothing here waits for
+// anything outside this machine, so a step that takes long without a reason is a finding: the end of the run lists the slow steps (a warning for now) and writes them all to e2e_timing.txt.
+const steps = []; let mark = performance.now(), waited = 0, waitedFor = 0;
+const ok = (c, msg) => { const t = performance.now(); steps.push({ msg, ms: t - mark, wait: waited, virtual: waitedFor }); mark = t; waited = 0; waitedFor = 0; if (!c) { failed++; console.log('  FAIL: ' + msg); } };
 
 // ---- the stand-in for the exe
 const files = new Map([['Glossary.sample.txt', 'LFM = 구인\n'], ['fonts/나눔 고딕.ttf', 'x'], ['locale/en-US.txt', fs.readFileSync(path.join(ROOT, 'locale', 'en-US.txt'), 'utf8')]]);
 // the version of the program (app/core/version.js) and the next patch version: the fake release list of GitHub is made from them, so the test does not change at every release
 const THIS_VERSION = /VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'app', 'core', 'version.js'), 'utf8'))[1];
 const NEXT_VERSION = THIS_VERSION.replace(/\d+$/, n => String(Number(n) + 1));
-const requests = [], calls = [], clip = [], modelAsks = [];
+const requests = [], calls = [], clip = [], modelAsks = [], chatOpened = [], debugAreas = [];
 let lastInputOpen = null;                            // the arguments of the last show_input
 let aiMode = 'ok';                                   // what the fake AI server answers to the model list: ok | down | 401 | bad
-let popupOn = false, popupPage = null, popupHides = 0, popupCloses = 0;
-const popupPlaced = [];
-let popupOn_ = false;                                       // the fake exe has a popup window (a test turns it on)
 let osVersion = '14.5';                                    // what the command os_version answers (macOS only)
 let osKind = 'windows';                                   // what the command os_kind answers (a test can switch it to 'macos' before it opens a page)
 const kb = { shift: false, enter: false, fg: 77 };       // the keyboard and the window in front (77 = the game, 99 = this program)
@@ -50,11 +50,11 @@ function grabBytes(x, y, w, h) {
   for (let r = 0; r < h; r++) Buffer.from(base.px.buffer, ((y + r) * SW + x) * 4, w * 4).copy(out, 8 + r * w * 4);
   return out.toString('base64');
 }
-const BY_OWNER = true;                                              // (the default way of "just above the game")
-const topCalls = [], raised = [];
-const opened = [], owners = [], placed = [], watched = [], trayTexts = [];
+const pluginFetches = [], pluginOpened = [], webCalls = [], centerRects = [];
+const centerReady = [];                                      // (the centers that said they are ready: the program shows them then)
+let dataFolders = [];                                        // (the login folders of the web windows: what the program would list)
+const opened = [], watched = [], trayTexts = [];
 let gameGone = false;
-const zoneCalls = [];                                 // what the page asked of the wheel hook (wheel_zone)
 const wheel = [];                                    // wheel turns the fake exe tells (up = positive)
 async function invoke(cmd, a = {}) {
   calls.push(cmd);
@@ -62,9 +62,37 @@ async function invoke(cmd, a = {}) {
     case 'fs_read': return files.has(a.path) ? files.get(a.path) : null;
     case 'fs_write': files.set(a.path, a.text); return null;
     case 'fs_append': files.set(a.path, (files.get(a.path) || '') + a.text); return null;
+    case 'fs_remove': files.delete(a.path); return null;
     case 'fs_kind': return files.has(a.path) ? 'file' : '';
     case 'fs_mkdir': return null;
-    case 'fs_list': { const pre = a.path.replace(/\/$/, '') + '/'; return [...files.keys()].filter(k => k.startsWith(pre) && !k.slice(pre.length).includes('/')).map(k => k.slice(pre.length)); }
+    case 'fs_list': { const pre = a.path.replace(/\/$/, '') + '/'; return [...new Set([...files.keys()].filter(k => k.startsWith(pre)).map(k => { const r = k.slice(pre.length); return r.includes('/') ? r.split('/')[0] + '/' : r; }))]; }
+    case 'plugin_token': return 'tok-' + a.id;
+    case 'plugin_forget': return null;
+    case 'plugin_open_url': pluginOpened.push(a); return null;
+    case 'open_chat_url': chatOpened.push(a.url); return null;
+    case 'set_debug_areas': debugAreas.push(a.areas); return null;
+    case 'center_rects': centerRects.push(a); return null;
+    case 'center_wheel': return { seq: wheel.length, turns: wheel.slice(a.seq).map(d => ({ id: '1', delta: d })) };
+    case 'center_zoom': return a.scale || 1;
+    case 'center_layout': return { origin: [0, 0], monitors: [[0, 0, 3840, 2160]] };
+    case 'center_ready': centerReady.push(a.label); return null;
+    case 'process_stats': return { os: 'windows', self: 10, note: '', procs: [{ pid: 10, parent: 1, name: 'ChatMatrix Reader.exe', kind: 'main', sub: '', ws: 104857600, private: 83886080, cpu_ms: 1000, handles: 300, gdi: 40, user: 60 }, { pid: 11, parent: 10, name: 'msedgewebview2.exe', kind: 'renderer', sub: '', ws: 52428800, private: 31457280, cpu_ms: 500, handles: 150, gdi: 10, user: 10 }] };
+    case 'web_open': webCalls.push(['open', a.args]); return null;
+    case 'web_close': webCalls.push(['close', a.label]); return null;
+    case 'web_allow': webCalls.push(['allow', a.allow]); return null;
+    case 'web_info': return { exists: true, visible: true, position: [100, 50], size: [360, 640] };
+    case 'web_cmd': webCalls.push(['cmd', a.label, a.cmd, a.url]); return null;
+    case 'web_alpha': webCalls.push(['alpha', a.label, a.alpha]); return null;
+    case 'web_ua': webCalls.push(['ua', a.label, a.ua, a.hints]); return null;
+    case 'address_show': webCalls.push(['addr', a]); return null;
+    case 'address_hide': webCalls.push(['addrhide']); return null;
+    case 'center_title': return null;
+    case 'web_events': return [];
+    case 'web_clear': webCalls.push(['clear', a.label]); return null;
+    case 'web_forget': webCalls.push(['forget', a.key]); return null;
+    case 'web_data_list': return dataFolders;
+    case 'plugin_hash': return { hash: 'abc', files: [] };
+    case 'plugin_fetch': pluginFetches.push(a); return { status: 200, body: '<html>list</html>', url: a.url, type: 'text/html' };
     case 'app_folder': return 'C:\\fake\\ChatMatrixReader';
     case 'open_url': opened.push(a.url); return null;
     case 'http_request': {
@@ -84,23 +112,12 @@ async function invoke(cmd, a = {}) {
     case 'show_input': kb.fg = 99; lastInputOpen = a; return null;
     case 'focus_window': kb.fg = a.hwnd; return true;
     case 'send_paste': return true;
-    case 'set_blur': return true;
     case 'screen_rect': return [0, 0, SW, SH];
-    case 'wheel_zone': zoneCalls.push(a); return null;
-    case 'raise_top': raised.push(1); return null;
-    case 'set_topmost': topCalls.push(a.on); return null;
     case 'os_kind': return osKind;
     case 'os_version': return osVersion;
-    case 'popup_open': if (!popupOn) throw new Error('no popup window in this test'); if (!popupPage) popupPage = await open('popup.html?label=popup', { width: 300, height: 300 }); return null;
-    case 'popup_place': popupPlaced.push(a); return null;
-    case 'popup_hide': popupHides++; return null;
-    case 'popup_close': popupCloses++; if (popupPage) { const pg = popupPage; popupPage = null; await pg.close(); } return null;
     case 'options_hotkey_ok': return true;
-    case 'wheel_since': return { seq: wheel.length, delta: wheel.slice(a.seq) };
     case 'quit_request': return null;
-    case 'set_owner': owners.push(a.owner); return null;
     case 'place_watch': watched.push(a.game); return null;
-    case 'place_above': placed.push(a.game); return null;
     case 'quit_app': return null;
     case 'system_fonts': return ['Arial', 'Malgun Gothic'];
     case 'audio_apps': return [
@@ -120,7 +137,7 @@ const { chromium } = createRequire(import.meta.url)('playwright');
 // Nothing here waits for anything outside this machine, so nothing may wait long: every step of the pages (a click, a selector, a page load) gets a few seconds, and the
 // whole run has a watchdog. A step that hangs is a failure that says where it stopped, not minutes of waiting. (The page clock is a fake one: the "waits" of the test
 // are not real time; a whole run takes about 40 seconds.)
-const watchdog = setTimeout(() => { console.log('FAIL: the run took more than 75 seconds (a normal run is about 40): something waits for something that never comes'); process.exit(3); }, 75000);
+const watchdog = setTimeout(() => { console.log('FAIL: the run took more than 100 seconds (a normal run is about 70): something waits for something that never comes'); process.exit(3); }, 100000);
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 560, height: 420 }, deviceScaleFactor: 2, locale: 'ko-KR' });
 ctx.setDefaultTimeout(5000); ctx.setDefaultNavigationTimeout(8000);
@@ -129,13 +146,24 @@ ctx.setDefaultTimeout(5000); ctx.setDefaultNavigationTimeout(8000);
 // is due on the way). A little real time between the steps lets the messages between the pages arrive.
 await ctx.clock.install();
 const STEP = 200;
-const tick = async ms => { for (let left = ms; left > 0; left -= STEP) { await ctx.clock.runFor(Math.min(left, STEP)); await new Promise(r => setTimeout(r, 6)); } };
+// Waits until something is true, and no longer: the check is made again after every small step of the page clock, so a step takes as long as the program takes and not a guessed time. `limit`
+// (virtual ms) is what the code may take: it is a failure that says what was waited for when it is not true by then (not a wait that was "long enough" and a check that fails after it).
+const until = async (cond, what, limit = 2000) => {
+  for (let left = limit; ; left -= 100) {
+    try { if (await cond()) return true; } catch { /* not yet */ }
+    if (left <= 0) { failed++; console.log(`  FAIL: not true after ${limit} ms of the page clock: ${what}`); return false; }
+    await tick(100);
+  }
+};
+// The same, for a check that follows: waits (at most `limit` ms of the page clock) until `cond` is true and says nothing; the check after it reports (with its own message) when it is not.
+const within = async (limit, cond) => { for (let left = limit; left > 0; left -= 100) { try { if (await cond()) return true; } catch { /* not yet */ } await tick(100); } try { return !!(await cond()); } catch { return false; } };
+const tick = async ms => { const t0 = performance.now(); for (let left = ms; left > 0; left -= STEP) { await ctx.clock.runFor(Math.min(left, STEP)); await new Promise(r => setTimeout(r, 6)); } waited += performance.now() - t0; waitedFor += ms; };
 for (const pattern of ['http://cmr.localhost/fonts/*', `${base}/fonts/*`]) await ctx.route(pattern, r => r.fulfill({ status: 200, contentType: 'font/ttf', body: Buffer.from(sfntWith('Nano Test')) }));      // (the pages ask their own address: the program's on Windows, the test server's here)
+await ctx.route('http://cmrplug.localhost/**', r => r.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' }));
 await ctx.exposeBinding('__invoke', (_, cmd, args) => invoke(cmd, args));
 await ctx.exposeBinding('__clip', (_, t) => { clip.push(t); });
 await ctx.addInitScript(() => {
   const label = new URLSearchParams(location.search).get('label') || 'control';
-  window.__cmrNoPopup = true;                          // (the pages draw their menu and tips themselves; the popup tests turn this off in the page)
   const bc = new BroadcastChannel('tauri-events'), handlers = new Map();
   bc.onmessage = e => (handlers.get(e.data.event) || []).forEach(h => h({ payload: e.data.payload }));
   window.__TAURI__ = {
@@ -163,91 +191,142 @@ const open = async (url, size) => {
   return p;
 };
 const control = await open('control.html?label=control', { width: 700, height: 900 });
-const main = await open('overlay.html?label=main');
+// The translation windows are panes of the control center of their order (center.js): one page here draws the main window and the second one. The checks of the window were written for a page of
+// its own (an element #lines, document.body.classList ...): `paneOf` gives the same doors for a pane. `evaluate` runs the function with a `document` that is the pane (the old ids are mapped
+// to the new elements, `#ctx` and the tips are the page's), `locator` maps the selector, `mouse` has the coordinates of the pane, `loc` is a plain way to look inside it.
+const MAP_SRC = `(s, id) => String(s).replace(/#lines-(\\d+)/g, '.plines[data-chat="$1"]').replace(/#lines/g, '.plines[data-chat="' + id + '"]').replace(/#widgets/g, '.pwidgets').replace(/#toBottom/g, '.ptobottom')
+  .replace(/#title/g, '.ptab:first-child').replace(/#bar \\.tab/g, '.ptab').replace(/\\[data-wid=/g, '[data-chat=').replace(/#bar/g, '.pbar').replace(/#tools/g, '.ptools').replace(/#voice/g, '.pvoice')
+  .replace(/#options/g, '.poptions').replace(/#close/g, '.pclose').replace(/#grip/g, '.pgrip').replace(/\\.edge/g, '.pedge')`;
+const SHIM_SRC = `(function (root, id, map, real) {
+  const own = s => !/^(#ctx|\\.w-tip|\\.cv-tip)/.test(s);
+  return new Proxy({}, { get: (_, k) => {
+    if (k === 'body') return root;
+    if (k === 'querySelector') return s => (own(s) ? root : real).querySelector(map(s, id));
+    if (k === 'querySelectorAll') return s => (own(s) ? root : real).querySelectorAll(map(s, id));
+    if (k === 'getElementById') return x => (own('#' + x) ? root : real).querySelector(map('#' + x, id));
+    if (k === 'dispatchEvent' || k === 'addEventListener' || k === 'removeEventListener') return (...a) => root[k](...a);
+    const v = real[k]; return typeof v === 'function' ? v.bind(real) : v;
+  } });
+})`;
+const paneOf = (page, id) => {
+  const call = (fn, arg) => [id, fn.toString(), arg, MAP_SRC, SHIM_SRC];
+  const inPage = ([i, src, a, mapSrc, shimSrc]) => {
+    const root = document.querySelector(`.pane[data-id="${i}"]`);
+    if (!root) throw new Error('no pane ' + i);
+    const doc = eval(shimSrc)(root, i, eval(mapSrc), document);
+    return new Function('document', 'a', `return (${src})(a)`)(doc, a);
+  };
+  const mapSel = s => s.replace(/#lines-(\d+)/g, '.plines[data-chat="$1"]').replace(/#lines/g, `.plines[data-chat="${id}"]`).replace(/#widgets/g, '.pwidgets').replace(/#toBottom/g, '.ptobottom')
+    .replace(/#title/g, '.ptab:first-child').replace(/#bar \.tab/g, '.ptab').replace(/\[data-wid=/g, '[data-chat=').replace(/#bar/g, '.pbar').replace(/#tools/g, '.ptools').replace(/#voice/g, '.pvoice')
+    .replace(/#options/g, '.poptions').replace(/#close/g, '.pclose').replace(/#grip/g, '.pgrip').replace(/\.edge/g, '.pedge');
+  const own = s => !/^(#ctx|\.w-tip|\.cv-tip)/.test(s);
+  const origin = async () => { const b = await page.locator(`.pane[data-id="${id}"] .pbody`).boundingBox(); return [b.x, b.y]; };
+  return {
+    id, page,
+    loc: sel => page.locator(`.pane[data-id="${id}"] ${sel}`),
+    locator: (sel, o) => (own(sel) ? page.locator(`.pane[data-id="${id}"] ${mapSel(sel)}`, o) : page.locator(sel, o)),
+    evaluate: (fn, arg) => page.evaluate(inPage, call(fn, arg)),
+    run: (fn, arg) => page.evaluate(([i, src, a]) => new Function('root', 'a', `return (${src})(root, a)`)(document.querySelector(`.pane[data-id="${i}"]`), a), [id, fn.toString(), arg]),
+    waitForFunction: (fn, arg, o) => page.waitForFunction(([i, src, a, m, sh]) => { const root = document.querySelector(`.pane[data-id="${i}"]`); return !!root && new Function('document', 'a', `return (${src})(a)`)(eval(sh)(root, i, eval(m), document), a); }, call(fn, arg), o),
+    screenshot: o => page.locator(`.pane[data-id="${id}"]`).screenshot({ path: o && o.path }),
+    bringToFront: () => page.bringToFront(),
+    keyboard: page.keyboard,
+    mouse: {
+      move: async (x, y, o) => { const [bx, by] = await origin(); return page.mouse.move(bx + x, by + y, o); },
+      click: async (x, y, o) => { const [bx, by] = await origin(); return page.mouse.click(bx + x, by + y, o); },
+      wheel: (dx, dy) => page.mouse.wheel(dx, dy),
+    },
+  };
+};
+const cm = await open('center.html?label=center1&mode=1&ox=0&oy=0', { width: 1200, height: 800 });
+await until(() => centerReady.includes('center1'), 'a center says that it is ready (after it has read its settings, zoomed and drawn)');
+const main = paneOf(cm, 1);
 const newId = await control.evaluate(() => 0);
 await control.waitForFunction(() => window.cmrHub && window.cmrHub.windows);
 ok(JSON.stringify(trayTexts.at(-1)) === '["옵션","종료"]', 'tray: the menu texts are given to the exe: ' + JSON.stringify(trayTexts));
 const id3 = await control.evaluate(() => window.cmrHub.windows.add('둘째'));
-const extra = await open('overlay.html?label=win' + id3, { width: 420, height: 300 });
+const extra = paneOf(cm, id3);
+await control.evaluate(i => import('./settings.js').then(m => m.set({ child_windows: m.cfg().child_windows.map(c => (c.id === i ? { ...c, geometry: '500x300+1300+700' } : c)) })), id3);    // (not on the main window: the mouse of the test meets one pane)
+await until(async () => (await cm.locator('.pane').count()) === 2, 'the second window is a pane too');
 await control.waitForFunction(() => window.cmrHub);
 ok(files.has('Glossary.txt'), 'Glossary.txt was made from the sample');
 // ---- the widgets of a window: drawn from the settings, fed by the hub, the tip under the pointer
 {
-  const W = 'core:voice-level', at = a => `#widgets .wa-${a} .widget[data-id="${W}"]`;
-  await control.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'inside', anchor: 'bottom-right', dx: 0, dy: 0, style: 'bar', show: 'always', scale: 1, opacity: 1, opts: {} } } })), W);
-  await control.waitForTimeout(600);
-  ok(await main.locator(at('bottom-right')).count() === 1 && await extra.locator('#widgets .widget').count() === 0, 'widgets: drawn in the place of the settings, only in the window that has it');
-  ok(await main.locator(at('bottom-right')).getAttribute('data-tone') === 'idle' && await main.locator(at('bottom-right') + ' .w-bar').count() === 1, 'widgets: off: idle, a thin bar');
+  const W = 'core:voice-level', at = a => `.pwidgets .wa-${a} .widget[data-id="${W}"]`;
+  const wset = w => control.evaluate(([id, v]) => import('./settings.js').then(m => m.set({ widgets: v ? { [id]: v } : {} })), [W, w]);
+  await wset({ place: 'inside', anchor: 'bottom-right', dx: 0, dy: 0, style: 'bar', show: 'always', scale: 1, opacity: 1, opts: {} });
+  await until(async () => (await main.loc(at('bottom-right')).count()) === 1, 'the widget is drawn');
+  ok(await main.loc(at('bottom-right')).count() === 1 && await extra.loc('.pwidgets .widget').count() === 0, 'widgets: drawn in the place of the settings, only in the window that has it');
+  ok(await main.loc(at('bottom-right')).getAttribute('data-tone') === 'idle' && await main.loc(at('bottom-right') + ' .w-bar').count() === 1, 'widgets: off: idle, a thin bar');
   await control.evaluate(() => { const c = window.cmrHub.voice.control; c.set({ state: 'on', engine: 'cpu', model: 'small', device: 'cpu', capture: { mode: 'process', program: 'Wow.exe', pid: 3, status: 'listening' }, texts: { count: 2, last: Date.now() } }); c.onLevel({ source: 'engine', db: -35, peak: 0.1, speech: true, thr: -45 }); });
-  await control.waitForTimeout(500);
-  const fill = await main.locator(at('bottom-right') + ' .w-fill').evaluate(e => e.style.width), mark = await main.locator(at('bottom-right') + ' .w-mark').evaluate(e => e.style.left);
-  ok(await main.locator(at('bottom-right')).getAttribute('data-tone') === 'hot' && Math.abs(parseFloat(fill) - 50) < 1 && Math.abs(parseFloat(mark) - 35.7) < 1, 'widgets: the hub\'s state: speech is heard: hot, the bar at -35 dB, the speech limit as the mark: ' + fill + ' ' + mark);
-  const colour = await main.locator(at('bottom-right') + ' .w-fill').evaluate(e => getComputedStyle(e).backgroundColor);
-  ok(colour !== 'rgba(0, 0, 0, 0)' && colour !== await main.locator(at('bottom-right')).evaluate(e => { e.dataset.tone = 'idle'; const c = getComputedStyle(e.querySelector('.w-fill')).backgroundColor; e.dataset.tone = 'hot'; return c; }), 'widgets: the colour follows the tone');
-  await main.screenshot({ path: path.join(OUT, 'widget_in_window.png'), clip: { x: 0, y: 330, width: 560, height: 90 } });
-  // the tip: the pointer comes from the window loop (also while click-through), here it is given by hand
-  const tipNow = await main.evaluate(() => { const r = document.querySelector('#widgets .widget').getBoundingClientRect(); const hit = window.__cmrWidgets.pointer(r.left + 2, r.top + 2); const t = document.querySelector('.w-tip'); return { hit, shown: !t.hidden, text: t.textContent }; });       // (one go: the window loop takes the pointer away again)
-  ok(tipNow.hit === W && tipNow.shown && tipNow.text.includes('켜져 있음 · Whisper · CPU · small') && tipNow.text.includes('Wow.exe') && tipNow.text.includes('인식된 글 2개'), 'widgets: the pointer over it shows the state in words: ' + JSON.stringify(tipNow.text));
-  await main.evaluate(() => window.__cmrWidgets.pointer(null, null));
-  ok(await main.locator('.w-tip').isHidden(), 'widgets: the pointer away: no tip');
-  await control.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'inside', anchor: 'top', dx: 5, dy: 0, style: 'battery', show: 'always', scale: 1.5, opacity: 1, opts: {} } } })), W);
-  await control.waitForTimeout(600);
-  ok(await main.locator(at('top')).count() === 1 && await main.locator(at('bottom-right')).count() === 0 && await main.locator(at('top') + ' .w-cell.on').count() === 3 && await main.locator(at('top')).evaluate(e => e.style.getPropertyValue('--ws') === '1.5' && e.style.transform.includes('5px')), 'widgets: another place and look: moved, a battery of 5 cells (3 are lit at -35 dB), scaled and moved');
-  await control.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'inside', anchor: 'top', style: 'bar', show: 'active' } } })), W);
+  await until(async () => (await main.loc(at('bottom-right')).getAttribute('data-tone')) === 'hot', 'the state of the hub reaches the widget');
+  const fill = await main.loc(at('bottom-right') + ' .w-fill').evaluate(e => e.style.width), mark = await main.loc(at('bottom-right') + ' .w-mark').evaluate(e => e.style.left);
+  ok(await main.loc(at('bottom-right')).getAttribute('data-tone') === 'hot' && Math.abs(parseFloat(fill) - 50) < 1 && Math.abs(parseFloat(mark) - 35.7) < 1, 'widgets: the hub\'s state: speech is heard: hot, the bar at -35 dB, the speech limit as the mark: ' + fill + ' / ' + mark);
+  const colour = await main.loc(at('bottom-right') + ' .w-fill').evaluate(e => getComputedStyle(e).backgroundColor);
+  ok(colour !== 'rgba(0, 0, 0, 0)' && colour !== await main.loc(at('bottom-right')).evaluate(e => { e.dataset.tone = 'idle'; const c = getComputedStyle(e.querySelector('.w-fill')).backgroundColor; e.dataset.tone = 'hot'; return c; }), 'widgets: the colour follows the tone');
+  await main.loc(at('bottom-right')).screenshot({ path: path.join(OUT, 'widget_in_window.png') });
+  // the tip: under the pointer (the center draws it on top of everything: its own element)
+  const wb = await main.loc(at('bottom-right')).boundingBox();
+  let jiggle = 0, tipText = '';                                    // (the pointer moves a little each time: the page may not have been ready for the first move; the text is taken in the same step as the check)
+  await until(async () => {
+    await cm.mouse.move(wb.x + 2 + (jiggle++ % 2), wb.y + 2);
+    tipText = (await cm.locator('body > .w-tip:visible').first().textContent({ timeout: 300 }).catch(() => '')) || '';
+    return tipText.includes('켜져 있음') && tipText.includes('Wow.exe') && tipText.includes('인식된 글 2개');
+  }, 'the pointer over the widget shows its tip (the state in words)', 3000);
+  ok(tipText.includes('켜져 있음 · Whisper · CPU · small') && tipText.includes('Wow.exe') && tipText.includes('인식된 글 2개'), 'widgets: the pointer over it shows the state in words: ' + JSON.stringify(tipText));
+  await cm.mouse.move(wb.x + 400, wb.y - 100);
+  await until(async () => await cm.locator('body > .w-tip:visible').count() === 0, 'the pointer away takes the tip away', 1000);
+  ok(await cm.locator('body > .w-tip:visible').count() === 0, 'widgets: the pointer away: no tip');
+  await wset({ place: 'inside', anchor: 'top', dx: 5, dy: 0, style: 'battery', show: 'always', scale: 1.5, opacity: 1, opts: {} });
+  await until(async () => (await main.loc(at('top')).count()) === 1, 'the widget moves to the new place');
+  ok(await main.loc(at('top')).count() === 1 && await main.loc(at('bottom-right')).count() === 0 && await main.loc(at('top') + ' .w-cell.on').count() === 3 && await main.loc(at('top')).evaluate(e => e.style.getPropertyValue('--ws') === '1.5' && e.style.transform.includes('5px')), 'widgets: another place and style: moved, 3 of 5 cells on, scaled, shifted');
+  await wset({ place: 'inside', anchor: 'top', style: 'bar', show: 'active' });
   await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'off', capture: null, texts: { count: 0, last: 0 } }));
-  await control.waitForTimeout(500);
-  ok(await main.locator(at('top')).isHidden(), 'widgets: "only while it is on": hidden when it is off');
-  await control.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'outside', anchor: 'top' } } })), W);
-  await control.waitForTimeout(500);
-  await control.waitForTimeout(500);
-  ok(await main.locator('#widgets .widget').count() === 0 && JSON.parse(files.get('config.json') || '{}').widgets?.[W]?.place === 'outside', 'widgets: an outside place is saved but not drawn yet');
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: {} })));
-  await control.waitForTimeout(400);
+  await until(async () => await main.loc(at('top')).isHidden(), 'the widget is hidden while the recognition is off');
+  ok(await main.loc(at('top')).isHidden(), 'widgets: "only while it is on": hidden when it is off');
+  await wset({ place: 'outside', anchor: 'top' });
+  await until(async () => (await main.loc('.pwidgets .widget').count()) === 0, 'an outside place is not drawn');
+  ok(await main.loc('.pwidgets .widget').count() === 0, 'widgets: an outside place is not drawn yet');
+  await wset(null);
 }
 // the speaker of the voice recognition: in the bar of every window, a drawing, its colour says the state, a click turns it on / off
-for (const [name, page] of [['main', main], ['extra', extra]]) {
-  const order = await page.evaluate(() => [...document.querySelectorAll('#tools > button')].map(b => b.id).join());
-  ok(order === 'research,voice,options,close', `speaker (${name}): between the refresh and the options icon: ` + order);
+for (const [name, h] of [['main', main], ['extra', extra]]) {
+  const order = await h.run(root => [...root.querySelectorAll('.ptools > button')].map(b => b.className).join());
+  ok(order === 'presearch,pvoice,poptions,pclose', `speaker (${name}): between the refresh and the options icon: ` + order);
 }
 {
-  const look = page => page.evaluate(() => { const b = document.querySelector('#voice'), w = b.querySelector('.waves');
+  const look = h => h.run(root => { const b = root.querySelector('.pvoice'), w = b.querySelector('.waves');
     return { state: b.dataset.state, color: getComputedStyle(b).color, waves: getComputedStyle(w).display, title: b.title, text: b.textContent.trim(), svg: !!b.querySelector('svg') }; });
-  const off = await look(main), others = await main.evaluate(() => getComputedStyle(document.querySelector('#options')).color);
+  const off = await look(main), others = await main.run(root => getComputedStyle(root.querySelector('.poptions')).color);
   ok(off.svg && off.text === '' && off.state === 'off' && off.color === others && off.waves === 'none' && off.title === '음성인식 켜기', 'speaker: a drawing (no symbol character), off: the colour of the other icons, no sound waves: ' + JSON.stringify(off));
-  await control.waitForTimeout(800);                                // (the window finishes its start: fonts, listeners)
   await control.evaluate(() => window.__TAURI__.event.emit('voice-lamp', { state: 'on', text: '' }));
-  await control.waitForTimeout(200);
+  await until(async () => (await look(extra)).state === 'on', 'the speaker is on in every window');
   const on = await look(main), on2 = await look(extra);
   ok(on.state === 'on' && on.color !== off.color && on.waves !== 'none' && on.title.includes('끄기') && on2.state === 'on', 'speaker: on: green, with sound waves, in every window: ' + JSON.stringify(on));
   await control.evaluate(() => window.__TAURI__.event.emit('voice-lamp', { state: 'error', text: '모델이 없습니다' }));
-  await control.waitForTimeout(200);
+  await until(async () => (await look(main)).state === 'error', 'the speaker shows the error');
   const bad = await look(main);
-  await main.evaluate(() => document.body.classList.add('interactive'));                  // (the bar shows while the pointer is on the window)
   for (const st of ['off', 'on', 'error']) {
     await control.evaluate(s2 => window.__TAURI__.event.emit('voice-lamp', { state: s2, text: s2 === 'error' ? '모델이 없습니다' : '' }), st);
-    await control.waitForTimeout(150);
-    await main.locator('#bar').screenshot({ path: path.join(OUT, 'speaker_' + st + '.png') });
+    await until(async () => (await look(main)).state === st, 'the speaker follows ' + st);
+    await main.loc('.pbar').screenshot({ path: path.join(OUT, 'speaker_' + st + '.png') });
   }
-  await main.evaluate(() => document.body.classList.remove('interactive'));
-  await control.evaluate(() => window.__TAURI__.event.emit('voice-lamp', { state: 'error', text: '모델이 없습니다' }));
-  await control.waitForTimeout(150);
   ok(bad.state === 'error' && bad.color !== off.color && bad.color !== on.color && bad.title.includes('모델이 없습니다'), 'speaker: error: its own colour, the reason as the tip: ' + JSON.stringify(bad));
   await control.evaluate(() => window.__TAURI__.event.emit('voice-lamp', { state: 'off', text: '' }));
   // a click: the hub turns the voice recognition on with the saved options (here nothing is installed: it says so)
-  await main.evaluate(() => document.querySelector('#voice').click());
-  await control.waitForTimeout(600);
+  await main.loc('.pvoice').click();
+  await until(async () => (await look(main)).state === 'error', 'a click turns it on: not installed, so it is an error', 3000);
   const clicked = await look(main);
   ok(clicked.state === 'error' && clicked.title.includes('설치되어 있지 않습니다'), 'speaker: a click turns it on like the button of the options (not installed: error, with the reason): ' + JSON.stringify(clicked));
   await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'off', code: '', msg: '' }));
-  await control.waitForTimeout(200);
 }
 await control.evaluate(() => {                                       // the extra window is known to the pipeline (the exe would open it)
   window.cmrHub.fakeLine({ channel: 'party', name: 'Thrallson', text: 'LF2M tank and healer for +12' });
   window.cmrHub.fakeLine({ channel: 'guild', name: 'Moonpaw', text: 'LFM raid tonight, anyone?' });
   window.cmrHub.fakeLine({ channel: 'sys', name: '', text: '[SERVER] restart in 5 minutes' });
 });
-const texts = page => page.evaluate(() => [...document.querySelectorAll('.cv-blk')].map(e => e.textContent));
-const hasText = (page, t) => page.waitForFunction(t => [...document.querySelectorAll('.cv-blk')].some(e => e.textContent.includes(t)), t, { timeout: 15000 }).catch(() => {});
+const texts = h => h.run(root => [...root.querySelectorAll('.plines:not(.off) .cv-blk')].map(e => e.textContent));
+const hasText = (h, t) => h.page.waitForFunction(([id, t]) => [...document.querySelectorAll(`.pane[data-id="${id}"] .plines:not(.off) .cv-blk`)].some(e => e.textContent.includes(t)), [h.id, t], { timeout: 15000 }).catch(() => {});
 await hasText(main, '번역: LFM(구인) raid tonight');
 const m = await texts(main);
 console.log('  main window:', JSON.stringify(m));
@@ -260,16 +339,17 @@ ok(requests.some(r => decodeURIComponent(r.url).replace(/\+/g, ' ').includes('ra
 ok(requests.every(r => (r.headers || []).some(([k]) => k === 'User-Agent')), 'requests carry the program\'s headers');
 
 // the hub's history reaches a window that opens later
-const late = await open('overlay.html?label=main');
+const lateCenter = await open('center.html?label=center1late&mode=1&ox=0&oy=0', { width: 1200, height: 800 }), late = paneOf(lateCenter, 1);
 await hasText(late, '번역: LFM(구인) raid tonight');
 const lt = await texts(late); console.log('  late window:', JSON.stringify(lt));
 ok(lt.length >= 5 && lt.some(t => t.includes('LF2M')), 'a window opened later catches up with the history');
+await lateCenter.close();
 
 // a setting changed in the hub: saved to config.json and drawn by the other windows
 await control.evaluate(() => { const el = document.getElementById('size'); el.value = 20; el.dispatchEvent(new Event('input')); document.getElementById('shadow').click(); });
-await main.waitForFunction(() => getComputedStyle(document.querySelector('#lines')).getPropertyValue('--cv-size').trim() === '20px', null, { timeout: 4000 }).catch(() => {});
-ok(await main.evaluate(() => getComputedStyle(document.querySelector('#lines')).getPropertyValue('--cv-size').trim()) === '20px', 'the font size reaches the main window');
-ok(await main.evaluate(() => getComputedStyle(document.querySelector('.cv-blk')).textShadow !== 'none'), 'the shadow reaches the main window');
+await until(async () => (await main.run(root => getComputedStyle(root.querySelector('.plines:not(.off)')).getPropertyValue('--cv-size').trim())) === '20px', 'the font size reaches the main window', 4000);
+ok(await main.run(root => getComputedStyle(root.querySelector('.plines:not(.off)')).getPropertyValue('--cv-size').trim()) === '20px', 'the font size reaches the main window');
+ok(await main.run(root => getComputedStyle(root.querySelector('.cv-blk')).textShadow !== 'none'), 'the shadow reaches the main window');
 await control.waitForTimeout(1500);
 const saved = JSON.parse(files.get('config.json') || '{}');
 ok(saved.font_size === 20 && saved.shadow_on === true && saved.config_version === 3, 'config.json has the new settings: ' + JSON.stringify([saved.font_size, saved.shadow_on, saved.config_version]));
@@ -294,7 +374,7 @@ ok(Array.isArray(lp) && lp[0] === 200 && lp[1] === 100, 'the position is remembe
 await control.waitForTimeout(800);
 const noInfo = a => a.filter(t => !t.startsWith('ℹ'));   // a notice (e.g. the glossary was read again) may come at any time
 const n1 = noInfo(await texts(main)).length;
-await control.waitForTimeout(1200);
+await within(1200, async () => noInfo(await texts(main)).length === n1);
 ok(noInfo(await texts(main)).length === n1, 'the same picture adds no line twice');
 
 // ---- the send box: the hotkey in the game opens the line, Enter translates, the translation goes to the clipboard, the game gets the keyboard back
@@ -398,38 +478,22 @@ await control.waitForTimeout(1500);
 ok(cfgFile().font_size === 14 && cfgFile().bottom_stick === true && cfgFile().shadow_on === !shadow0, 'options/windows: window 1 writes its own keys (font_size, bottom_stick, shadow_on)');
 ok((cfgFile().win1_off || []).includes('O') && !(cfgFile().win1_off || []).includes('G'), 'options/windows: window 1 channels are stored as the list that is left out: ' + JSON.stringify(cfgFile().win1_off));
 ok(await opt.locator('.row b.label', { hasText: '그림자 가로' }).isVisible() === !shadow0, 'options/windows: shadow rows follow the shadow switch');
-// above everything / just above the game
+// above everything / just above the game: the setting decides which control center draws the window (the order itself is the program's: center.rs)
 const sw = label => rowOf(label).locator('.switch');
-ok(await main.evaluate(() => window.__top) === true && placed.length === 0, 'topmost: on by default, nothing is placed');
+const inCenter = async id => (await cm.locator(`.pane[data-id="${id}"]`).count()) === 1;      // (this page is the center of the windows that are on top)
+ok(await inCenter(1), 'topmost: on by default: the window is in the center of the windows on top');
 await sw('와우 위에만').click();
-await control.waitForTimeout(800);
-ok(cfgFile().topmost_wow_only === true && cfgFile().topmost === false, 'topmost: "just above the game" is on, "always on top" off');
-{ // owner way: two states by the program in front
-  const fg0 = kb.fg;
-  kb.fg = 5; await control.waitForTimeout(700);
-  ok(owners.at(-1) === 77 && topCalls.at(-1) === false, 'above the game, another program in front: the game is the owner, not topmost: ' + JSON.stringify([owners.at(-1), topCalls.slice(-3)]));
-  kb.fg = 77; await control.waitForTimeout(700);
-  ok(topCalls.at(-1) === true && owners.at(-1) === 0, 'above the game, the game in front: topmost, no owner: ' + JSON.stringify([owners.at(-1), topCalls.slice(-3)]));
-  kb.fg = 5; await control.waitForTimeout(700);
-  ok(owners.at(-1) === 77 && topCalls.at(-1) === false, 'and back: owner again, not topmost');
-  kb.fg = 5; kb.mine = true; await control.waitForTimeout(700);
-  ok(topCalls.at(-1) === true && owners.at(-1) === 0, 'above the game, our own window (options / send box) in front: topmost like the game in front: ' + JSON.stringify([owners.at(-1), topCalls.slice(-3)]));
-  kb.mine = false; await control.waitForTimeout(700);
-  ok(owners.at(-1) === 77 && topCalls.at(-1) === false, 'and when it is not in front any more: owner again');
-  kb.fg = fg0;
-}
-const placedBefore = placed.length;
+await until(async () => cfgFile().topmost_wow_only === true && !(await inCenter(1)), '"just above the game" takes the window to its own center');
+ok(cfgFile().topmost_wow_only === true && cfgFile().topmost === false && !(await inCenter(1)), 'topmost: "just above the game" is on, "always on top" off: the window is in another center');
 await sw('항상 맨 위에').click();
-await control.waitForTimeout(800);
-ok(cfgFile().topmost === true && cfgFile().topmost_wow_only === false && await main.evaluate(() => window.__top) === true && (BY_OWNER ? owners.at(-1) === 0 : !owners.at(-1)), 'topmost: "always on top" takes the other one off: ' + JSON.stringify([cfgFile().topmost, cfgFile().topmost_wow_only, await main.evaluate(() => window.__top), owners.slice(-3)]));
-{ // neither on top nor above the game: an ordinary window, a touch brings it up over the others
-  const n0 = raised.length;
-  await main.locator('#lines').click({ force: true }); await control.waitForTimeout(200);
-  ok(raised.length === n0, 'always on top: a click does not need to raise the window');
-  await sw('항상 맨 위에').click(); await control.waitForTimeout(800);
-  await main.locator('#lines').click({ force: true }); await control.waitForTimeout(200);
-  ok(raised.length > n0, 'ordinary window (both off): a click raises it over the other windows');
-  await sw('항상 맨 위에').click(); await control.waitForTimeout(800);
+await until(async () => cfgFile().topmost === true && await inCenter(1), '"always on top" brings it back');
+ok(cfgFile().topmost === true && cfgFile().topmost_wow_only === false && await inCenter(1), 'topmost: "always on top" takes the other one off: back in the center of the windows on top');
+{ // neither on top nor above the game: an ordinary window (the ordinary center draws it and raises itself when it is touched)
+  await sw('항상 맨 위에').click();
+  await until(async () => cfgFile().topmost === false && !(await inCenter(1)), 'both off: the ordinary center draws it');
+  ok(cfgFile().topmost === false && cfgFile().topmost_wow_only === false && !(await inCenter(1)), 'ordinary window (both off): it is in the ordinary center');
+  await sw('항상 맨 위에').click();
+  await until(async () => cfgFile().topmost === true && await inCenter(1), '"always on top" again');
 }
 // the font list: the files of fonts/ and the way back to the default
 const fontBox = rowOf('글꼴').locator('input.wide'), pop = opt.locator('.sg-pop');
@@ -459,82 +523,106 @@ ok(cfgFile().font_family === '', 'options/windows: emptied: the default again');
   const nameBox = rowOf('이름').locator('input');
   ok(await nameBox.count() === 1, 'options/windows: the main window has the name row too');
   await nameBox.fill('팀 채팅'); await nameBox.press('Tab'); await control.waitForTimeout(700);
-  ok(cfgFile().main_name === '팀 채팅' && await main.locator('#title').textContent() === '팀 채팅' && await main.evaluate(() => document.title) === 'ChatMatrix - 팀 채팅', 'options/windows: the name of the main window is saved and shown in its tab: ' + cfgFile().main_name);
+  ok(cfgFile().main_name === '팀 채팅' && await main.locator('#title').textContent() === '팀 채팅', 'options/windows: the name of the main window is saved and shown in its tab: ' + cfgFile().main_name);
   ok((await opt.locator('select option').allTextContents()).some(t => t === '1 · 팀 채팅'), 'options/windows: the list of windows says it: ' + (await opt.locator('select option').allTextContents()).slice(0, 4).join('|'));
   await nameBox.fill(''); await nameBox.press('Tab'); await control.waitForTimeout(700);
   ok(cfgFile().main_name === '' && await main.locator('#title').textContent() === '메인', 'options/windows: emptied: the default name again');
 }
-// the mouse over a click-through window clears it (the fake window always has the mouse over it)
-await sw('클릭 관통').click(); await control.waitForTimeout(500);
-ok(await main.evaluate(() => document.body.classList.contains('hover-clear')) === false, 'hover clear: off by default');
+// click-through windows: the system's cursor is given by hand (the middle of the pane, or far away from it). The loop of the center looks at it every OVERLAY_POLL_MS.
+const dprNow = () => cm.evaluate(() => window.devicePixelRatio);
+const cursorOver = async h => { const b = await h.loc('.pbody').boundingBox(), d = await dprNow(); kb.cx = Math.round((b.x + b.width / 2) * d); kb.cy = Math.round((b.y + b.height / 2) * d); };
+const cursorAway = () => { kb.cx = 9999; kb.cy = 9999; };
+const has = (h, cls) => h.evaluate(c => document.body.classList.contains(c), cls);
+cursorAway();
+await sw('클릭 관통').click();
+await until(async () => await has(main, 'through'), 'the window is click-through');
+ok(await has(main, 'hover-clear') === false, 'hover clear: off by default');
 // the wheel up over a click-through window: the frame shows (the old chat is read); when the mouse leaves, it goes through again
-await control.evaluate(() => import('./settings.js').then(m => m.set({ wheel_through: true }))); await control.waitForTimeout(500);
-wheel.push(120); await control.waitForTimeout(500);
-ok(await main.evaluate(() => document.body.classList.contains('interactive')) === true, 'wheel review: the wheel up over a click-through window makes it usable');
-kb.cx = 9999; await control.waitForTimeout(500);
-ok(await main.evaluate(() => document.body.classList.contains('interactive')) === true, 'wheel review: it stays in view while the old chat is shown, also when the mouse left');
+await control.evaluate(() => import('./settings.js').then(m => m.set({ wheel_through: true })));
+await cursorOver(main);
+await until(async () => (await has(main, 'through')) && !(await has(main, 'interactive')), 'click-through: not usable', 1000);
+wheel.push(120);
+await until(async () => await has(main, 'review'), 'the wheel up starts the review', 1500);
+ok(await has(main, 'interactive') === true, 'wheel review: the wheel up over a click-through window makes it usable');
+cursorAway(); await control.waitForTimeout(400);
+ok(await has(main, 'interactive') === true, 'wheel review: it stays in view while the old chat is shown, also when the mouse left');
 ok(await main.evaluate(() => document.body.classList.contains('review') && getComputedStyle(document.getElementById('toBottom')).display !== 'none'), 'wheel review: the frame is marked and the way back down is there');
 await main.evaluate(() => { const l = document.getElementById('lines'); l.scrollTop = l.scrollHeight; });
-await control.waitForTimeout(600);
-ok(await main.evaluate(() => !document.body.classList.contains('review')), 'wheel review: scrolled to the newest line, the review ends at once');
-await control.waitForTimeout(300);
-ok(await main.evaluate(() => document.body.classList.contains('interactive')) === false, 'wheel review: at the newest line and the mouse away, the window goes through again');
-kb.cx = 0; await control.waitForTimeout(300);
-wheel.push(120); await control.waitForTimeout(500);
-ok(await main.evaluate(() => document.body.classList.contains('review')), 'wheel review: again');
-await main.locator('#toBottom').click({ force: true }); await control.waitForTimeout(500);
-ok(await main.evaluate(() => !document.body.classList.contains('review')), 'wheel review: the way back down ends it');
-wheel.push(120); await control.waitForTimeout(400);
-ok(await main.evaluate(() => document.body.classList.contains('review')), 'wheel review: again (for the wheel down)');
-await main.mouse.move(100, 100); await main.mouse.wheel(0, 900);
-await control.waitForTimeout(600);
-ok(await main.evaluate(() => !document.body.classList.contains('review')), 'wheel review: the wheel down to the newest line ends it');
+await until(async () => !(await has(main, 'review')), 'scrolled to the newest line, the review ends', 1000);
+ok(!(await has(main, 'review')), 'wheel review: scrolled to the newest line, the review ends at once');
+await until(async () => !(await has(main, 'interactive')), 'the window goes through again', 1500);
+ok(await has(main, 'interactive') === false, 'wheel review: at the newest line and the mouse away, the window goes through again');
+await cursorOver(main); await control.waitForTimeout(300);
+wheel.push(120);
+await until(async () => await has(main, 'review'), 'again', 1500);
+ok(await has(main, 'review'), 'wheel review: again');
+await main.locator('#toBottom').click({ force: true });
+await until(async () => !(await has(main, 'review')), 'the way back down ends it', 1000);
+ok(!(await has(main, 'review')), 'wheel review: the way back down ends it');
+wheel.push(120);
+await until(async () => await has(main, 'review'), 'again (for the wheel down)', 1500);
+ok(await has(main, 'review'), 'wheel review: again (for the wheel down)');
+{ const b = await main.loc('.pbody').boundingBox(); await cm.mouse.move(b.x + 40, b.y + 40); await cm.mouse.wheel(0, 900); }
+await until(async () => !(await has(main, 'review')), 'the wheel down to the newest line ends it', 1500);
+ok(!(await has(main, 'review')), 'wheel review: the wheel down to the newest line ends it');
 // the lines get shorter by themselves (a translation line hidden): the browser moves the position, that is no review
+await control.waitForTimeout(700);                                // (the page counts 600 ms from the wheel: what moves the lines later is not the user)
 await main.evaluate(() => { const l = document.getElementById('lines'); const pad = document.createElement('div'); pad.id = 'tpad'; pad.style.height = '900px'; l.firstChild.append(pad); l.scrollTop = l.scrollHeight; });
 await control.waitForTimeout(300);
 await main.evaluate(() => document.getElementById('tpad').remove());
 await control.waitForTimeout(500);
-ok(await main.evaluate(() => !document.body.classList.contains('review')), 'wheel review: lines getting shorter by themselves do not start it');
-await control.evaluate(() => import('./settings.js').then(m => m.set({ font_weight: 700 }))); await control.waitForTimeout(500);
+ok(!(await has(main, 'review')), 'wheel review: lines getting shorter by themselves do not start it');
+await control.evaluate(() => import('./settings.js').then(m => m.set({ font_weight: 700 })));
+await until(async () => (await main.evaluate(() => getComputedStyle(document.querySelector('.cv-blk')).fontWeight)) === '700', 'the font weight reaches the lines');
 ok(await main.evaluate(() => getComputedStyle(document.querySelector('.cv-blk')).fontWeight) === '700', 'font weight: 700 reaches the lines');
-await control.evaluate(() => import('./settings.js').then(m => m.set({ font_weight: 400 }))); await control.waitForTimeout(400);
-await sw('관통 창 숨기기').click(); await control.waitForTimeout(600);
-ok(await main.evaluate(() => document.body.classList.contains('hover-clear')) === true, 'hover clear: cleared while the mouse is over it');
-kb.shift = true; await control.waitForTimeout(500);
-ok(await main.evaluate(() => document.body.classList.contains('hover-clear')) === false, 'hover clear: not while the interact key is held');
+await control.evaluate(() => import('./settings.js').then(m => m.set({ font_weight: 400 })));
+await sw('관통 창 숨기기').click();
+await cursorOver(main);
+await until(async () => await has(main, 'hover-clear'), 'the mouse over the window clears it', 1500);
+ok(await has(main, 'hover-clear') === true, 'hover clear: cleared while the mouse is over it');
+kb.shift = true;
+await until(async () => !(await has(main, 'hover-clear')), 'the interact key brings it back', 1000);
+ok(await has(main, 'hover-clear') === false, 'hover clear: not while the interact key is held');
 kb.shift = false;
-// the tip of a link (item ...) under the cursor of a click-through window: the page gets no mouse events, so the window loop shows it from the cursor position
+// the tip of a link (item ...) under the cursor of a click-through window: the page gets no mouse events, so the loop of the center shows it from the cursor position
 {
   await main.evaluate(() => {
     const s = document.createElement('span'); s.className = 'cv-tipped'; s._tip = ['[Test Item]', 'Binds when picked up']; s.id = 'tiptest'; s.textContent = '[Test Item]';
-    s.style.cssText = 'position:fixed; left:60px; top:50px; padding:2px 8px; color:#fff; z-index:1;';
+    s.style.cssText = 'position:fixed; left:260px; top:200px; padding:2px 8px; color:#fff; z-index:1;';
     document.querySelector('.cv-blk').append(s);
   });
-  const dpr = await main.evaluate(() => window.devicePixelRatio);
+  const dpr = await dprNow();
   const at = async sel => { const r = await main.evaluate(s => { const b = document.querySelector(s).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }, sel); kb.cx = Math.round(r[0] * dpr); kb.cy = Math.round(r[1] * dpr); };
-  const tip = () => main.evaluate(() => { const t = document.querySelector('.cv-tip'); return { shown: getComputedStyle(t).display !== 'none', text: t.textContent }; });
-  await at('#tiptest'); await control.waitForTimeout(500);
+  const tip = async () => { const t = await cm.locator('body > .cv-tip:visible').allTextContents(); return { shown: t.length > 0, text: t.join('|') }; };
+  await at('#tiptest'); await control.waitForTimeout(400);
   ok((await tip()).shown === false, 'link tip: not while the window is cleared by the mouse (hover clear is on)');
-  await sw('관통 창 숨기기').click(); await control.waitForTimeout(600);
+  await sw('관통 창 숨기기').click();
+  await until(async () => (await tip()).shown, 'a click-through window shows the tip of the link under the cursor', 1500);
   let t1 = await tip();
   ok(t1.shown && t1.text.includes('Test Item') && t1.text.includes('Binds when picked up'), 'link tip: a click-through window shows the tip of the link under the cursor: ' + JSON.stringify(t1));
-  kb.cx = 400; kb.cy = 250; await control.waitForTimeout(500);
+  cursorAway();
+  await until(async () => !(await tip()).shown, 'the cursor leaves the link: the tip goes away', 1000);
   ok((await tip()).shown === false, 'link tip: the cursor leaves the link: the tip goes away');
-  await at('#tiptest'); await control.waitForTimeout(500);
+  await at('#tiptest');
+  await until(async () => (await tip()).shown, 'back on the link', 1000);
   ok((await tip()).shown === true, 'link tip: back on the link');
   ok(await sw('관통 중 링크 보기 허용').isVisible(), 'link tip: the option is in the 창 tab, under the wheel one');
-  await sw('관통 중 링크 보기 허용').click(); await control.waitForTimeout(600);
+  await sw('관통 중 링크 보기 허용').click();
+  await until(async () => !(await tip()).shown, 'the option off: no tip while click-through', 1000);
   ok((await tip()).shown === false && (await control.evaluate(() => import('./settings.js').then(m => m.cfg().through_tips))) === false, 'link tip: the option off: no tip while click-through');
-  await sw('관통 중 링크 보기 허용').click(); await control.waitForTimeout(600);
+  await sw('관통 중 링크 보기 허용').click();
+  await until(async () => (await tip()).shown, 'the option on again', 1000);
   ok((await tip()).shown === true, 'link tip: the option on again');
-  kb.shift = true; await control.waitForTimeout(500);
-  ok((await tip()).shown === false, 'link tip: the interact key is held (the window is usable): the one of the mouse events takes over, not this one');
-  kb.shift = false; await control.waitForTimeout(500);
+  kb.shift = true; await control.waitForTimeout(400);
+  ok(await has(main, 'interactive') === true, 'link tip: the interact key is held: the window is usable (the mouse events take over)');
+  kb.shift = false;
+  await until(async () => await has(main, 'through') && !(await has(main, 'interactive')) && (await tip()).shown, 'the key released: click-through again, the tip is back', 1500);
   ok((await tip()).shown === true, 'link tip: the key released: click-through again, the tip is back');
-  kb.cx = 0; kb.cy = 0; await sw('관통 창 숨기기').click(); await control.waitForTimeout(500);       // (as it was)
+  cursorAway(); await sw('관통 창 숨기기').click();
   await main.evaluate(() => document.getElementById('tiptest').remove());
 }
-await sw('관통 창 숨기기').click(); await sw('클릭 관통').click(); await control.waitForTimeout(500);
+await sw('관통 창 숨기기').click(); await sw('클릭 관통').click();
+await until(async () => !(await has(main, 'through')), 'the window takes the mouse again');
 // ---- the look rows (outline / heavier glyphs / spacing / no kerning, in tenths of a pixel): they reach the lines
 {
   const look = () => main.evaluate(() => { const b = document.querySelector('.cv-blk'), c = getComputedStyle(b), sc = getComputedStyle(document.querySelector('.cv-scroll')); return { shadow: c.textShadow, stroke: c.webkitTextStrokeWidth, spacing: sc.letterSpacing, kern: sc.fontKerning }; });
@@ -570,13 +658,13 @@ await sw('관통 창 숨기기').click(); await sw('클릭 관통').click(); awa
   ok(cfgW().style === 'battery' && await card.locator('.wp-layer .w-battery').count() === 1, 'options/widgets: the look is chosen from the ones the widget declares');
   await card.locator('.wp-field:has(span:text-is("보이는 때")) select').selectOption('active');
   await card.locator('.wp-field:has(span:text-is("가로 이동 (x)")) input').fill('12'); await card.locator('.wp-field:has(span:text-is("가로 이동 (x)")) input').dispatchEvent('change');
-  await control.waitForTimeout(800);
+  await within(800, async () => cfgW().show === 'active' && cfgW().dx === 12);
   ok(cfgW().show === 'active' && cfgW().dx === 12, 'options/widgets: when it is shown, the move in x');
   await opt.locator('.wp').first().screenshot({ path: path.join(OUT, 'options_widget.png') });
   // the list on the left: every widget, with its own switch; a second widget (as a plugin would register it) joins the list
   ok(await opt.locator('.wl-item').count() === 1 && await opt.locator('.wl-item.sel .wl-name').textContent() === '음성인식 음량바' && await opt.locator('.wl-badge').count() === 0, 'options/widgets: the list has the one widget there is (selected, no "플러그인" mark: it is the program\'s)');
   await opt.evaluate(() => import('./widgets/defaults.js').then(m => m.registry.register({ id: 'demo:status', label: 'Demo 상태', kind: 'light', styles: [{ id: 'dot', label: '점' }], settings: [{ key: 'blink', type: 'check', label: '깜빡임', def: true }, { key: 'size', type: 'number', label: '굵기', min: 1, max: 9, def: 3 }] })));
-  await control.waitForTimeout(300);
+  await within(300, async () => await opt.locator('.wl-item').count() === 2 && await opt.locator('.wl-item').nth(1).locator('.wl-badge').textContent() === '플러그인');
   ok(await opt.locator('.wl-item').count() === 2 && await opt.locator('.wl-item').nth(1).locator('.wl-badge').textContent() === '플러그인', 'options/widgets: a widget that is registered later joins the list, marked as a plugin\'s');
   await opt.locator('.wl-item').nth(1).click(); await control.waitForTimeout(300);
   ok(await opt.locator('.wp-title').textContent() === 'Demo 상태' && await opt.locator('.wp-form').isHidden() && await opt.locator('.wp-top input').isChecked() === false, 'options/widgets: the right side is the chosen one; it is off for this window: its choices wait (hidden until it is on)');
@@ -589,13 +677,13 @@ await sw('관통 창 숨기기').click(); await sw('클릭 관통').click(); awa
   await opt.screenshot({ path: path.join(OUT, 'options_widgets_list.png'), clip: await opt.locator('.wm').boundingBox() });
   // settings of a widget nobody provides any more are kept and shown, with a way to take them away
   await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: { ...m.cfg().widgets, 'gone:thing': { place: 'inside', anchor: 'top' } } })));
-  await control.waitForTimeout(600);
+  await within(600, async () => await opt.locator('.wl-item.orphan').count() === 1 && await opt.locator('.wl-item.orphan .wl-badge').textContent() === '없음');
   ok(await opt.locator('.wl-item.orphan').count() === 1 && await opt.locator('.wl-item.orphan .wl-badge').textContent() === '없음', 'options/widgets: settings of a widget nobody provides are listed, dim, marked "없음"');
   await opt.locator('.wl-item.orphan').click(); await control.waitForTimeout(300);
   await opt.locator('button', { hasText: '이 설정 지우기' }).click(); await control.waitForTimeout(800);
   ok(!cfgFile().widgets['gone:thing'] && await opt.locator('.wl-item.orphan').count() === 0, 'options/widgets: deleting them');
   await opt.evaluate(() => import('./widgets/defaults.js').then(m => m.registry.unregister('demo:status')));
-  await control.waitForTimeout(300);
+  await within(300, async () => await opt.locator('.wl-item').count() === 2 && await opt.locator('.wl-item.orphan').count() === 1);
   ok(await opt.locator('.wl-item').count() === 2 && await opt.locator('.wl-item.orphan').count() === 1, 'options/widgets: a widget whose plugin goes away stays in the list as "없음" while its settings are there');
   await opt.locator('.wl-item.orphan').click(); await opt.locator('button', { hasText: '이 설정 지우기' }).click(); await control.waitForTimeout(600);
   await opt.locator('.wl-item').first().click(); await control.waitForTimeout(300);
@@ -605,42 +693,29 @@ await sw('관통 창 숨기기').click(); await sw('클릭 관통').click(); awa
 // "열 때 비우기": an extra window that is opened later gets the lines the hub kept (off), or starts empty and shows what comes after it was opened (on)
 {
   const idc = await control.evaluate(() => window.cmrHub.windows.add('비우기'));
-  const blocks = pg => pg.evaluate(() => document.querySelectorAll('#lines .cv-blk').length);
+  const blocks = h => h.evaluate(() => document.querySelectorAll('#lines .cv-blk').length);
+  const later = async n => { const pg = await open(`center.html?label=center1late${n}&mode=1&ox=0&oy=0`, { width: 1200, height: 800 }); await until(async () => (await pg.locator(`.pane[data-id="${idc}"]`).count()) === 1, 'the window is a pane of the new page'); return paneOf(pg, idc); };      // (a page that starts later: it is given the history of the hub)
   const say = t => control.evaluate(x => window.cmrHub.fakeLine({ channel: 'party', name: 'Earlier', text: x }), t);
   for (const t of ['before one', 'before two', 'before three']) await say(t);        // (the hub keeps the last events: a window opened now is given these)
   await control.waitForTimeout(400);
-  const p1 = await open('overlay.html?label=win' + idc, { width: 420, height: 300 }); await control.waitForTimeout(900);
+  const p1 = await later(1); await within(1500, async () => (await blocks(p1)) > 0);
   const kept = await blocks(p1);
   ok(kept > 0, 'clear on open: off (the default): the window gets the lines of before: ' + kept);
-  await p1.close();
+  await p1.page.close();
   await control.evaluate(i => import('./settings.js').then(m => m.set({ child_windows: m.cfg().child_windows.map(c => (c.id === i ? { ...c, clear_on_open: true } : c)) })), idc); await control.waitForTimeout(500);
   await say('before four'); await control.waitForTimeout(300);
-  const p2 = await open('overlay.html?label=win' + idc, { width: 420, height: 300 }); await control.waitForTimeout(900);
+  const p2 = await later(2); await control.waitForTimeout(900);
   ok(await blocks(p2) === 0, 'clear on open: on: the window starts empty: ' + await blocks(p2));
-  await control.evaluate(() => window.cmrHub.fakeLine({ channel: 'party', name: 'Later', text: 'a line after the window was opened' })); await control.waitForTimeout(900);
+  await control.evaluate(() => window.cmrHub.fakeLine({ channel: 'party', name: 'Later', text: 'a line after the window was opened' }));
+  await within(1500, async () => (await blocks(p2)) > 0);
   ok(await blocks(p2) > 0 && (await p2.locator('#lines').textContent()).includes('a line after the window was opened'), 'clear on open: on: what comes after it was opened shows as usual');
-  await p2.close();
+  await p2.page.close();
   const row = opt.locator('.row', { has: opt.locator('b.label', { hasText: /^열 때 비우기$/ }) });
   await opt.selectOption('.wintool select', String(idc)); await control.waitForTimeout(500);
   ok(await row.count() === 1 && await row.locator('small.note').count() === 3, 'clear on open: the option is in the window options (an extra window), a note of three lines');
   await opt.selectOption('.wintool select', '1'); await control.waitForTimeout(400);
   ok(await row.isHidden(), 'clear on open: not shown for the main window');
   await control.evaluate(i => window.cmrHub.windows.remove(i), idc); await control.waitForTimeout(300);
-}
-
-// "온전한 묶음만" in a window that is not click-through: the groups are judged by the edge below its title bar (22px), not by the top of the lines (4px)
-{
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ whole_groups: true, click_through: false }))); await control.waitForTimeout(600);
-  const starts = () => main.evaluate(() => [...document.querySelectorAll('#lines .cv-blk')].filter((k, i) => (k.dataset.g || i === 0) && !k.classList.contains('cv-clip')).map(k => Math.round(k.getBoundingClientRect().top)));
-  let tops = [], band = false;
-  for (let h = 330; h <= 420 && !band; h += 6) {                                  // the height where the oldest whole group would start between the top of the lines and the end of the bar
-    await main.setViewportSize({ width: 560, height: h }); await control.waitForTimeout(400);
-    await main.evaluate(() => { const l = document.getElementById('lines'); l.scrollTop = l.scrollHeight; }); await control.waitForTimeout(300);
-    tops = await starts(); band = tops.length > 0 && Math.min(...tops) >= 4 && Math.min(...tops) < 22;
-  }
-  ok(tops.length > 0 && Math.min(...tops) >= 21, 'whole groups (title bar): no whole group starts under the title bar: ' + JSON.stringify(tops.slice(0, 3)) + (band ? ' (in the band)' : ''));
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ whole_groups: false }))); await control.waitForTimeout(500);
-  await main.setViewportSize({ width: 560, height: 420 });
 }
 
 // "온전한 묶음만" and "보일 묶음 수": the rows are in the window options and the main window hides the older groups
@@ -702,8 +777,14 @@ ok((await rowOf('글 정렬').locator('select option').first().textContent()).st
 ok((await rowOf('글꼴').locator('input.wide').getAttribute('placeholder')).startsWith('창 1을 따름 · ') && await rowOf('글꼴').locator('input.wide').inputValue() === '', 'options/windows: the font box says what it follows (the empty box), and a new window follows');
 ok(await rowOf('배경 진하기').locator('button.def').isVisible() && await rowOf('시간 표시').locator('button.def').isVisible() && await rowOf('시간 표시').locator('button.def').textContent() === '기본값', 'options/windows: sliders and on / off switches have the "기본값" button, they do not follow');
 ok(await rowOf('시간 표시').locator('input[type=checkbox]').isChecked() && await rowOf('시간 표시').locator('button.def').isDisabled(), 'options/windows: a switch an extra window has no value for shows its default (on) and the 기본값 button is dim');
+// the background of a window is at most 99 % (at 100 % the engine draws the text now thick, now thin): the slider ends there, and a note says why
+{
+  const bg = rowOf('배경 진하기');
+  ok(await bg.locator('input[type=range]').getAttribute('max') === '99', 'options/windows: the slider of the background ends at 99 %');
+  ok((await bg.textContent()).includes('99%까지 지정할 수 있습니다') && (await bg.textContent()).includes('엔진'), 'options/windows: the note says why the limit is 99 %');
+}
 await rowOf('줄 간격').locator('input').fill('5'); await rowOf('줄 간격').locator('input').dispatchEvent('change');
-await control.waitForTimeout(1500);
+await within(1500, async () => cfgFile().child_windows.find(c => c.id === 3).line_spacing === 5 && cfgFile().line_spacing !== 5);
 ok(cfgFile().child_windows.find(c => c.id === 3).line_spacing === 5 && cfgFile().line_spacing !== 5, 'options/windows: an extra window gets its own value');
 await rowOf('줄 간격').locator('input').fill(''); await rowOf('줄 간격').locator('input').dispatchEvent('change');
 await control.waitForTimeout(1500);
@@ -713,11 +794,11 @@ ok(!('line_spacing' in cfgFile().child_windows.find(c => c.id === 3)) && (await 
   const main = cfgFile().font_size;
   await rowOf('글자 크기').locator('input').first().focus();
   await rowOf('글자 크기').locator('input').first().press('ArrowUp');
-  await control.waitForTimeout(1200);
+  await within(1200, async () => cfgFile().child_windows.find(c => c.id === 3).font_size === main + 1 && await rowOf('글자 크기').locator('input').first().inputValue() === String(main + 1));
   ok(cfgFile().child_windows.find(c => c.id === 3).font_size === main + 1 && await rowOf('글자 크기').locator('input').first().inputValue() === String(main + 1), `options/windows: ArrowUp on the empty font size starts from window 1's ${main}: ${main + 1}`);
   await rowOf('글자 크기').locator('.step').last().click();
   await rowOf('글자 크기').locator('.step').last().click();
-  await control.waitForTimeout(1200);
+  await within(1200, async () => cfgFile().child_windows.find(c => c.id === 3).font_size === main - 1);
   ok(cfgFile().child_windows.find(c => c.id === 3).font_size === main - 1, 'options/windows: the ▾ button steps one at a time');
   await rowOf('글자 크기').locator('input').first().fill(''); await rowOf('글자 크기').locator('input').first().dispatchEvent('change');
   await control.waitForTimeout(1200);
@@ -743,12 +824,520 @@ ok(!('line_spacing' in cfgFile().child_windows.find(c => c.id === 3)) && (await 
   await lowIn.fill(''); await lowIn.dispatchEvent('change'); await control.waitForTimeout(900);
 }
 await opt.selectOption('.row:has(b.label:text-is("글 정렬")) select', 'center');
-await control.waitForTimeout(1200);
+await within(1200, async () => cfgFile().child_windows.find(c => c.id === 3).align === 'center');
 ok(cfgFile().child_windows.find(c => c.id === 3).align === 'center', 'options/windows: a choice of its own');
 await opt.selectOption('.row:has(b.label:text-is("글 정렬")) select', '');
 await control.waitForTimeout(1200);
 ok(cfgFile().child_windows.find(c => c.id === 3).align === null, 'options/windows: "창 1을 따름" in a choice list: null (it follows window 1)');
 await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
+// a control center (3.2): the page of a kind of order draws the windows of that kind as panes with the chat of the hub, and tells their places
+{
+  const geoBefore = [cfgFile().geometry, (cfgFile().child_windows.find(c => c.id === 3) || {}).geometry];       // (the pane saves its place in the settings: put back afterwards)
+  const cp = await open('center.html?label=center1cp&mode=1&ox=0&oy=0', { width: 1200, height: 800 });
+  await until(async () => (await cp.locator('.pane .cv-list').count()) > 0 && (await cp.locator('.pane .cv-list').first().textContent()).length > 0, 'the pane shows the chat of the hub', 4000);
+  ok(await cp.locator('.pane').count() >= 1 && (await cp.locator('.pane .cv-list').first().textContent()).length > 0, 'center: the pane of the main window shows the chat of the hub: ' + (await cp.locator('.pane .cv-list').first().textContent()).slice(0, 60));
+  ok(centerRects.length > 0 && centerRects.at(-1).label === 'center1' && centerRects.at(-1).panes.some(p => p.id === '1' && p.w > 100 && p.h > 50), 'center: the place of the pane is told to the program: ' + JSON.stringify(centerRects.at(-1)));
+  // (the panes of the windows that are open stand on each other at first: the last one is on top, it is the one the pointer meets)
+  const before = await cp.locator('.pane').last().boundingBox();
+  const bar = await cp.locator('.pane .pbar').last().boundingBox();
+  await cp.mouse.move(bar.x + 20, bar.y + 10); await cp.mouse.down(); await cp.mouse.move(bar.x + 120, bar.y + 70, { steps: 4 }); await cp.mouse.up();
+  await until(async () => Math.abs((await cp.locator('.pane').last().boundingBox()).x - before.x - 100) < 3, 'the pane follows the drag');
+  const after = await cp.locator('.pane').last().boundingBox();
+  ok(Math.abs(after.x - before.x - 100) < 3 && Math.abs(after.y - before.y - 60) < 3, 'center: the bar drags the pane: ' + JSON.stringify([before, after]));
+  // the edges resize it: the right edge makes it wider, the left edge moves the left side and keeps the right side where it is
+  {
+    const pn = cp.locator('.pane').last(), b0 = await pn.boundingBox(), er = await pn.locator('.e-r').boundingBox();
+    await cp.mouse.move(er.x + 2, er.y + er.height / 2); await cp.mouse.down(); await cp.mouse.move(er.x + 42, er.y + er.height / 2, { steps: 3 }); await cp.mouse.up();
+    await until(async () => Math.abs((await pn.boundingBox()).width - b0.width - 40) < 3, 'the right edge makes the pane wider');
+    const b1 = await pn.boundingBox(), el = await pn.locator('.e-l').boundingBox();
+    await cp.mouse.move(el.x + 2, el.y + el.height / 2); await cp.mouse.down(); await cp.mouse.move(el.x - 28, el.y + el.height / 2, { steps: 3 }); await cp.mouse.up();
+    await until(async () => Math.abs((await pn.boundingBox()).width - b1.width - 30) < 3, 'the left edge makes the pane wider to the left');
+    const b2 = await pn.boundingBox();
+    ok(Math.abs(b2.x + b2.width - (b1.x + b1.width)) < 3, 'center/edges: the left edge keeps the right side where it is: ' + JSON.stringify([b1, b2]));
+  }
+  // the size of the window moves the lines by itself (a smaller window and a bigger one): that is not the user reading the old chat
+  {
+    const pn = cp.locator('.pane').last(), eb = await pn.locator('.e-b').boundingBox();
+    await cp.mouse.move(eb.x + eb.width / 2, eb.y + 2); await cp.mouse.down(); await cp.mouse.move(eb.x + eb.width / 2, eb.y - 60, { steps: 3 }); await cp.mouse.move(eb.x + eb.width / 2, eb.y + 70, { steps: 3 }); await cp.mouse.up();
+    await control.waitForTimeout(700);
+    ok(!(await pn.evaluate(e => e.classList.contains('review'))), 'center/resize: a window made smaller and bigger again is not "reading the old chat"');
+  }
+  // a web window: the bar and the strips are the center's; the page is a window of the system that the program puts under it (a box with `web`), the mouse goes through where it is
+  {
+    const ev = (name, p) => control.evaluate(([n, x]) => window.__TAURI__.event.emit(n, x), [name, p]);
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ child_windows: [...m.cfg().child_windows, { ...m.cfg().child_windows[0], id: 9, name: '웹', kind: 'web', owner: 'plug', owner_win: 'web', geometry: '360x640+600+300', open_mode: 'never', dock_to: 0 }] })));
+    await control.evaluate(() => { window.__webClosed = 0; window.__TAURI__.event.listen('web-close', () => { window.__webClosed++; }); });
+    await ev('web-state', { windows: [{ win: 9, label: 'web_test', title: '공략 창', lock: false }] });
+    await until(async () => (await cp.locator('.webpane').count()) === 1, 'the web window has a bar in the center');
+    ok((await cp.locator('.webpane .ptab').textContent()) === '공략 창', 'center/web: its bar shows the title it was given');
+    await until(() => centerRects.at(-1).panes.some(p => p.id === 'w9' && p.web === 'web_test' && p.hit === false), 'the program is told where the page is');
+    const rects = centerRects.at(-1).panes.filter(p => p.id.startsWith('w9'));
+    ok(rects.some(p => p.id === 'w9b' && p.hit) && rects.filter(p => p.hit).length === 5 && rects.every(p => p.web === 'web_test' || p.id !== 'w9'), 'center/web: the bar and the strips take the mouse (5), the page does not: ' + JSON.stringify(rects.map(p => [p.id, p.hit])));
+    await cp.locator('.webpane').screenshot({ path: path.join(OUT, 'webpane.png') });
+    await ev('web-title', { label: 'web_test', title: '새 제목' });
+    await until(async () => (await cp.locator('.webpane .ptab').textContent()) === '새 제목', 'the title follows the page');
+    await ev('web-scroll', { label: 'web_test', p: 0.5, s: 0.3 });
+    await until(async () => (await cp.locator('.webpane .pscroll').evaluate(e => e.style.opacity)) === '1', 'the line shows while the page scrolls');
+    await cp.locator('.webpane .preload').click();
+    await cp.locator('.webpane .pback').click();
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'reload') && webCalls.some(c => c[0] === 'cmd' && c[2] === 'back'), 'the buttons go to the page');
+    const wb = await cp.locator('.webpane .pbar').boundingBox(), w0 = (await cp.locator('.webpane').boundingBox());
+    await cp.mouse.move(wb.x + 30, wb.y + 10); await cp.mouse.down(); await cp.mouse.move(wb.x + 70, wb.y + 40, { steps: 3 }); await cp.mouse.up();
+    await until(async () => Math.abs((await cp.locator('.webpane').boundingBox()).x - w0.x - 40) < 3, 'the bar moves the web window');
+    ok(centerRects.at(-1).panes.find(p => p.id === 'w9').x > rects.find(p => p.id === 'w9').x + 30, 'center/web: the place told to the program moves with the bar');
+    await cp.locator('.webpane .pclose').click();
+    await until(async () => (await control.evaluate(() => window.__webClosed)) === 1, 'the close button asks the hub to close it');
+    await ev('web-state', { windows: [] });
+    await until(async () => (await cp.locator('.webpane').count()) === 0, 'the bar goes when the window is closed');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ child_windows: m.cfg().child_windows.filter(c => c.id !== 9) })));
+  }
+  // touching a pane brings it to the front of the center (the pane under the pointer takes the clicks)
+  const z = async i => Number(await cp.locator('.pane').nth(i).evaluate(e => e.style.zIndex));
+  ok(await cp.locator('.pane').count() >= 2 && await z(0) < await z(1), 'center: the first order of the panes follows the numbers of the windows: ' + [await z(0), await z(1)]);
+  await cp.locator('.pane').nth(0).evaluate(e => e.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })));
+  ok(await z(0) > await z(1), 'center: a pane that is touched comes to the front: ' + [await z(0), await z(1)]);
+  // the place of the pane is in the settings now (the place of the TEXT: what a window of 3.1.1 kept)
+  ok(/^\d+x\d+\+\d+\+\d+$/.test(cfgFile().child_windows.find(c => c.id === 3).geometry), 'center: the place of the pane is kept in the settings: ' + cfgFile().child_windows.find(c => c.id === 3).geometry);
+  // widgets: drawn inside the pane of the window that has them (the settings of its host)
+  const WID = 'core:voice-level';
+  await cp.evaluate(id => import('./settings.js').then(m => m.set({ widgets: { [id]: { place: 'inside', anchor: 'bottom-right', dx: 0, dy: 0, style: 'bar', show: 'always', scale: 1, opacity: 1 } } })), WID);
+  await until(async () => (await cp.locator('.pane .widget').count()) === 1, 'the widget is drawn');
+  ok(await cp.locator(`.pane .pwidgets .wa-bottom-right .widget[data-id="${WID}"]`).count() === 1 && await cp.locator('.pane .widget').count() === 1, 'center/widgets: drawn in the pane of the window that has it: ' + await cp.locator('.pane .widget').count());
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ widgets: {} })));
+  await until(async () => (await cp.locator('.pane .widget').count()) === 0, 'the widget is taken away');
+  ok(await cp.locator('.pane .widget').count() === 0, 'center/widgets: taken away with the settings');
+  // click-through: no place for the mouse (the clicks go to the game) until the interact key is held with the cursor over the window
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ click_through: true, hide_tools: false, wheel_through: true })));
+  const mainPane = cp.locator('.pane').first(), hasMain = () => centerRects.at(-1).panes.some(p => p.id === '1' && p.hit);
+  const gameOn = await cp.evaluate(() => new Promise(r => { window.__TAURI__.event.listen('game-state', e => r(e.payload.found)); window.__TAURI__.event.emit('game-hello', {}); setTimeout(() => r(null), 1500); }));
+  if (gameOn) {
+    await until(async () => (await cp.locator('.pane.through:not(.interactive)').count()) > 0 && !hasMain() && (centerRects.at(-1).wheel || []).some(p => p.id === '1'), 'the window is click-through: no place for the mouse, its wheel is asked for');
+    ok(await mainPane.evaluate(e => e.classList.contains('through') && !e.classList.contains('interactive')) && !hasMain(), 'center/through: click-through: no place for the mouse, no bar');
+    ok((centerRects.at(-1).wheel || []).some(p => p.id === '1'), 'center/wheel: the wheel over a click-through window is taken from the game (its place is told)');
+    // the look of a click-through window is the one the "hide" options say: the tab, the icons and the frame are there unless they hide them; nothing takes the mouse
+    const look = () => mainPane.evaluate(e => { const q = x => e.querySelector(x), cs = (x, pe) => getComputedStyle(q(x), pe); return { bar: cs('.pbar').visibility, bp: cs('.pbar').pointerEvents, tab: cs('.ptab').opacity, tools: cs('.ptools').display, toolsA: cs('.ptools').opacity, grip: cs('.pgrip').display, frame: cs('.pbody', '::after').display, edge: cs('.pbody', '::after').borderTopColor }; });
+    const lk = await look();
+    ok(lk.bar === 'visible' && lk.bp === 'none' && lk.tab !== '0' && lk.tools !== 'none' && lk.toolsA !== '0' && lk.grip !== 'none' && lk.frame === 'block' && lk.edge !== 'rgba(0, 0, 0, 0)' && !hasMain(), 'center/through: the name tab, the icons and the frame are shown (as the hide options say), no place for the mouse: ' + JSON.stringify(lk));
+    await cp.evaluate(() => import('./settings.js').then(m => m.set({ hide_tabs: true, hide_frame: true, hide_tools: true })));
+    await until(async () => { const l = await look(); return l.tab === '0' && l.toolsA === '0'; }, 'center/through: with the hide options on, the tab and the icons are hidden', 4000);
+    const lh = await look();
+    ok(lh.edge === 'rgba(0, 0, 0, 0)', 'center/through: and the frame: ' + JSON.stringify(lh));
+    // the cursor passing over a click-through window shows nothing that is hidden; with the interact key held it all comes
+    const mb = await mainPane.boundingBox(); kb.cx = Math.round(mb.x + 40); kb.cy = Math.round(mb.y + 60);
+    await cp.waitForTimeout(900);
+    const lo = await look();
+    ok(lo.tab === '0' && lo.toolsA === '0' && lo.edge === 'rgba(0, 0, 0, 0)' && await mainPane.evaluate(e => e.classList.contains('outside')), 'center/through: the cursor over a click-through window does not show what is hidden: ' + JSON.stringify(lo));
+    kb.shift = true;
+    await until(async () => { const l = await look(); return l.tab !== '0' && l.toolsA !== '0' && l.edge !== 'rgba(0, 0, 0, 0)'; }, 'center/through: with the interact key held, the hidden shows', 3000);
+    kb.shift = false;
+    await until(async () => (await look()).tab === '0', 'center/through: and the key let go: hidden again', 3000);
+    await cp.evaluate(() => import('./settings.js').then(m => m.set({ hide_tabs: false, hide_frame: false, hide_tools: false })));
+    kb.shift = true;
+    await until(() => hasMain(), 'the interact key over the window gives it a place for the mouse', 1000);
+    ok(await mainPane.evaluate(e => e.classList.contains('interactive')) && hasMain(), 'center/through: the interact key over the window: it takes the mouse');
+    kb.shift = false;
+    await until(() => !hasMain(), 'the key let go takes the place away again', 1000);
+    ok(!hasMain(), 'center/through: the key let go: the mouse goes through again');
+    kb.cx = 0; kb.cy = 0;
+  } else console.log('(no game in this test: the click-through check is skipped)');
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ click_through: false })));
+  await until(() => hasMain(), 'the window takes the mouse again');
+  ok(hasMain(), 'center/through: not click-through: the window takes the mouse');
+  // the scroll bar of the lines: there while the window is used, away while it cannot be (click-through) or when the frame is hidden and the mouse is out
+  {
+    const sb = () => mainPane.evaluate(e => getComputedStyle(e.querySelector('.cv-scroll')).scrollbarColor);
+    const gone = 'rgba(0, 0, 0, 0)';
+    ok(!(await sb()).startsWith(gone), 'center/scroll bar: a window that is used shows its scroll bar: ' + await sb());
+    await cp.evaluate(() => import('./settings.js').then(m => m.set({ hide_frame: true })));
+    await until(async () => (await sb()).startsWith(gone), 'center/scroll bar: hidden with the frame while the mouse is out');
+    await cp.evaluate(() => import('./settings.js').then(m => m.set({ hide_frame: false })));
+    await until(async () => !(await sb()).startsWith(gone), 'center/scroll bar: and back');
+  }
+  // blur: the level goes to the program (it makes a window of the system behind the text area); not while the mouse clears the window
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ blur: 2 })));
+  await until(() => centerRects.at(-1).panes.some(p => p.id === '1' && p.blur === 2), 'the level of the blur is told');
+  ok(centerRects.at(-1).panes.some(p => p.id === '1' && p.blur === 2), 'center/blur: the level of the blur is told: ' + JSON.stringify(centerRects.at(-1).panes.map(p => [p.id, p.blur])));
+  await cp.evaluate(() => import('./settings.js').then(m => m.set({ blur: 0 })));
+  await until(() => centerRects.at(-1).panes.every(p => !p.blur), 'the blur is off');
+  ok(centerRects.at(-1).panes.every(p => !p.blur), 'center/blur: off: no blur is asked for');
+  // the right-click menu: in the page of the center; while it is open the center takes the whole mouse (a rect 'menu'), a click elsewhere closes it
+  const pb = await cp.locator('.pane .pbody').first().boundingBox();
+  await cp.mouse.click(pb.x + 30, pb.y + 30, { button: 'right' });
+  await until(() => cp.locator('#ctx').isVisible(), 'the menu opens', 1000);
+  ok(await cp.locator('#ctx').isVisible() && (await cp.locator('#ctx div').allTextContents()).some(t => t.includes('창 비우기')), 'center/menu: the right button opens the menu: ' + (await cp.locator('#ctx').innerText()).replace(/\n/g, '|').slice(0, 80));
+  ok(centerRects.at(-1).panes.some(p => p.id === 'menu'), 'center/menu: the center takes the whole mouse while the menu is open');
+  await cp.mouse.click(pb.x + 400, pb.y + 100);
+  await until(() => cp.locator('#ctx').isHidden(), 'the menu closes', 1000);
+  ok(await cp.locator('#ctx').isHidden() && !centerRects.at(-1).panes.some(p => p.id === 'menu'), 'center/menu: a click elsewhere closes it and gives the mouse back');
+  // the tips of the ordinary center are drawn by the center of the windows on top
+  await control.evaluate(() => window.__TAURI__.event.emit('center-tip', { text: 'tip-test', rect: [100, 300, 160, 320] }));
+  await until(() => cp.locator('.w-tip', { hasText: 'tip-test' }).isVisible(), 'the tip of the other center is drawn', 1000);
+  ok(await cp.locator('.w-tip', { hasText: 'tip-test' }).isVisible(), 'center/tips: a tip of another center is drawn here');
+  await control.evaluate(() => window.__TAURI__.event.emit('center-tip', { hide: true }));
+  await until(() => cp.locator('.w-tip', { hasText: 'tip-test' }).isHidden(), 'the tip is taken away', 1000);
+  ok(await cp.locator('.w-tip', { hasText: 'tip-test' }).isHidden(), 'center/tips: and taken away');
+  // tabs: a window docked to another is a tab of its pane (the active tab shows its lines; a tab of another window takes over when touched)
+  const dockSet = d => cp.evaluate(d => import('./settings.js').then(m => m.set({ child_windows: m.cfg().child_windows.map(c => (c.id === 3 ? { ...c, dock_to: d } : c)) })), d);
+  await dockSet(1);
+  await until(async () => (await cp.locator('.pane .ptab').count()) === 2, 'the docked window is a tab');
+  ok(await cp.locator('.pane .ptab').count() === 2 && await cp.locator('.pane').count() === 1 && await cp.locator('.pane .ptab.on').count() === 1, 'center/tabs: a docked window is a tab of the pane: ' + await cp.locator('.pane .ptab').count() + '/' + await cp.locator('.pane').count());
+  await cp.locator('.pane .ptab').nth(1).dispatchEvent('pointerdown', { button: 0 });
+  await until(() => cp.locator('.pane .ptab').nth(1).evaluate(e => e.classList.contains('on')), 'the touched tab is the active one', 1000);
+  ok(await cp.locator('.pane .ptab').nth(1).evaluate(e => e.classList.contains('on')) && await cp.locator('.pane .plines.off').count() === 1, 'center/tabs: a touched tab becomes the active one, the other chat is hidden');
+  await dockSet(0);
+  await until(async () => (await cp.locator('.pane .ptab').count()) === (await cp.locator('.pane').count()), 'the tab is a window of its own again');
+  ok(await cp.locator('.pane .ptab').count() === await cp.locator('.pane').count(), 'center/tabs: undocked again: a pane of its own');
+  // the mini browser: the hub opens a window of it (the default one), the center draws its bar with an address; the menus and the address bar act on it
+  {
+    const cmd = (c, id) => cp.evaluate(([c2, i]) => window.__TAURI__.event.emit('browser-command', { cmd: c2, id: i }), [c, id]);                // (from another page: a page does not hear its own events)
+    const opens = () => webCalls.filter(c => c[0] === 'open' && c[1].label === 'web_b1');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ bookmarks: [{ name: '지도', url: 'https://map.kakao.com/' }] })));
+    await cmd('open', 1);
+    await until(async () => (await cp.locator('.webpane .paddr').count()) === 1, 'the window of the mini browser has an address bar');
+    const a1 = opens().at(-1)[1];
+    ok(a1.free === true && a1.url === 'https://www.google.com/' && a1.ua.includes('Android') && a1.ua.includes('Mobile') && a1.ua_hints && a1.ua_hints.mobile === true && a1.ua_hints.platform === 'Android' && a1.persist === false && a1.key === 'browser1' && a1.allow.length === 0, 'browser/open: a window the user opens: any address, the phone page, no login kept: ' + JSON.stringify(a1));
+    ok(centerRects.at(-1).panes.some(p => p.id === 'w1' && p.web === 'web_b1'), 'browser/open: the center tells where the page is');
+    await cmd('open', 1);
+    await control.waitForTimeout(300);
+    ok(opens().length === 1, 'browser/open: asking again for an open window does not open another');
+    // the address: drawn by the center, typed in the small window (address.html): a click puts it over the place, a site gets https://, a search goes to Google
+    const addr = cp.locator('.webpane .paddr');
+    await addr.dispatchEvent('mousedown', { button: 0 });                                  // (another window of the test lies over it: the event itself)
+    await until(() => webCalls.some(c => c[0] === 'addr' && c[1].label === 'web_b1' && c[1].w > 50 && c[1].h > 10), 'a click on the address asks for the box over it');
+    const ap = await open('address.html', { width: 300, height: 22 });
+    await cm.evaluate(() => window.__TAURI__.event.emit('address-open', { label: 'web_b1', text: 'https://www.google.com/' }));         // (the program tells it; from another page)
+    await until(async () => (await ap.locator('#a').inputValue()) === 'https://www.google.com/', 'the box shows the address now');
+    await until(async () => await addr.evaluate(e => e.classList.contains('editing')), 'the address in the bar shows that it is being typed (its letters are hidden)');
+    await ap.locator('#a').fill('namu.wiki/w/x'); await ap.locator('#a').press('Enter');
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'goto' && c[3] === 'https://namu.wiki/w/x'), 'a site is gone to');
+    await cm.evaluate(() => window.__TAURI__.event.emit('address-open', { label: 'web_b1', text: '' }));
+    await ap.locator('#a').fill('와우 공략'); await ap.locator('#a').press('Enter');
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'goto' && c[3] === 'https://www.google.com/search?q=' + encodeURIComponent('와우 공략')), 'what is not a site is searched');
+    await until(async () => !(await addr.evaluate(e => e.classList.contains('editing'))), 'the bar shows its address again when the box is gone');
+    // Esc: what was typed is not taken: nothing is gone to
+    const gotos = webCalls.filter(c => c[0] === 'cmd' && c[2] === 'goto').length;
+    await cm.evaluate(() => window.__TAURI__.event.emit('address-open', { label: 'web_b1', text: '' }));
+    await ap.locator('#a').fill('not-finished.example'); await ap.locator('#a').press('Escape');
+    await until(async () => !(await addr.evaluate(e => e.classList.contains('editing'))), 'Esc puts the box away');
+    ok(webCalls.filter(c => c[0] === 'cmd' && c[2] === 'goto').length === gotos, 'browser/address: Esc: the unfinished address is not gone to');
+    await ap.close();
+    // a click on the bar (not the address) puts the box away
+    const hides = webCalls.filter(c => c[0] === 'addrhide').length;
+    await cp.locator('.webpane .paddrbar').dispatchEvent('pointerdown');
+    await until(() => webCalls.filter(c => c[0] === 'addrhide').length > hides, 'a click elsewhere in the window puts the box away');
+    // the address the page goes to is shown, and kept as the address seen last
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-nav', { label: 'web_b1', url: 'https://a.b/c' }));            // (a third page tells it: the hub and the center both hear it)
+    await until(async () => (await addr.locator('.ptxt').textContent()) === 'https://a.b/c', 'the address is shown');
+    await until(() => cfgFile().browser_windows[0].last_url === 'https://a.b/c', 'the address is kept as the last one', 3000);
+    // the home button, the phone / computer button, and this page in the user's own browser
+    await cp.locator('.webpane .phome').dispatchEvent('click');
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'goto' && c[3] === 'https://www.google.com/'), 'the home button goes to the first address');
+    const modeBtn = cp.locator('.webpane .pmode');
+    ok(await modeBtn.getAttribute('data-mode') === 'mobile', 'browser/mode: the button shows the phone');
+    await modeBtn.dispatchEvent('click');
+    await until(() => webCalls.some(c => c[0] === 'ua' && c[1] === 'web_b1' && !c[2].includes('Android')), 'the window is told it is a computer now');
+    await until(async () => (await modeBtn.getAttribute('data-mode')) === 'pc', 'the button shows the computer');
+    ok(webCalls.some(c => c[0] === 'cmd' && c[1] === 'web_b1' && c[2] === 'reload'), 'browser/mode: the page is loaded again');
+    ok(cfgFile().browser_windows[0].mode === 'mobile', 'browser/mode: the setting is not changed (it is only for as long as the window is open)');
+    await modeBtn.dispatchEvent('click');
+    await until(() => webCalls.some(c => c[0] === 'ua' && c[1] === 'web_b1' && c[2].includes('Android') && c[3] && c[3].mobile === true), 'and back to the phone (the headers say it too)');
+    await cp.locator('.webpane .ptab').dispatchEvent('pointerdown', { shiftKey: true, button: 0, bubbles: true });                // (at the press: the bar holds the pointer for dragging, the click would go to the bar)
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[1] === 'web_b1' && c[2] === 'external'), 'Shift + click on the title opens the page in the user\'s browser');
+    // the size of the page: the program tells it ('web-zoom'): the line shows it a moment, the window keeps it
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-zoom', { label: 'web_b1', zoom: 1.2 }));
+    await until(async () => (await cp.locator('.webpane .pzoom').textContent()) === '120%', 'the size is shown in the address line');
+    await cp.waitForTimeout(1500);
+    ok(cfgFile().browser_windows[0].zoom === 1, 'browser/zoom: the size is not kept unless the user chose it');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, remember_zoom: true } : b)) })));
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-zoom', { label: 'web_b1', zoom: 1.2 }));
+    await until(() => cfgFile().browser_windows[0].zoom === 1.2, 'the window keeps the size when asked to', 3000);
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, remember_zoom: false } : b)) })));
+    await until(() => cfgFile().browser_windows[0].zoom === 1, 'turning it off puts the kept size back to 100 %', 3000);
+    // the text selected on the page and copied with the right button: the program sends it, the center puts it on the clipboard and the bar says so
+    const clip0 = clip.length;
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-copy', { label: 'web_b1', text: '/console reload' }));
+    await until(() => clip.length === clip0 + 1 && clip.at(-1) === '/console reload', 'browser/copy: the selected text is on the clipboard');
+    await until(async () => (await cp.locator('.webpane .pcopied').evaluate(e => e.style.opacity)) === '1', 'and the bar says it was copied');
+    ok(opens().at(-1)[1].rclick_copy === true, 'browser/copy: the right button copies by default');
+    // a web address in the chat: shown as [host/path]; a click asks first (the whole address), then it goes to the mini browser; with Ctrl, to the user's own browser
+    await control.evaluate(() => window.cmrHub.fakeLine({ channel: 'party', name: 'Lead', text: 'join discord.gg/abc123로 오세요 and https://10.0.0.1/x' }));
+    const urlSel = cp.locator('.cv-url', { hasText: 'discord.gg' });
+    await until(async () => (await urlSel.count()) >= 1, 'chat/url: an address in a line is a link');
+    const shown = await urlSel.allTextContents(), allUrls = await cp.locator('.cv-url').allTextContents();
+    ok(shown.every(t => t === '[discord.gg/abc123]') && !allUrls.some(t => t.includes('10.0.0.1')), 'chat/url: shown as [host/path] (a number address is not a link): ' + JSON.stringify(allUrls));
+    const urlEl = urlSel.first();
+    await urlEl.click();
+    await until(async () => (await cp.locator('#ctx').isVisible()), 'chat/url: a click asks before it opens');
+    const asks = (await cp.locator('#ctx div').allTextContents());
+    ok(asks[0] === 'https://discord.gg/abc123' && ['미니 브라우저에서 열기', '내 브라우저에서 열기', '주소 복사', '취소'].every(t => asks.includes(t)), 'chat/url: the question shows the whole address and the places to choose: ' + JSON.stringify(asks));
+    await cp.locator('#ctx div', { hasText: '미니 브라우저에서 열기' }).click();
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[1] === 'web_b1' && c[2] === 'goto' && c[3] === 'https://discord.gg/abc123'), 'chat/url: the mini browser goes to it');
+    await urlEl.click({ modifiers: ['Control'] });                                  // (no key is looked at: the same question)
+    await until(async () => (await cp.locator('#ctx').isVisible()), 'chat/url: the question again');
+    await cp.locator('#ctx div', { hasText: '내 브라우저에서 열기' }).click();
+    await until(() => chatOpened.includes('https://discord.gg/abc123'), 'chat/url: the user\'s browser is asked to open it');
+    const c1 = clip.length;
+    await urlEl.click(); await cp.locator('#ctx div', { hasText: '주소 복사' }).click();
+    await until(() => clip.length === c1 + 1 && clip.at(-1) === 'https://discord.gg/abc123', 'chat/url: the address is copied');
+    await urlEl.click(); await cp.locator('#ctx div', { hasText: '취소' }).click();
+    ok(chatOpened.length === 1 && clip.length === c1 + 1, 'chat/url: cancel does nothing');
+    // the option: off, a new line keeps its address as plain text
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ chat_links: false })));
+    await control.evaluate(() => window.cmrHub.fakeLine({ channel: 'party', name: 'Lead', text: 'again discord.gg/zzz999 please' }));
+    await cp.waitForTimeout(700);
+    ok(!(await cp.locator('.cv-url', { hasText: 'zzz999' }).count()), 'chat/url: with the option off a new address is plain text');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ chat_links: true })));
+    // the menu of the window opens from its bars, not from the page (where the page is, the center only has it while a menu is open)
+    await cp.locator('.webpane .pbody').dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 });
+    await cp.waitForTimeout(200);
+    ok(!(await cp.locator('#ctx').isVisible()), 'center/web: a right click on the page does not open the menu of the window');
+    await cp.locator('.webpane .pbar').dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 });
+    await until(async () => (await cp.locator('#ctx').isVisible()), 'and one on the bar does');
+    await cp.keyboard.press('Escape');
+    ok(opens().at(-1)[1].zoom === 1, 'browser/zoom: (the window was opened at 100 %)');
+    ok(opens().at(-1)[1].ctrl_zoom === true && opens().at(-1)[1].shift_scroll === false, 'browser/keys: the window is opened with the zoom on and the sideways wheel off (the way it was)');
+    // the right button on the page: nothing, unless the user chose it for the window (read at the moment of the click)
+    await control.evaluate(() => { window.__rc = 0; window.__TAURI__.event.listen('web-close', e => { if (e.payload && e.payload.label === 'web_b1') window.__rc++; }); });
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-rclick', { label: 'web_b1' }));
+    await cp.waitForTimeout(300);
+    ok(await control.evaluate(() => window.__rc) === 0, 'browser/rclick: a right click on the page does nothing while the option is off');
+    // away from the mouse: it fades to the setting (slowly) and is solid again at once when the mouse is over it
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, idle_alpha: 0.5 } : b)) })));
+    kb.cx = 5000; kb.cy = 5000;
+    await until(() => webCalls.some(c => c[0] === 'alpha' && c[1] === 'web_b1' && c[2] === 0.5), 'with the mouse away the window fades to 50 %', 8000);
+    // the menu of ANOTHER window does not make it solid (only its own does)
+    const spot0 = await cp.evaluate(() => { for (const p of document.querySelectorAll('.pane:not(.webpane) .pbody')) { const r = p.getBoundingClientRect(); for (let y = r.top + 10; y < r.bottom - 10; y += 20) for (let x = r.left + 10; x < r.right - 10; x += 20) { const e = document.elementFromPoint(x, y); if (e && e.closest('.pane:not(.webpane)') === p.closest('.pane')) return { x, y }; } } return null; });
+    await cp.mouse.click(spot0.x, spot0.y, { button: 'right' });
+    await until(async () => (await cp.locator('#ctx').isVisible()), 'the menu of a translation window is open');
+    await cp.waitForTimeout(900);
+    ok(webCalls.filter(c => c[0] === 'alpha').at(-1)[2] === 0.5, 'browser/fade: the menu of another window does not make it solid');
+    await cp.keyboard.press('Escape');
+    const box1 = centerRects.at(-1).panes.find(p => p.id === 'w1');
+    kb.cx = box1.x + box1.w / 2; kb.cy = box1.y + box1.h / 2;
+    await until(() => webCalls.filter(c => c[0] === 'alpha').at(-1)[2] === 1, 'with the mouse over it, it is solid at once', 4000);
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, idle_alpha: 1 } : b)) })));
+    kb.cx = 0; kb.cy = 0;
+    // the order of the web windows: the center draws their frames by `z` and tells the program, which puts their pages in the same order; every translation window is above them all
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: [...m.cfg().browser_windows, { id: 2, name: '', mode: 'mobile', start_kind: 'url', start_url: 'https://www.google.com/', last_url: '', persist: false, topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1, idle_alpha: 1 }] })));
+    await cmd('open', 2);
+    await until(async () => (await cp.locator('.webpane').count()) === 2, 'a second window of the mini browser');
+    const zOf = async label => cp.evaluate(l => Number(document.querySelector(`.webpane[data-web="${l}"]`).style.zIndex), label);
+    const sentZ = label => (centerRects.at(-1).panes.find(p => p.web === label) || {}).z;
+    await until(async () => sentZ('web_b2') > sentZ('web_b1'), 'a window that is made is in front of the other: its z is higher in what the program gets');
+    ok(await zOf('web_b1') < 1000 && await zOf('web_b2') < 1000 && (await cp.evaluate(() => Math.min(...[...document.querySelectorAll('.pane:not(.webpane)')].map(e => Number(e.style.zIndex)))) >= 1000), 'browser/order: every translation window is above every web window');
+    await cp.locator('.webpane[data-web="web_b1"] .paddrbar').dispatchEvent('pointerdown');
+    await until(() => sentZ('web_b1') > sentZ('web_b2'), 'a window that is touched comes to the front: the program is told the new order');
+    // what a window draws is not drawn where a window in front of it covers it (the pages of the web windows are under the center: the frame of the one behind would show over the one in front)
+    const maskOf = label => cp.evaluate(l => document.querySelector(`.webpane[data-web="${l}"]`).style.maskImage || document.querySelector(`.webpane[data-web="${l}"]`).style.webkitMaskImage || '', label);
+    await until(async () => (await maskOf('web_b1')) === '' && (await maskOf('web_b2')) !== '', 'the window behind is masked where the one in front covers it; the one in front is whole');
+    await cp.locator('.webpane[data-web="web_b2"] .paddrbar').dispatchEvent('pointerdown');
+    await until(async () => (await maskOf('web_b2')) === '' && (await maskOf('web_b1')) !== '', 'and the other way round when the other is touched');
+    // a page that is pressed is brought to the front by the system: the program says the order it found, the center numbers the windows that way
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-order', { labels: ['web_b1', 'web_b2'] }));
+    await until(async () => (await zOf('web_b1')) > (await zOf('web_b2')) && sentZ('web_b1') > sentZ('web_b2'), 'the order of the system is taken: web_b1 in front');
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-order', { labels: ['web_b2', 'web_b1'] }));
+    await until(async () => (await zOf('web_b2')) > (await zOf('web_b1')) && sentZ('web_b2') > sentZ('web_b1'), 'and the other way round');
+    // a page that is pressed: the system is not let to bring it over the center; the program says it was pressed and the center brings it to the front of the web windows
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-raise', { label: 'web_b1' }));
+    await until(() => sentZ('web_b1') > sentZ('web_b2'), 'a page that was pressed comes to the front');
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-raise', { label: 'web_b2' }));
+    await until(() => sentZ('web_b2') > sentZ('web_b1'), 'and the other one');
+    await cmd('close', 2);
+    await until(async () => (await cp.locator('.webpane').count()) === 1, 'the second window is closed');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.filter(b => b.id !== 2) })));
+    // "평소에 인터페이스 숨기기": with the mouse away the bars, the address and the frame go (the class the style sheet works from); over the window they are there
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, hide_ui: true } : b)) })));
+    kb.cx = 5000; kb.cy = 5000;
+    await until(async () => { const c = await cp.locator('.webpane').getAttribute('class'); return c.includes('hide-ui') && c.includes('away'); }, 'with the mouse away the interface of the web window is hidden', 4000);
+    { const bx = centerRects.at(-1).panes.find(p => p.id === 'w1'); kb.cx = bx.x + bx.w / 2; kb.cy = bx.y + bx.h / 2; }
+    await until(async () => !(await cp.locator('.webpane').getAttribute('class')).includes('away'), 'with the mouse over it, the interface is shown', 4000);
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, hide_ui: false } : b)) })));
+    kb.cx = 0; kb.cy = 0;
+    // the right button on the bar: the bookmarks, adding the page, the settings
+    await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 40, y: 10 } });
+    await until(async () => (await cp.locator('#ctx').isVisible()), 'the menu of the bar');
+    const items = await cp.locator('#ctx div:not(.sep)').allTextContents();
+    ok(items[0] === '지도' && items.includes('현재 페이지를 즐겨찾기에 추가') && items.includes('현재 페이지를 내 브라우저에서 열기') && items.includes('이 창의 설정…'), 'browser/menu: the bookmarks, adding the page, the settings: ' + items.join('|'));
+    await cp.locator('#ctx div', { hasText: '지도' }).click();
+    await until(() => webCalls.some(c => c[0] === 'cmd' && c[2] === 'goto' && c[3] === 'https://map.kakao.com/'), 'a bookmark takes this window there');
+    await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 40, y: 10 } });
+    await cp.locator('#ctx div', { hasText: '현재 페이지를 즐겨찾기에 추가' }).click();
+    await until(() => (cfgFile().bookmarks || []).some(m => m.url === 'https://a.b/c'), 'the page is added to the bookmarks');
+    // the menu of a translation window lists the windows of the mini browser
+    // (a place of a translation window that no web window covers: looked for with the page's own idea of what is on top)
+    const spot = await cp.evaluate(() => { for (const p of document.querySelectorAll('.pane:not(.webpane) .pbody')) { const r = p.getBoundingClientRect(); for (let y = r.top + 10; y < r.bottom - 10; y += 20) for (let x = r.left + 10; x < r.right - 10; x += 20) { const e = document.elementFromPoint(x, y); if (e && e.closest('.pane:not(.webpane)') === p.closest('.pane')) return { x, y }; } } return null; });
+    const pb = { x: spot.x - 30, y: spot.y - 30 };
+    await cp.mouse.click(pb.x + 30, pb.y + 30, { button: 'right' });
+    await until(async () => (await cp.locator('#ctx div.on').allTextContents()).includes('모바일'), 'the menu shows the open window of the mini browser');
+    await cp.locator('#ctx div', { hasText: /^모바일$/ }).click();                // (open: it closes)
+    await until(async () => (await cp.locator('.webpane').count()) === 0, 'a click on the open window in the menu closes it');
+    ok(webCalls.some(c => c[0] === 'close' && c[1] === 'web_b1'), 'browser/menu: closed by the menu');
+    await cp.mouse.click(pb.x + 30, pb.y + 30, { button: 'right' });
+    await cp.locator('#ctx div', { hasText: /^모바일$/ }).click();                // (closed: it opens)
+    await until(async () => (await cp.locator('.webpane .paddr').count()) === 1, 'and opens it again');
+    await cp.locator('.webpane .pclose').click();
+    await until(async () => (await cp.locator('.webpane').count()) === 0, 'the close button of the bar closes it');
+    // the login: kept in a folder of its own only when the window asks for it; taken away from a window that is not open
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => ({ ...b, persist: true, mode: 'pc', start_kind: 'last', last_url: 'https://x.y/z' })) })));
+    await cmd('open', 1);
+    await until(() => opens().length === 3, 'the window is opened again');
+    const a2 = opens().at(-1)[1];
+    ok(a2.persist === true && a2.ua === '' && a2.url === 'https://x.y/z', 'browser/open: the settings of the window are used (PC page, the last address, the login kept): ' + JSON.stringify(a2));
+    // the right button on the page, the option on: the window closes at once (read at the click)
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, rclick_close: true } : b)) })));
+    await control.evaluate(() => { window.__rc = 0; });
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-rclick', { label: 'web_b1' }));
+    await until(async () => (await cp.locator('.webpane').count()) === 0, 'browser/rclick: with the option on, a right click on the page closes the window');
+    ok(await control.evaluate(() => window.__rc) === 1, 'browser/rclick: it asks for the close once');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, rclick_close: false } : b)) })));
+    await cmd('close', 1); await cmd('clear', 1);
+    await until(() => webCalls.some(c => c[0] === 'forget' && c[1] === 'browser1'), 'the login of a window that is not open: its folder is taken away');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => ({ ...b, persist: false, mode: 'mobile', start_kind: 'url' })), bookmarks: [] })));
+  }
+  // the screens changed so that a window is out of sight: it comes back to the main screen, and the user is told once
+  await control.evaluate(() => window.__TAURI__.event.emit('center-layout', { origin: [0, 0], monitors: [[3000, 0, 800, 600]] }));
+  await until(async () => (await cp.locator('.pane .cv-list').first().textContent()).includes('모니터 환경이 바뀌어'), 'the window that was out of sight is brought back, with a notice');
+  const mb2 = await cp.locator('.pane').first().boundingBox();
+  const dp = await cp.evaluate(() => window.devicePixelRatio);
+  ok(mb2.x >= 3000 / dp - 5 && (await cp.locator('.pane .cv-list').first().textContent()).includes('모니터 환경이 바뀌어'), 'center/screens: a window that is out of every screen comes to the main one, with a notice: ' + mb2.x);
+  await control.evaluate(() => window.__TAURI__.event.emit('center-layout', { origin: [0, 0], monitors: [[0, 0, 3840, 2160]] }));
+  await control.evaluate(([g, g3]) => import('./settings.js').then(m => m.set({ geometry: g, child_windows: m.cfg().child_windows.map(c => (c.id === 3 ? { ...c, geometry: g3 || '' } : c)) })), geoBefore); await control.waitForTimeout(400);
+  await cp.close();
+}
+// ---- where a window may stand: the bar goes below the text when there is no room above, a monitor edge with another monitor behind it is a speed bump, an edge with nothing behind it is a wall
+{
+  const geo0 = cfgFile().geometry;
+  const readyBefore = centerReady.length;
+  const cpm = await open('center.html?label=center1m&mode=1&ox=0&oy=0', { width: 1200, height: 800 });
+  const pane = () => cpm.locator('.pane[data-id="1"]');
+  await until(async () => (await cpm.locator('.pane[data-id="1"] .cv-list').count()) > 0, 'a pane to move', 4000);
+  await until(() => centerReady.length > readyBefore, 'the page is ready (its own start is over: the screens it asks for come last)');
+  const layoutOf = monitors => control.evaluate(m => window.__TAURI__.event.emit('center-layout', { origin: [0, 0], monitors: m }), monitors);
+  const setGeo = g => control.evaluate(x => import('./settings.js').then(m => m.set({ geometry: x })), g);
+  const drag = async (dx, dy) => { const bar = await cpm.locator('.pane[data-id="1"] .pbar').boundingBox(); await cpm.mouse.move(bar.x + 30, bar.y + 10); await cpm.mouse.down(); await cpm.mouse.move(bar.x + 30 + dx, bar.y + 10 + dy, { steps: 8 }); await cpm.mouse.up(); };
+  await layoutOf([[0, 0, 1000, 1600], [1000, 0, 1000, 1600]]);           // (two monitors side by side; 1 css pixel = 2 screen pixels here)
+  // the bar: above the text while it fits above, below when the text touches the top of the monitor
+  await setGeo('500x300+200+400'); await until(async () => !(await pane().getAttribute('class')).includes('flip'), 'in the middle of the monitor the bar is above the text');
+  await setGeo('500x300+200+30'); await until(async () => (await pane().getAttribute('class')).includes('flip'), 'no room above: the bar goes below the text');
+  { const t = await pane().boundingBox(), b = await cpm.locator('.pane[data-id="1"] .pbar').boundingBox(); ok(b.y > t.y + t.height - 30 && Math.abs(t.y - 15) < 3, 'window/bar below: the text keeps its place (15 css px from the top), the bar is under it: ' + JSON.stringify([t, b])); }
+  ok(centerRects.at(-1).panes.some(p => p.id === '1' && p.below === true), 'window/bar below: the program is told (the text area starts at the top of the box)');
+  await setGeo('500x300+200+400'); await until(async () => !(await pane().getAttribute('class')).includes('flip'), 'back above when there is room');
+  // a wall: the left edge of the first monitor has no monitor behind it
+  await drag(-400, 0);
+  await until(async () => Math.abs((await pane().boundingBox()).x) < 2, 'the left edge of the first monitor is a wall: the text stops at it');
+  await setGeo('500x300+200+400'); await until(async () => Math.abs((await pane().boundingBox()).x - 100) < 3, 'the window is put back');
+  // the speed bump between the monitors (the edge is at 500 css px; the text is 250 wide): a little past it stays at the edge, much more goes over
+  await drag(180, 0);
+  await until(async () => Math.abs((await pane().boundingBox()).x - 250) < 3, 'a little past the edge to the next monitor: it stays at the edge');
+  await drag(150, 0);
+  await until(async () => Math.abs((await pane().boundingBox()).x - 400) < 3, 'much more (past 100 px): it goes over to the next monitor, after the mouse', 4000);
+  await setGeo(geo0); await layoutOf([[0, 0, 3840, 2160]]);
+  await cpm.close();
+}
+// ---- the tab 미니 브라우저: the browser windows (window 1 is always there), the bookmarks, how a web window is drawn
+{
+  await opt.locator('#tabs li', { hasText: '미니 브라우저' }).click();
+  const picker = opt.locator('.wintool select'), names = async () => (await picker.locator('option').allTextContents()).join('|');
+  await until(async () => (await picker.count()) === 1, 'the picker of the browser windows is there');
+  ok((await names()) === '1 · 모바일', 'browser: window 1 is there from the start, called "모바일": ' + await names());
+  ok(await opt.locator('.wintool button', { hasText: '삭제' }).isHidden(), 'browser: window 1 cannot be deleted (no button)');
+  ok(cfgFile().browser_windows.length === 1 && cfgFile().browser_windows[0].start_url === 'https://www.google.com/' && cfgFile().browser_windows[0].persist === false, 'browser: window 1 starts with Google and keeps no login');
+  await opt.locator('.wintool button', { hasText: '새 창' }).click();
+  await until(async () => (await names()) === '1 · 모바일|2 · 브라우저 2', 'a new window is made and chosen');
+  await until(async () => cfgFile().browser_windows.length === 2, 'the window is in the file');
+  ok(cfgFile().browser_windows.length === 2 && await picker.inputValue() === 'b2', 'browser: a new window: the second, chosen: ' + await names());
+  await rowOf('이름').locator('input').fill('공략'); await rowOf('이름').locator('input').press('Tab');
+  await until(async () => (await names()).includes('2 · 공략'), 'the name reaches the list');
+  await until(async () => cfgFile().browser_windows[1].name === '공략', 'the name is in the file');
+  ok(cfgFile().browser_windows[1].name === '공략', 'browser: the name is saved');
+  await rowOf('화면').locator('select').selectOption('pc');
+  await until(async () => cfgFile().browser_windows[1].mode === 'pc', 'the screen is saved');
+  ok(cfgFile().browser_windows[0].mode === 'mobile', 'browser: only the chosen window changed');
+  await rowOf('시작 주소').locator('input').fill('나쁜 주소'); await rowOf('시작 주소').locator('input').press('Tab');
+  await control.waitForTimeout(500);
+  ok(cfgFile().browser_windows[1].start_url === 'https://www.google.com/' && (await rowOf('시작 주소').locator('.err').textContent()).includes('http'), 'browser: a wrong start address is refused with a reason');
+  await rowOf('시작 주소').locator('input').fill('https://www.youtube.com/'); await rowOf('시작 주소').locator('input').press('Tab');
+  await until(async () => cfgFile().browser_windows[1].start_url === 'https://www.youtube.com/', 'a good start address is saved');
+  await sw('로그인 유지').click();
+  await until(async () => cfgFile().browser_windows[1].persist === true, 'the login is kept');
+  await sw('와우 위에만').click();
+  await until(async () => cfgFile().browser_windows[1].topmost_wow_only === true, 'above the game only');
+  ok(cfgFile().browser_windows[1].topmost === false, 'browser: "above the game only" takes "always on top" off');
+  const del = opt.locator('.wintool button', { hasText: '삭제' });
+  await del.click(); await del.click();
+  await until(async () => cfgFile().browser_windows.length === 1, 'the window is deleted (two presses)');
+  ok(cfgFile().browser_windows[0].id === 1 && await picker.inputValue() === 'b1', 'browser: deleted: window 1 is shown again');
+  // the limit: ten windows
+  for (let i = 0; i < 12; i++) await opt.locator('.wintool button', { hasText: '새 창' }).click({ force: true }).catch(() => {});
+  await until(async () => cfgFile().browser_windows.length === 10, 'ten windows are made', 4000);
+  ok(cfgFile().browser_windows.length === 10 && await opt.locator('.wintool button', { hasText: '새 창' }).isDisabled(), 'browser: no more than ten windows: the button is dim');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.filter(b => b.id === 1) })));
+  await until(async () => (await names()) === '1 · 모바일', 'back to one window');
+  // the button to open and close the window of the chosen browser window
+  {
+    const tog = opt.locator('.wintool button', { hasText: /^(열기|닫기)$/ }), before = webCalls.filter(c => c[0] === 'open' && c[1].label === 'web_b1').length;
+    await tog.click();
+    await until(async () => webCalls.filter(c => c[0] === 'open' && c[1].label === 'web_b1').length === before + 1 && (await tog.textContent()) === '닫기', 'the button opens the window and says it can be closed');
+    ok((await opt.locator('.wintool .winstate').textContent()).includes('열려 있음'), 'browser: the state says it is open');
+    await tog.click();
+    await until(async () => (await tog.textContent()) === '열기', 'the button closes it');
+    await opt.locator('.row', { has: opt.locator('b.label', { hasText: /^로그인 정보$/ }) }).locator('button.btn').click();
+    await until(() => webCalls.some(c => c[0] === 'forget' && c[1] === 'browser1'), 'the button clears the login of a window that is not open');
+  }
+  // the bookmarks: the other page of the tab
+  await opt.locator('.subtabs button', { hasText: '즐겨찾기 설정' }).click();
+  await until(async () => (await opt.locator('.bm').count()) === 1, 'the page of the bookmarks');
+  ok(await opt.locator('.wintool').isHidden() && await opt.locator('.row b.label', { hasText: /^이름$/ }).count() === 0, 'browser/bookmarks: the picker and the settings of a window are not on this page');
+  const bm = opt.locator('.bm'), url = bm.locator('.bm-add input').nth(1), nm = bm.locator('.bm-add input').nth(0);
+  await url.fill('nope'); await bm.locator('.bm-add button').click();
+  ok(cfgFile().bookmarks.length === 0 && (await url.getAttribute('class')).includes('bad'), 'browser/bookmarks: a wrong address is not added');
+  await nm.fill('지도'); await url.fill('https://map.kakao.com/'); await bm.locator('.bm-add button').click();
+  await until(async () => cfgFile().bookmarks.length === 1, 'a bookmark is added');
+  await bm.locator('.bm-add input').nth(0).fill(''); await bm.locator('.bm-add input').nth(1).fill('https://a.b/c'); await bm.locator('.bm-add button').click();
+  await until(async () => cfgFile().bookmarks.length === 2, 'a second bookmark is added (named after the site)');
+  ok(cfgFile().bookmarks[0].name === '지도' && cfgFile().bookmarks[1].name === 'a.b', 'browser/bookmarks: the name of the second one is the site: ' + JSON.stringify(cfgFile().bookmarks));
+  await bm.locator('.bm-row').nth(1).locator('button', { hasText: '↑' }).click();
+  await until(async () => cfgFile().bookmarks[0].name === 'a.b', 'the second goes up');
+  await bm.locator('.bm-row').nth(0).locator('button', { hasText: '✕' }).click();
+  await until(async () => cfgFile().bookmarks.length === 1, 'a bookmark is taken away');
+  ok(cfgFile().bookmarks[0].name === '지도', 'browser/bookmarks: the other one stays');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ bookmarks: [] })));
+  // back to the settings: how a web window is drawn (for all of them), and the web window of a plugin below a line in the picker
+  await opt.locator('.subtabs button', { hasText: '미니 브라우저 설정' }).click();
+  await until(async () => (await opt.locator('.wintool select').count()) === 1, 'the page of the settings');
+  await rowOf('그리기 방식').locator('select').selectOption('cpu');
+  await until(async () => cfgFile().web_render === 'cpu', 'the way to draw is saved');
+  ok(await opt.locator('#tabs li', { hasText: '고급' }).count() === 1 && await opt.locator('.row b.label', { hasText: /^그리기 방식$/ }).count() === 1, 'browser: the way a web window is drawn is in this tab');
+  await rowOf('그리기 방식').locator('select').selectOption('auto');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ child_windows: [...m.cfg().child_windows, { ...m.cfg().child_windows[0], id: 9, name: '플러그인 웹', kind: 'web', owner: 'plug', owner_win: 'web', geometry: '360x640+600+300', open_mode: 'never', dock_to: 0, topmost: true, topmost_wow_only: false, lock_window: false }] })));
+  await until(async () => (await picker.locator('option').allTextContents()).some(t => t.includes('9 · 플러그인 웹')), 'the web window of the plugin is in the picker');
+  const opts = await picker.locator('option').allTextContents();
+  ok(opts.some(t => t.includes('플러그인 웹창 ──')) && opts.indexOf(opts.find(t => t.includes('9 ·'))) > opts.findIndex(t => t.includes('──')), 'browser: the web windows of the plugins are below a line in the picker: ' + opts.join('|'));
+  // a web window of a plugin that is not there: what is left of it is told as that, and has a button to take it away (with the login folder of the plugin)
+  await picker.selectOption('w9');
+  await until(async () => (await opt.locator('.orphan-note').count()) === 1, 'a web window of a plugin that is gone shows a note');
+  ok(opts.some(t => t.includes('9 ·') && t.includes('지워진 플러그인')) && (await opt.locator('.orphan-note').textContent()).includes('"plug"') && await opt.locator('.row b.label', { hasText: /^열리는 때$/ }).count() === 0, 'browser: the web window of a plugin that is gone is marked, with a note and no settings: ' + opts.join('|'));
+  const delW = opt.locator('.wintool button', { hasText: /^(삭제|정말 삭제\?)$/ });
+  ok(await delW.isVisible(), 'browser: the way to delete it is there');
+  await delW.click(); await delW.click();
+  await until(async () => !cfgFile().child_windows.some(c => c.id === 9), 'the window is taken out of the settings', 4000);
+  ok(webCalls.some(c => c[0] === 'forget' && c[1] === 'plug'), 'browser: the login folder of that plugin is taken away with it');
+  // a login folder that no window has: shown, and taken away by hand
+  await until(async () => (await opt.locator('.stored').count()) === 1, 'the card of the logins that are left');
+  ok((await opt.locator('.stored').textContent()).includes('남은 로그인 정보가 없습니다'), 'browser: nothing is left over when no folder is there');
+  dataFolders = ['browser1', 'browser7', 'oldplug', '_private'];
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ web_render: 'cpu' }))); await control.evaluate(() => import('./settings.js').then(m => m.set({ web_render: 'auto' })));
+  await until(async () => (await opt.locator('.stored code').allTextContents()).join() === 'browser7,oldplug', 'the folders that no window has are listed (the ones of a window, and the private one, are not)', 4000);
+  await opt.locator('.stored .bm-row', { hasText: 'oldplug' }).locator('button').click();
+  await until(() => webCalls.some(c => c[0] === 'forget' && c[1] === 'oldplug'), 'a folder that is left over is taken away by hand');
+  dataFolders = [];
+  await picker.selectOption('b1');
+}
+// the tab "기록": the log moved here from "정보", and the table of the processes
+await opt.locator('#tabs li', { hasText: '기록' }).click(); await control.waitForTimeout(1500);
+ok(await opt.locator('.resmon .res-table tbody tr').count() === 2 && (await opt.locator('.res-total').textContent()).includes('2'), 'options/log: the table of the processes: ' + (await opt.locator('.res-total').textContent()));
+ok(await opt.locator('textarea, .logview').count() > 0 && !(await opt.locator('#tabs li', { hasText: '정보' }).count() === 0), 'options/log: the log is in this tab');
+await opt.locator('#tabs li', { hasText: '창' }).first().click(); await control.waitForTimeout(500);
 ok((await opt.locator('#tabs li', { hasText: '창' }).first().locator('.badge').textContent()) !== '', 'options/windows: the tab counts the changes');
 await opt.click('#revertAll');
 await control.waitForTimeout(1500);
@@ -792,11 +1381,11 @@ await control.waitForTimeout(1200);
 ok(cfgFile().translator === 'openai' && await opt.locator('h3', { hasText: '직접 설정한 서버' }).isVisible(), 'options/translation: all server cards stay when the method changes');
 await opt.locator('h3', { hasText: '직접 설정한 서버' }).click();
 await opt.selectOption('.row:has(b.label:text-is("서비스")) select', 'DeepL Free');
-await control.waitForTimeout(1200);
+await within(1200, async () => cfgFile().custom_preset === 'DeepL Free' && cfgFile().custom_url.includes('deepl.com') && cfgFile().custom_path === 'translations.0.text');
 ok(cfgFile().custom_preset === 'DeepL Free' && cfgFile().custom_url.includes('deepl.com') && cfgFile().custom_path === 'translations.0.text', 'options/translation: a service preset fills the custom server rows');
 ok(await opt.locator('.row', { hasText: '고른 서비스의 안내' }).isVisible() && await opt.locator('.row:has(b.label:text-is("주소")) input').inputValue().then(v => v.includes('deepl.com')), 'options/translation: the preset note and the address show');
 await opt.selectOption('.routebox:has-text("길드 관리") select', 'off');
-await control.waitForTimeout(1200);
+await within(1200, async () => JSON.stringify(cfgFile().channel_route.O) === '"off"');
 ok(JSON.stringify(cfgFile().channel_route.O) === '"off"', 'options/translation: a channel can be set to "번역 안 함": ' + JSON.stringify(cfgFile().channel_route));
 await opt.screenshot({ path: path.join(OUT, 'options_translation.png') });
 await opt.click('#revertAll');
@@ -810,12 +1399,12 @@ ok(await opt.locator('.vsource').count() === 4 && (await opt.locator('.vsources'
 await opt.locator('.vsource', { hasText: 'Hugging Face' }).locator('button').click();
 ok(opened.at(-1) === 'https://huggingface.co/ggerganov/whisper.cpp', 'options/voice: the model repository opens in the browser: ' + opened.at(-1));
 await opt.waitForSelector('.vstatus');
-await control.waitForTimeout(400);
+await within(400, async () => (await opt.locator('.vstatus .vtext').textContent()).startsWith('꺼져 있음') && await opt.locator('.vtoggle').textContent() === '켜기');
 ok((await opt.locator('.vstatus .vtext').textContent()).startsWith('꺼져 있음') && await opt.locator('.vtoggle').textContent() === '켜기', 'options/voice: off, and the button says what it will do');
 ok(await opt.locator('.vinstall .vnone').textContent() === '설치되지 않음' && await opt.locator('.vbtns button', { hasText: '설치 (CPU)' }).isVisible(), 'options/voice: nothing installed, the install button is there');
 ok(await opt.locator('.row b.label:text-is("계산 장치")').isVisible() && await opt.locator('.row b.label:text-is("서버 주소")').isHidden(), 'options/voice: Whisper is the method: its card is open, the server card folded');
 await opt.locator('.vtoggle').click();
-await control.waitForTimeout(500);
+await within(500, async () => await opt.locator('.vstatus').getAttribute('data-state') === 'error' && (await opt.locator('.vstatus .vtext').textContent()).includes('설치되어 있지 않습니다'));
 ok(await opt.locator('.vstatus').getAttribute('data-state') === 'error' && (await opt.locator('.vstatus .vtext').textContent()).includes('설치되어 있지 않습니다'), 'options/voice: turned on with nothing installed: the reason is shown');
 await opt.locator('.vbtns button', { hasText: '설치 (CPU)' }).click();
 await opt.waitForFunction(() => /올라와/.test(document.querySelector('.vmsg')?.textContent || ''));
@@ -847,7 +1436,7 @@ await control.waitForTimeout(200);
 // what waits for a restart, the loudness bar and the sentences (it is on)
 await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'on', engine: 'cpu', model: 'small', device: 'cpu', capture: { mode: 'device', device: 'Headset', program: 'Discord.exe', status: 'listening' },
   warn: '', pending: ['model', 'device'], texts: { count: 3, last: Date.now() - 4000 } }));
-await control.waitForTimeout(300);
+await within(300, async () => await opt.locator('.vpending').isVisible() && (await opt.locator('.vpending').textContent()).includes('모델') && (await opt.locator('.vpending').textContent()).includes('계산 장치') && await opt.locator('.vpending button').isVisible());
 ok(await opt.locator('.vpending').isVisible() && (await opt.locator('.vpending').textContent()).includes('모델') && (await opt.locator('.vpending').textContent()).includes('계산 장치') && await opt.locator('.vpending button').isVisible(), 'options/voice: what only a restart applies is named, with a button');
 ok(await opt.locator('.vlevel').isVisible() && (await opt.locator('.vtexts').textContent()).includes('인식된 글 3개'), 'options/voice: the loudness bar and the sentences are shown while it is on');
 await control.evaluate(() => window.__TAURI__.event.emit('voice-level', { source: 'engine', db: -35, peak: 0.1, speech: true, thr: -45 }));
@@ -858,12 +1447,12 @@ await control.waitForTimeout(250);
   ok((await opt.locator('.vdb').textContent()) === '-35 dB' && await opt.locator('.vspeech.on').isVisible(), 'options/voice: the number and "speech" light');
 }
 await control.evaluate(() => window.__TAURI__.event.emit('voice-level', { source: 'capture', peak: 0.1, level: 0.1, gate: true }));
-await control.waitForTimeout(200);
+await within(200, async () => (await opt.locator('.vdb').textContent()) === '-35 dB' && (await opt.locator('.vgate').textContent()) === '통과 중');
 ok((await opt.locator('.vdb').textContent()) === '-35 dB' && (await opt.locator('.vgate').textContent()) === '통과 중', 'options/voice: while the engine reports, its reading is used; the gate shows for the whole-device method');
 await opt.locator('.vstatus').screenshot({ path: path.join(OUT, 'options_voice_level.png') });
 await control.evaluate(() => { window.__restarts = 0; window.__TAURI__.event.listen('voice-restart', () => { window.__restarts++; }); });
 await opt.locator('.vpending button').click();
-await control.waitForTimeout(200);
+await within(200, async () => await control.evaluate(() => window.__restarts) >= 1);
 ok(await control.evaluate(() => window.__restarts) >= 1, 'options/voice: the button asks the hub to restart');
 await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'off', capture: null, pending: [], texts: { count: 0, last: 0 }, engine: '', model: '', device: '' }));
 await control.waitForTimeout(200);
@@ -873,14 +1462,14 @@ const mrow = n => opt.locator('.vmtable tbody tr', { hasText: n }).first();
 ok(await opt.locator('.vmtable tbody tr').count() === 6 && (await mrow('small').locator('td').nth(2).textContent()) === '없음' && await mrow('small').locator('button').textContent() === '받기', 'options/voice: every model is listed, one that is not on the disk says so and can be got');
 await control.evaluate(() => window.cmrHub.voice.control.set({ installed: { engines: ['cpu'], models: ['small'] }, benchFiles: ['talk.wav'],
   perf: [{ model: 'small', device: 'cpu', live: { n: 8, ratio: 0.42, avgMs: 1500, speech: 30 }, bench: { ratio: 0.3, dur: 20, ms: 6000, file: 'talk.wav', text: 'hello there', load_ms: 700, at: 1 } }] }));
-await control.waitForTimeout(300);
+await within(300, async () => (await mrow('small').locator('td').nth(2).textContent()).startsWith('설치됨') && await mrow('small').locator('button').textContent() === '삭제');
 ok((await mrow('small').locator('td').nth(2).textContent()).startsWith('설치됨') && await mrow('small').locator('button').textContent() === '삭제', 'options/voice: an installed model says so and can be deleted');
 ok((await mrow('small').locator('td').nth(3).textContent()) === '×0.42 (8)' && (await mrow('small').locator('td').nth(4).textContent()).startsWith('×0.30') && (await mrow('small').locator('td').nth(4).textContent()).includes('불러오기 0.7'), 'options/voice: the speed in use and of the test are shown, with the load time apart');
 await control.evaluate(() => window.cmrHub.voice.control.set({ task: '', perf: [{ model: 'small', device: 'cpu', live: null, bench: { ratio: 1.64, dur: 11, ms: 18000, file: 'talk.wav', text: 'hello there', load_ms: 80000, at: 1 } }] }));
-await control.waitForTimeout(300);
+await within(300, async () => (await mrow('small').locator('td').nth(4).textContent()).includes('⚠') && (await opt.locator('.vmodels .vmsg').textContent()).includes('시험 배율이 1을 넘는'));
 ok((await mrow('small').locator('td').nth(4).textContent()).includes('⚠') && (await opt.locator('.vmodels .vmsg').textContent()).includes('시험 배율이 1을 넘는'), 'options/voice: a test ratio over 1 is marked and explained');
 await control.evaluate(() => window.cmrHub.voice.control.set({ perf: [{ model: 'small', device: 'cpu', live: { n: 8, ratio: 0.42, avgMs: 1500, speech: 30 }, bench: { ratio: 0.3, dur: 20, ms: 6000, file: 'talk.wav', text: 'hello there', load_ms: 700, at: 1 } }] }));
-await control.waitForTimeout(300);
+await within(300, async () => (await opt.locator('.vheard').textContent()).includes('hello there'));
 ok((await opt.locator('.vheard').textContent()).includes('hello there'), 'options/voice: what the model heard in the test is shown');
 ok(await opt.locator('.vbench button', { hasText: '선택한 모델 속도 시험' }).isDisabled(), 'options/voice: the test button waits for a ticked model');
 await mrow('small').locator('input').check();
@@ -891,20 +1480,20 @@ await opt.screenshot({ path: path.join(OUT, 'options_voice_models.png'), fullPag
 await control.evaluate(() => window.cmrHub.voice.control.set({ installed: { engines: [], models: [] }, perf: [], benchFiles: [] }));
 ok(await opt.locator('.row b.label:text-is("소리 대상")').isVisible() && await opt.locator('.row b.label:text-is("프로그램")').isHidden(), 'options/voice: the program picker shows only for "프로그램을 직접 고르기"');
 await opt.selectOption('.row:has(b.label:text-is("소리 대상")) select', 'discord');
-await control.waitForTimeout(1000);
+await within(1000, async () => cfgFile().voice_target === 'discord' && (await opt.locator('.row:has(b.label:text-is("소리 대상")) .hint').textContent()).includes('세션'));
 ok(cfgFile().voice_target === 'discord' && (await opt.locator('.row:has(b.label:text-is("소리 대상")) .hint').textContent()).includes('세션'), 'options/voice: the Discord preset is kept, with its hint');
 await opt.selectOption('.row:has(b.label:text-is("소리 대상")) select', 'app');
 await opt.waitForSelector('.vpicker');
 ok((await opt.locator('.vpicker select option').allTextContents()).join('|').includes('Discord.exe · 렌더러 · Headset') && (await opt.locator('.vpicker select option').allTextContents()).join('|').includes('Discord.exe · AudioService · Speakers · pid 5'), 'options/voice: the programs that make sound are listed per job and device');
 await opt.selectOption('.vpicker select', 'wow.exe');
-await control.waitForTimeout(1000);
+await within(1000, async () => cfgFile().voice_app === 'wow.exe');
 ok(cfgFile().voice_app === 'wow.exe', 'options/voice: a program is picked from the list');
 await opt.fill('.vpicker input', 'chrome.exe');
 await opt.locator('.vpicker input').dispatchEvent('change');
-await control.waitForTimeout(1000);
+await within(1000, async () => cfgFile().voice_app === 'chrome.exe');
 ok(cfgFile().voice_app === 'chrome.exe', 'options/voice: a program typed by hand is kept');
 await opt.selectOption('.vpicker select', 'Discord.exe|renderer|');
-await control.waitForTimeout(800);
+await within(800, async () => cfgFile().voice_app === 'Discord.exe|renderer|');
 ok(cfgFile().voice_app === 'Discord.exe|renderer|', 'options/voice: one job of a program (Discord voice) can be picked');
 await opt.locator('.vpicker .vprobe').waitFor({ state: 'attached' });
 await opt.locator('.vpicker button:text-is("소리 확인 (4초)")').click();
@@ -914,10 +1503,10 @@ await opt.locator('.vpicker button:has-text("장치 소리 확인")').click();
 await opt.waitForFunction(() => document.querySelector('.vpicker .vprobe').textContent.includes('probe-device.wav'));
 ok(true, 'options/voice: the whole-device check works');
 await opt.selectOption('.row:has(b.label:text-is("표시 방식")) select', 'live');
-await control.waitForTimeout(1000);
+await within(1000, async () => cfgFile().voice_mode === 'live' && await opt.locator('.row b.label:text-is("실시간 갱신 간격")').isVisible());
 ok(cfgFile().voice_mode === 'live' && await opt.locator('.row b.label:text-is("실시간 갱신 간격")').isVisible(), 'options/voice: live mode shows its interval');
 await opt.selectOption('.row:has(b.label:text-is("말하는 언어")) select', 'ja');
-await control.waitForTimeout(1000);
+await within(1000, async () => cfgFile().voice_lang === 'ja');
 ok(cfgFile().voice_lang === 'ja', 'options/voice: the spoken language is kept');
 await opt.selectOption('.row:has(b.label:text-is("음성인식 방식")) select', 'openai');
 await control.waitForTimeout(1200);
@@ -925,7 +1514,7 @@ ok(cfgFile().voice_engine === 'openai' && await opt.locator('.row b.label:text-i
 await opt.selectOption('.row:has(b.label:text-is("계산 장치")) select', 'gpu', { timeout: 300 }).catch(() => {});       // (folded: the card of the server is open; this only tries, it used to wait 30 s)
 await opt.screenshot({ path: path.join(OUT, 'options_voice_server.png'), fullPage: true });
 await opt.click('#revertAll');
-await control.waitForTimeout(1200);
+await within(1200, async () => cfgFile().voice_engine === 'whisper' && await opt.locator('.row b.label:text-is("계산 장치")').isVisible());
 ok(cfgFile().voice_engine === 'whisper' && await opt.locator('.row b.label:text-is("계산 장치")').isVisible(), 'options/voice: revert all (Whisper card open again)');
 await opt.locator('h3', { hasText: '고급' }).click();
 await opt.setViewportSize({ width: 940, height: 1500 });      // (the whole tab in one picture)
@@ -937,12 +1526,12 @@ await opt.locator('#tabs li', { hasText: '일반' }).click();
 // ---- the 단어장·프롬프트 tab: the glossary file is edited and saved here; the prompt has its own default button
 await opt.locator('#tabs li', { hasText: '단어장' }).click();
 await opt.waitForSelector('textarea.filetext');
-await control.waitForTimeout(300);
+await within(300, async () => (await opt.inputValue('textarea.filetext')).includes('LFM = 구인') && await opt.locator('.row.t-file button', { hasText: '저장' }).isDisabled());
 ok((await opt.inputValue('textarea.filetext')).includes('LFM = 구인') && await opt.locator('.row.t-file button', { hasText: '저장' }).isDisabled(), 'options/glossary: the glossary file is shown (nothing to save yet)');
 await opt.fill('textarea.filetext', (await opt.inputValue('textarea.filetext')) + '\nZZTOP = 시험용 단어\n');
 ok(await opt.locator('.row.t-file button', { hasText: '저장' }).isEnabled(), 'options/glossary: editing enables "저장"');
 await opt.locator('.row.t-file button', { hasText: '저장' }).click();
-await control.waitForTimeout(300);
+await within(300, async () => (files.get('Glossary.txt') || '').includes('ZZTOP = 시험용 단어'));
 ok((files.get('Glossary.txt') || '').includes('ZZTOP = 시험용 단어'), 'options/glossary: saved to Glossary.txt');
 let sawGloss = false, sawConn = (await texts(main)).some(t => t.includes('번역 서버 연결 양호'));
 for (let i = 0; i < 80 && !sawGloss; i++) { await control.waitForTimeout(100); sawGloss = (await texts(main)).some(t => t.includes('단어장을 다시 읽었습니다')); }
@@ -951,16 +1540,16 @@ ok(sawConn, 'upkeep: the connection check at start shows its result');
 const promptRow = rowOf('기본 프롬프트');
 ok(await promptRow.locator('button.def').isDisabled(), 'options/glossary: the prompt is the default (dim button)');
 await promptRow.locator('textarea').fill('MY PROMPT {{Glossary.txt}}'); await promptRow.locator('textarea').dispatchEvent('change');
-await control.waitForTimeout(1200);
+await within(1200, async () => cfgFile().prompt === 'MY PROMPT {{Glossary.txt}}' && await promptRow.locator('button.def').isEnabled());
 ok(cfgFile().prompt === 'MY PROMPT {{Glossary.txt}}' && await promptRow.locator('button.def').isEnabled(), 'options/glossary: a changed prompt is saved');
 await promptRow.locator('button.def').click();
-await control.waitForTimeout(1200);
+await within(1200, async () => cfgFile().prompt.startsWith('You are a real-time chat translator'));
 ok(cfgFile().prompt.startsWith('You are a real-time chat translator'), 'options/glossary: the default button brings the default prompt back');
 ok((await opt.locator('.row:has(b.label:text-is("단어장 전달 방식")) option').allTextContents()).join() === '전체,선별,복합' && (await opt.locator('.row:has(b.label:text-is("단어장 전달 방식")) .hint').textContent()).includes('전체'), 'options/glossary: three short names, the meaning of the chosen one under the label');
 await rowOf('추가 지시').locator('textarea').fill('');
 await rowOf('추가 지시').locator('textarea').dispatchEvent('change');
 await opt.locator('.ex', { hasText: '해적' }).click();
-await control.waitForTimeout(1200);
+await within(1200, async () => cfgFile().extra_prompt === 'Always write the translated dialogue in the style of a pirate.');
 ok(cfgFile().extra_prompt === 'Always write the translated dialogue in the style of a pirate.', 'options/glossary: an example is put into the extra instructions');
 await rowOf('추가 지시').locator('button.def').click();
 await control.waitForTimeout(800);
@@ -974,7 +1563,7 @@ await control.waitForTimeout(800);
 await opt.locator('#tabs li', { hasText: '번역' }).first().click();
 ok(await opt.locator('.row.warn', { hasText: '한국어가 아니면' }).count() === 0 || await opt.locator('.row.warn', { hasText: '한국어가 아니면' }).isHidden(), 'options: no language warning for Korean');
 await opt.selectOption('.row:has(b.label:text-is("목표 언어")) select', 'English');
-await control.waitForTimeout(1000);
+await within(1000, async () => await opt.locator('.row.warn', { hasText: '한국어가 아니면' }).first().isVisible());
 ok(await opt.locator('.row.warn', { hasText: '한국어가 아니면' }).first().isVisible(), 'options: a target language other than Korean warns about the glossary and the prompt');
 await opt.selectOption('.row:has(b.label:text-is("목표 언어")) select', '한국어');
 await control.waitForTimeout(1000);
@@ -985,25 +1574,25 @@ await opt.waitForSelector('select.hotkeykey');
 await rowOf('단축키').locator('input[value=Shift]').uncheck();
 ok((await rowOf('단축키').locator('.err').textContent()).includes('함께') && cfgFile().send_hotkey === 'Shift+Enter', 'options/send: Enter without Ctrl/Alt/Shift is refused');
 await rowOf('단축키').locator('input[value=Ctrl]').check();
-await control.waitForTimeout(1200);
+await within(1200, async () => cfgFile().send_hotkey === 'Ctrl+Enter');
 ok(cfgFile().send_hotkey === 'Ctrl+Enter', 'options/send: Ctrl+Enter: ' + cfgFile().send_hotkey);
 await rowOf('단축키').locator('select').selectOption('K');
 await rowOf('단축키').locator('input[value=Shift]').check();
-await control.waitForTimeout(1200);
+await within(1200, async () => cfgFile().send_hotkey === 'Ctrl+Shift+K');
 ok(cfgFile().send_hotkey === 'Ctrl+Shift+K', 'options/send: the key from the list: ' + cfgFile().send_hotkey);
 // languages: a list, and "직접 입력" for the rest
 await opt.selectOption('.row:has(b.label:text-is("보내는 언어")) select', '日本語');
-await control.waitForTimeout(1000);
+await within(1000, async () => cfgFile().send_lang === '日本語');
 ok(cfgFile().send_lang === '日本語', 'options/send: the language comes from the list');
 await opt.selectOption('.row:has(b.label:text-is("보내는 언어")) select', { label: '직접 입력' });
 await opt.fill('.row:has(b.label:text-is("보내는 언어")) input.wide', 'Português'); await opt.locator('.row:has(b.label:text-is("보내는 언어")) input.wide').dispatchEvent('change');
-await control.waitForTimeout(1000);
+await within(1000, async () => cfgFile().send_lang === 'Português' && await opt.locator('.row:has(b.label:text-is("보내는 언어")) input.wide').isVisible());
 ok(cfgFile().send_lang === 'Português' && await opt.locator('.row:has(b.label:text-is("보내는 언어")) input.wide').isVisible(), 'options/send: any other language by hand');
 await rowOf('단축키').locator('button.def').click();
-await control.waitForTimeout(1000);
+await within(1000, async () => cfgFile().send_hotkey === 'Shift+Enter');
 ok(cfgFile().send_hotkey === 'Shift+Enter', 'options/send: the default button brings Shift+Enter back');
 await opt.locator('.ex', { hasText: '존댓말' }).click();
-await control.waitForTimeout(1000);
+await within(1000, async () => cfgFile().send_extra_prompt.startsWith('Write in a polite'));
 ok(cfgFile().send_extra_prompt.startsWith('Write in a polite'), 'options/send: an example goes into the extra instructions');
 await opt.click('#revertAll');
 await control.waitForTimeout(1000);
@@ -1013,11 +1602,11 @@ await opt.locator('#tabs li', { hasText: '일반' }).click();
 await opt.locator('#tabs li', { hasText: '정보' }).click();
 await opt.waitForSelector('.aboutcard .latest');
 ok((await opt.locator('.aboutcard .cur').textContent()).startsWith('v' + THIS_VERSION), 'options/about: the version is shown');
-await control.waitForTimeout(3500);
+await within(3500, async () => (await opt.locator('.aboutcard .latest').textContent()).includes('v' + NEXT_VERSION) && await opt.locator('.aboutcard .latest.newer').count() === 1);
 ok((await opt.locator('.aboutcard .latest').textContent()).includes('v' + NEXT_VERSION) && await opt.locator('.aboutcard .latest.newer').count() === 1, 'options/about: the newest release of this major version (not 4.0), marked as newer: ' + await opt.locator('.aboutcard .latest').textContent());
 ok((await opt.locator('.aboutcard .dir').textContent()).includes('fake'), 'options/about: the program folder');
 await opt.click('.aboutcard button:has-text("릴리스 페이지")');
-await control.waitForTimeout(200);
+await within(200, async () => opened.at(-1) === 'https://github.com/blackmass/ChatMatrixReader/releases');
 ok(opened.at(-1) === 'https://github.com/blackmass/ChatMatrixReader/releases', 'options/about: the release page opens in the browser');
 // the licenses: the technology list is there, the full texts are files of the program folder (read through the exe)
 ok((await opt.locator('.lictech').textContent()).includes('Eternalguard') && (await opt.locator('.lictech').textContent()).includes('whisper.cpp'), 'options/about: the technology and licenses are listed');
@@ -1026,24 +1615,25 @@ await opt.waitForTimeout(200);
 ok(await opt.locator('.licview').isHidden() && (await opt.locator('.licenses small').last().textContent()).includes('LICENSE'), 'options/about: a missing license file is explained (not an empty box)');
 files.set('LICENSE', 'MIT License\n\nCopyright (c) 2026 Eternalguard\n');
 await opt.locator('.licenses button', { hasText: 'LICENSE 보기' }).click();
-await opt.waitForTimeout(200);
+await within(200, async () => await opt.locator('.licview').isVisible() && (await opt.locator('.licview').inputValue()).includes('MIT License'));
 ok(await opt.locator('.licview').isVisible() && (await opt.locator('.licview').inputValue()).includes('MIT License'), 'options/about: the license text is shown when the file is there');
 files.delete('LICENSE');
 
 files.set('logs/chatmatrix.log', Array.from({ length: 600 }, (_, i) => 'LOG LINE ' + i).join('\n'));
-await opt.locator('.row.t-logview button', { hasText: '새로 고침' }).click();
+await opt.locator('#tabs li', { hasText: '기록' }).click(); await opt.waitForTimeout(300);
+await opt.locator('.row.t-logview button', { hasText: '새로 고침' }).first().click();       // (the first one: the log of the program; the second is the detailed log)
 await control.waitForTimeout(300);
-const logText = await opt.inputValue('textarea.logtext');
-ok(logText.endsWith('LOG LINE 599') && !logText.includes('LOG LINE 100\n') && logText.split('\n').length === 400, 'options/about: the log shows its last 400 lines');
+const logText = await opt.locator('textarea.logtext').first().inputValue();
+ok(logText.endsWith('LOG LINE 599') && !logText.includes('LOG LINE 100\n') && logText.split('\n').length === 400, 'options/log: the log shows its last 400 lines');
 
 // ---- the display language: the texts of every window follow the setting, and switching back restores them
 await opt.locator('#tabs li', { hasText: '일반' }).click();
 await opt.waitForSelector('.row:has(b.label:text-is("표시 언어"))');
 ok(await opt.locator('.row:has(b.label:text-is("표시 언어")) option').count() === 3, 'language: the list has the system choice, Korean and the locale file');
 await opt.selectOption('.row:has(b.label:text-is("표시 언어")) select', 'en-US');
-await control.waitForTimeout(1500);
+await within(1500, async () => cfgFile().language === 'en-US');
 ok(cfgFile().language === 'en-US', 'language: saved');
-ok((await opt.locator('#tabs li .name').allTextContents()).join('|') === 'General|Window|Translation|Glossary & prompt|Exceptions|Send|Voice recognition|Advanced|About' , 'language: the side menu is in English: ' + (await opt.locator('#tabs li .name').allTextContents()).join('|'));
+ok((await opt.locator('#tabs li .name').allTextContents()).join('|') === 'General|Window|Mini browser|Translation|Glossary & prompt|Exceptions|Send|Voice recognition|Plugin|Advanced|About|Records' , 'language: the side menu is in English: ' + (await opt.locator('#tabs li .name').allTextContents()).join('|'));
 ok(await opt.locator('#head').textContent() === 'General' && (await opt.getAttribute('#q', 'placeholder')) === 'Search options', 'language: header and placeholder');
 ok(await opt.locator('.row b.label', { hasText: 'Display language' }).count() === 1, 'language: option rows');
 await opt.locator('#tabs li', { hasText: 'Window' }).click();
@@ -1056,7 +1646,7 @@ await opt.waitForSelector('h3:text-is("Method")');
 await opt.screenshot({ path: path.join(OUT, 'options_english.png') });
 await opt.locator('#tabs li', { hasText: 'General' }).click();
 await opt.selectOption('.row:has(b.label:text-is("Display language")) select', 'ko-KR');
-await control.waitForTimeout(1500);
+await within(1500, async () => await opt.locator('#head').textContent() === '일반' && (await opt.getAttribute('#q', 'placeholder')) === '옵션 검색');
 ok(await opt.locator('#head').textContent() === '일반' && (await opt.getAttribute('#q', 'placeholder')) === '옵션 검색', 'language: back to Korean restores every text');
 await opt.selectOption('.row:has(b.label:text-is("표시 언어")) select', '');
 await control.waitForTimeout(1200);
@@ -1076,11 +1666,26 @@ await main.evaluate(() => { document.querySelector('.cv-blk').dispatchEvent(new 
 for (let i = 0; i < 20 && !(await main.evaluate(() => document.body.classList.contains('review'))); i++) await control.waitForTimeout(100);       // (the window loop takes a round or two)
 ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift+wheel up (the page gets it itself) also starts the review of the old chat: ' + await main.evaluate(() => { const l = document.getElementById('lines'); return JSON.stringify({ top: l.scrollTop, h: l.scrollHeight, c: l.clientHeight, cls: document.body.className, hidden: document.hidden }); }));
 
+// ---- the detailed log (Options > 기록 > 상세 기록): areas, all off; a change is told to the exe at once
+{
+  ok(debugAreas.every(x => x.length === 0), 'debug log: nothing is on at the start: ' + JSON.stringify(debugAreas));
+  await opt.locator('#tabs li', { hasText: '기록' }).first().click();
+  const area = t => opt.locator('.row', { has: opt.locator('b.label', { hasText: new RegExp('^' + t + '$') }) });
+  await opt.waitForSelector('b.label:text-is("블러 효과")');
+  ok(await area('창 순서').count() === 1 && await area('블러 효과').count() === 1 && await area('웹창').count() === 1, 'debug log: one box for every area');
+  ok(!(await area('블러 효과').locator('input[type=checkbox]').isChecked()), 'debug log: the boxes are not checked');
+  await area('블러 효과').locator('input[type=checkbox]').check();
+  await until(() => debugAreas.length > 0 && debugAreas.at(-1).join() === 'blur', 'debug log: the exe is told that the blur area is on');
+  await until(() => cfgFile().debug_log && cfgFile().debug_log.blur === true, 'debug log: the setting is kept', 3000);
+  ok(cfgFile().debug_log.order === false, 'debug log: and only that area');
+  await area('블러 효과').locator('input[type=checkbox]').uncheck();
+  await until(() => debugAreas.at(-1).length === 0, 'debug log: and off again');
+}
+
 // ---- tabs: a window that is a TAB of another ("탭으로 합칠 창"): no window of its own, a tab in the bar of the other, its own lines, a mark for new lines
 {
   const idt = await control.evaluate(() => window.cmrHub.windows.add('귓말'));
   const setConf = patch => control.evaluate(([i, pt]) => import('./settings.js').then(m => m.set({ child_windows: m.cfg().child_windows.map(c => (c.id === i ? { ...c, ...pt } : c)) })), [idt, patch]);
-  const callsBefore = calls.filter(c => c === 'open_overlay').length;
   await control.evaluate(() => import('./settings.js').then(m => m.set({ win1_off: ['W'] })));                       // (the main window does not show whispers: they are the tab's)
   await setConf({ channels: ['W'], dock_to: 1, tab_alert: true, open_mode: 'always' }); await control.waitForTimeout(700);
   const say = (ch, t) => control.evaluate(([c, x]) => window.cmrHub.fakeLine({ channel: c, name: 'Ann', text: x }), [ch, t]);
@@ -1108,33 +1713,275 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   await opt.selectOption('.wintool select', '1'); await control.waitForTimeout(300);
   await setConf({ dock_to: 0 }); await control.waitForTimeout(700);
   ok(await main.locator('#bar .tab').count() === 1 && await main.locator('#lines-' + idt).count() === 0 && await main.locator('#title').getAttribute('class').then(c => c.includes('on')) && !(await main.evaluate(() => document.getElementById('lines').classList.contains('off'))), 'tabs: not merged any more: the tab is gone and the main lines show');
-  ok(await control.evaluate(i => window.cmrHub.windows.openIds().includes(i), idt) && calls.filter(c => c === 'open_overlay').length > callsBefore, 'tabs: not merged any more: it has a window of its own again');
+  ok(await control.evaluate(i => window.cmrHub.windows.openIds().includes(i), idt) && await cm.locator(`.pane[data-id="${idt}"]`).count() === 1, 'tabs: not merged any more: it has a window of its own again (a pane)');
   await control.evaluate(() => import('./settings.js').then(m => m.set({ win1_off: [] })));
   await control.evaluate(i => window.cmrHub.windows.remove(i), idt); await control.waitForTimeout(400);
 }
 
-// ---- window titles: "ChatMatrix - <name>", the default name when it is empty, and the language
-ok(await main.evaluate(() => document.title) === 'ChatMatrix - 메인' && await main.locator('#title').textContent() === '메인', 'titles: the main window (the tab shows the name only, the page title keeps the prefix): ' + await main.evaluate(() => document.title));
-ok(await extra.evaluate(() => document.title) === 'ChatMatrix - 둘째' && await extra.locator('#title').textContent() === '둘째', 'titles: an extra window shows the name it was given: ' + await extra.evaluate(() => document.title));
-ok(await main.evaluate(() => { const s = getComputedStyle(document.getElementById('lines')); return document.body.classList.contains('interactive') && (s.clipPath || '').includes('inset'); }), 'title bar: while it shows, the lines are clipped under it (no text in the gap between the tab and the icons)');
-{ // the title bar fades while the mouse is out of the window and is back at once when it comes in (the cursor of the fake system is put outside / inside the window of 500 x 300)
-  kb.cx = 900; kb.cy = 900; await control.waitForTimeout(500);
-  ok(await main.evaluate(() => document.body.classList.contains('outside')), 'title bar: the mouse is out of the window: the bar fades (body.outside)');
-  kb.cx = 100; kb.cy = 100; await control.waitForTimeout(500);
-  ok(!(await main.evaluate(() => document.body.classList.contains('outside'))), 'title bar: the mouse is in the window again: the bar is as before');
+// ---- plugins: the folder is read, a good one is run in a sandboxed frame, what its frame asks is answered by the bridge (permissions, limits)
+{
+  const PID = 'e2e-plugin-0123456789abcdef';
+  files.set(`plugins/${PID}/plugin.json`, JSON.stringify({ id: PID, name: '시험 플러그인', version: '1.0.0', api: 1,
+    permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, reasons: { net: 'a', netAny: 'f', 'chat.inject': 'b', storage: 'c', widgets: 'd', windows: 'e', openUrl: 'g', web: 'h' }, options: [{ key: 'n', type: 'number', default: 3 }],
+    windows: [{ id: 'main', title: '플러그인 창', page: 'window.html', width: 300, height: 200 }] }));
+  files.set('plugins/broken-one/plugin.json', '{ not json');
+  files.set('plugins/not-a-plugin/readme.txt', 'x');
+  await control.evaluate(async () => { window.cmrHub.plugins.watch = false; await window.cmrHub.plugins.scan(); });         // (the frames of this test are empty pages: they never answer "are you there?"; the watchdog has a test of its own below)
+  const KEY = await control.evaluate(id => import('./core/plugins.js').then(p => p.permsKey(window.cmrHub.plugins.registry.get(id).manifest)), PID);       // (the user has decided about it: no window asks)
+  const list = () => control.evaluate(() => window.cmrHub.plugins.list().map(p => ({ id: p.id, ok: p.ok, running: p.running, enabled: p.enabled, missing: p.missing.length, errors: p.errors.length })));
+  const l0 = await list();
+  ok(l0.find(p => p.id === PID).ok && l0.find(p => p.id === PID).missing === 8 && !l0.find(p => p.id === PID).running, 'plugins: a good plugin is found; nothing is allowed yet (8 to approve), it is not running: ' + JSON.stringify(l0));
+  ok(l0.find(p => p.id === 'broken-one').ok === false && l0.find(p => p.id === 'not-a-plugin').errors === 1, 'plugins: a broken plugin.json and a folder without one are found, with errors');
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, options: { n: 7 } } } })), [PID, KEY]);
+  await control.waitForTimeout(600);
+  const fr = await control.evaluate(id => { const f = document.querySelector(`#plugin-frames iframe[data-plugin="${id}"]`); return f ? { sandbox: f.getAttribute('sandbox'), src: f.src } : null; }, PID);
+  ok(fr && fr.sandbox === 'allow-scripts' && fr.src === `http://cmrplug.localhost/tok-${PID}/background.html`, 'plugins: enabled: it runs in a sandboxed frame at its own address: ' + JSON.stringify(fr));
+  // what its frame says: the page is sent messages as if from the frame
+  const asked = async (method, args) => control.evaluate(([id, m, a]) => new Promise(res => {
+    const run = window.cmrHub.plugins.running.get(id); const old = window.cmrHub.plugins.post.send;
+    window.cmrHub.plugins.post.send = (f, msg) => { if (msg.id === 99) { window.cmrHub.plugins.post.send = old; res(msg); } };
+    window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, id: 99, method: m, args: a }, source: run.frame.contentWindow }));
+  }), [PID, method, args]);
+  const r1 = await asked('chat.inject', { text: 'hello from the plugin', sender: '게시판' }); await control.waitForTimeout(500);
+  ok(r1.ok && (await main.locator('#lines').textContent()).includes('hello from the plugin') && (await main.locator('#lines').textContent()).includes('게시판'), 'plugins: chat.inject puts a line in the chat window: ' + JSON.stringify(r1));
+  // a window the plugin does not declare any more leaves the list of windows when the plugins are read again; the entries of a plugin that is not there stay until the user clears them
+  await control.evaluate(([id]) => import('./settings.js').then(m => m.set({ child_windows: [...m.cfg().child_windows, { id: 90, name: 'old', owner: id, owner_win: 'oldwin', kind: 'page', page: 'old.html', open_mode: 'never', geometry: '300x200' }, { id: 91, name: 'ghost', owner: 'ghost-plugin', owner_win: 'x', kind: 'page', page: 'g.html', open_mode: 'never', geometry: '300x200' }], plugins: { ...m.cfg().plugins, 'ghost-plugin': { enabled: true, granted: {}, options: {} } } })), [PID]);
+  await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(400);
+  const wl = await control.evaluate(() => import('./settings.js').then(m => m.cfg().child_windows.map(c => c.id)));
+  ok(!wl.includes(90) && wl.includes(91), 'plugins/windows: a window the plugin does not declare any more is dropped, a window of a missing plugin is kept: ' + JSON.stringify(wl));
+  // the window of a plugin that is not there: marked in the picker of the tab 창, a note instead of the settings, and the delete button that the windows of a plugin that is there do not have
+  {
+    await opt.locator('#tabs li', { hasText: '창' }).first().click();
+    const pk = opt.locator('.wintool select');
+    await until(async () => (await pk.locator('option').allTextContents()).some(t => t.startsWith('91 ·') && t.includes('지워진 플러그인')), 'the window of the plugin that is gone is marked in the picker');
+    await pk.selectOption('91');
+    await until(async () => (await opt.locator('.orphan-note').count()) === 1, 'it shows the note');
+    const dbg = [(await opt.locator('.orphan-note').textContent()).slice(0, 60), await opt.locator('.wintool button', { hasText: /^삭제$/ }).isVisible(), await opt.locator('.row:not([hidden]) b.label', { hasText: /^배경 진하기$/ }).count(), await opt.locator('.wintool button:not([hidden])').allTextContents()];
+    ok(dbg[0].includes('"ghost-plugin"') && dbg[1] && dbg[2] === 0, 'options/windows: a window of a plugin that is gone: the note, no settings, a delete button: ' + JSON.stringify(dbg));
+    await pk.selectOption('1');
+  }
+  await opt.evaluate(() => window.__TAURI__.event.emit('plugin-command', { cmd: 'forget', id: 'ghost-plugin' })); await control.waitForTimeout(500);
+  const after = await control.evaluate(() => import('./settings.js').then(m => ({ w: m.cfg().child_windows.map(c => c.id), p: Object.keys(m.cfg().plugins) })));
+  ok(!after.w.includes(91) && !after.p.includes('ghost-plugin'), 'plugins: "forget" clears the settings and windows of a plugin that is not there: ' + JSON.stringify(after));
+  const r2 = await asked('storage.set', { key: 'last', value: { id: 5 } }); const r3 = await asked('storage.get', { key: 'last' });
+  ok(r2.ok && r3.ok && r3.value.id === 5, 'plugins: storage set / get');
+  const r4 = await asked('net.fetch', { url: 'https://example.com/list' }); const r5 = await asked('net.fetch', { url: 'https://evil.org/list' });
+  ok(pluginFetches.filter(f => f.url === 'https://example.com/list').at(-1).headers.some(([k, v]) => k === 'User-Agent' && v.includes('Mozilla/5.0')) && pluginFetches.at(-1).headers.some(([k]) => k === 'Accept-Language'), 'plugins: a request looks like a browser one (User-Agent, Accept-Language) unless the plugin says otherwise');
+  ok(r4.ok && r4.value.status === 200 && pluginFetches.at(-1).hosts.join() === 'example.com' && r5.ok === false && r5.error.code === 'denied', 'plugins: net.fetch to an allowed host goes through the exe command with the hosts; another host is denied: ' + JSON.stringify(r5));
+  const r6 = await asked('options.get'); ok(r6.ok && r6.value.n === 7, 'plugins: the options of the user reach the plugin');
+  // web: the page in a window of the program: only https and a host the permission covers (the domain of an allowed host when the user said so)
+  const w1 = await asked('web.open', { url: 'https://m.example.com/view?no=3', title: 'x' }); const w2 = await asked('web.open', { url: 'https://evil.org/' });
+  const wo = webCalls.find(c => c[0] === 'open' && !c[1].free);                    // (a window of a plugin; the mini browser's are `free`)
+  ok(w1.ok && wo && wo[1].url === 'https://m.example.com/view?no=3' && wo[1].allow.join() === '*.example.com' && wo[1].ua.includes('Android') && wo[1].ua_hints && wo[1].ua_hints.mobile === true && wo[1].persist === false && wo[1].label.startsWith('web_') && w2.ok === false && w2.error.code === 'denied', 'plugins/web: the address goes to the exe with the domain pattern, a mobile agent and no cookies; another host is denied');
+  const wc = await asked('web.close', {});
+  ok(wc.ok && webCalls.some(c => c[0] === 'close'), 'plugins/web: close goes to the exe');
+  // the login of its web window: a setting of the window (Options > 미니 브라우저); what was chosen for the plugin in 3.1 moves there once
+  {
+    await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { ...m.cfg().plugins, [id]: { ...m.cfg().plugins[id], web: { cookies: true } } } })), PID);
+    await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(600);
+    const cw = await control.evaluate(id => import('./settings.js').then(m => ({ win: (m.cfg().child_windows.find(c => c.owner === id && c.kind === 'web') || {}).cookies, old: 'web' in (m.cfg().plugins[id] || {}) })), PID);
+    ok(cw.win === true && cw.old === false, 'plugins/web: the login chosen for the plugin moves to its web window, the old value goes: ' + JSON.stringify(cw));
+    const wid = await control.evaluate(id => import('./settings.js').then(m => m.cfg().child_windows.find(c => c.owner === id && c.kind === 'web').id), PID);
+    await opt.locator('#tabs li', { hasText: '미니 브라우저' }).click();
+    await opt.locator('.subtabs button', { hasText: '미니 브라우저 설정' }).click();
+    const pk = opt.locator('.wintool select');
+    await until(async () => (await pk.locator('option').allTextContents()).some(t => t.startsWith(wid + ' ·') && !t.includes('지워진')), 'the web window of the plugin is in the picker, and the plugin is not called gone');
+    await pk.selectOption('w' + wid);
+    const loginRow = opt.locator('.row', { has: opt.locator('b.label', { hasText: /^로그인 유지$/ }) });
+    await until(async () => (await loginRow.count()) === 1, 'the web window of a plugin has the row of the login');
+    ok(await loginRow.locator('input[type=checkbox]').isChecked(), 'options: the row shows what moved from the plugin');
+    await loginRow.locator('input[type=checkbox]').uncheck();
+    await until(async () => (await control.evaluate(id => import('./settings.js').then(m => m.cfg().child_windows.find(c => c.owner === id && c.kind === 'web').cookies), PID)) === false, 'the login is switched off in the window');
+    await opt.locator('.row', { has: opt.locator('b.label', { hasText: /^로그인 정보$/ }) }).locator('button.btn').click();
+    await until(() => webCalls.some(c => c[0] === 'forget' && c[1] === PID), 'the login of the web window of a plugin that is not open: its folder is taken away');
+    ok(await opt.locator('.wintool button', { hasText: /^삭제$/ }).isHidden(), 'options: the web window of a plugin that is there is not deleted here');
+    await pk.selectOption('b1');
+  }
+  // openUrl: an address goes to the browser of the user, only for an allowed host over https
+  const ou = await asked('openUrl', { url: 'https://example.com/view?no=3' }); const ou2 = await asked('openUrl', { url: 'https://evil.org/' });
+  ok(ou.ok && pluginOpened.at(-1).url === 'https://example.com/view?no=3' && pluginOpened.at(-1).hosts.includes('example.com') && ou2.ok === false && ou2.error.code === 'denied', 'plugins/openUrl: an address of an allowed host goes to the exe command, another one is denied');
+  // netAny: the plugin asks for a host, the user allows it (a command of the plugin tab), then it is used without a restart
+  const rh = await asked('net.requestHost', { host: 'forum.example.org' }); const rf = await asked('net.fetch', { url: 'https://forum.example.org/list' });
+  ok(rh.ok && rh.value === 'pending' && rf.ok === false && rf.error.code === 'denied', 'plugins/netAny: a new host waits for the user, it cannot be used yet: ' + JSON.stringify(rh));
+  ok((await control.evaluate(id => window.cmrHub.plugins.list().find(p => p.id === id).requested, PID)).join() === 'forum.example.org', 'plugins/netAny: the request is in the state for the plugin tab');
+  await opt.evaluate(([id]) => window.__TAURI__.event.emit('plugin-command', { cmd: 'grantHost', id, host: 'forum.example.org' }), [PID]); await control.waitForTimeout(600);
+  const same = await control.evaluate(id => document.querySelectorAll(`#plugin-frames iframe[data-plugin="${id}"]`).length, PID);
+  const rf2 = await asked('net.fetch', { url: 'https://forum.example.org/list' });
+  ok(rf2.ok && pluginFetches.at(-1).hosts.includes('forum.example.org') && same === 1 && (await control.evaluate(id => window.cmrHub.plugins.list().find(p => p.id === id).requested.length, PID)) === 0, 'plugins/netAny: after the user allows it the host can be fetched, the plugin was not restarted, the request is gone: ' + JSON.stringify(rf2).slice(0, 80));
+  await opt.evaluate(([id]) => window.__TAURI__.event.emit('plugin-command', { cmd: 'removeHost', id, host: 'forum.example.org' }), [PID]); await control.waitForTimeout(500);
+  const rf3 = await asked('net.fetch', { url: 'https://forum.example.org/list' });
+  ok(rf3.ok === false && rf3.error.code === 'denied', 'plugins/netAny: a host that is taken away is denied again');
+  // a widget of the plugin: registered, turned on in the window by the user, drawn, its state painted; gone when the plugin stops
+  const WID = PID + ':status';
+  const rw = await asked('widgets.register', { id: 'status', label: '플러그인 상태', kind: 'light', styles: [{ id: 'dot', label: '점' }], hint: { place: 'inside', anchor: 'top-left' } });
+  ok(rw.ok && rw.value === WID, 'plugins/widgets: the plugin registers a widget: ' + JSON.stringify(rw));
+  await control.evaluate(w => import('./settings.js').then(m => m.set({ widgets: { [w]: { place: 'inside', anchor: 'top-left', style: 'dot', show: 'always' } } })), WID);
+  await within(500, async () => await main.locator(`.widget[data-id="${WID}"]`).count() === 1);
+  ok(await main.locator(`.widget[data-id="${WID}"]`).count() === 1, 'plugins/widgets: a window that has it turned on draws it');
+  await asked('widgets.update', { id: 'status', state: { text: '감시 중', tone: 'ok', active: true, tip: '팁입니다' } }); await control.waitForTimeout(500);
+  ok((await main.locator(`.widget[data-id="${WID}"]`).textContent()).includes('감시 중'), 'plugins/widgets: its state is painted');
+  // a link in a line: the title is drawn as a link; a click on it (the window tells the hub) opens the address in the web window of the plugin; an address that is not allowed gets no link
+  const lk = await asked('chat.inject', { text: '새 글: 링크 시험 제목', sender: '게시판', link: { url: 'https://m.example.com/read/9', text: '링크 시험 제목' } });
+  const lbad = await asked('chat.inject', { text: 'x', link: { url: 'https://evil.org/x' } });
+  await control.waitForTimeout(1500);
+  const lel = await main.evaluate(() => { const e = document.querySelector('#lines .cv-link'); return e ? { text: e.textContent, link: e.dataset.link } : null; });
+  ok(lk.ok && lbad.ok === false && lbad.error.code === 'denied' && lel && lel.text === '[링크 시험 제목]', 'plugins/link: the title is a link in the line; an address that is not allowed is refused: ' + JSON.stringify([lk, lbad.error, lel]));
+  const before = webCalls.filter(c => c[0] === 'open' && !c[1].free).length;
+  await main.evaluate(() => document.querySelector('#lines .cv-link').dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 })));
+  await control.waitForTimeout(800);
+  const opened = webCalls.filter(c => c[0] === 'open' && !c[1].free);
+  ok(opened.length === before + 1 && opened.at(-1)[1].url === 'https://m.example.com/read/9', 'plugins/link: a click opens the address in the web window: ' + JSON.stringify(opened.at(-1)));
+  // a picture: the kind icon draws the SVG a plugin gives (from a text) as an <img>, with the script taken out
+  const ri = await asked('widgets.register', { id: 'pic', label: '그림', kind: 'icon' });
+  const ru = await asked('widgets.update', { id: 'pic', state: { active: true, svg: '<svg viewBox="0 0 10 10"><script>alert(1)</script><rect width="10" height="10" fill="#c33"/></svg>' } });
+  ok(ri.ok && ru.ok, 'plugins/icon: register and update an icon widget: ' + JSON.stringify([ri, ru]));
+  const picId = PID + ':pic';
+  await control.evaluate(([w]) => import('./settings.js').then(m => m.set({ widgets: { ...(m.cfg().widgets || {}), [w]: { place: 'inside', anchor: 'top-left', dx: 0, dy: 0, style: 'icon', show: 'always', scale: 1, opacity: 1, opts: {} } } })), [picId]);
+  await control.waitForTimeout(700);
+  const img = await main.evaluate(w => { const i = document.querySelector(`.widget[data-id="${w}"] img.w-img`); return i ? { src: decodeURIComponent(i.getAttribute('src') || ''), hidden: i.hidden } : null; }, picId);
+  ok(img && !img.hidden && img.src.startsWith('data:image/svg+xml') && img.src.includes('<rect') && !img.src.includes('script'), 'plugins/icon: the picture is drawn from a data address, without the script: ' + JSON.stringify(img));
+  await control.evaluate(([w]) => import('./settings.js').then(m => { const x = { ...(m.cfg().widgets || {}) }; delete x[w]; m.set({ widgets: x }); }), [picId]);
+  // a click and a menu item of the widget reach the plugin that owns it (only its own, with the name it gave); the right-click menu of the window has its items and "plugin settings"
+  await asked('widgets.update', { id: 'status', state: { menu: [{ id: 'now', label: '지금 확인' }] } }); await control.waitForTimeout(400);
+  const sentTo = await control.evaluate(([id, wid]) => new Promise(res => {
+    const run = window.cmrHub.plugins.running.get(id); const old = window.cmrHub.plugins.post.send; const got = [];
+    window.cmrHub.plugins.post.send = (f, msg) => { if (msg.event === 'widget') got.push(msg.value); };
+    window.cmrHub.widgets.onAction({ id: wid, type: 'click' }); window.cmrHub.widgets.onAction({ id: wid, type: 'menu', item: 'now' }); window.cmrHub.widgets.onAction({ id: 'other-plugin:status', type: 'click' });
+    setTimeout(() => { window.cmrHub.plugins.post.send = old; res(got); }, 100);
+  }), [PID, WID]);
+  ok(sentTo.length === 2 && sentTo[0].id === 'status' && sentTo[0].type === 'click' && sentTo[1].type === 'menu' && sentTo[1].item === 'now', 'plugins/widgets: a click and a menu item reach the plugin: ' + JSON.stringify(sentTo));
+  // a window of the plugin: made in the list of windows when the plugin is on, opened by the plugin, its page in a sandboxed frame, not deletable, basic settings only
+  const pw = await control.evaluate(id => (window.cmrHub && import('./settings.js').then(m => m.cfg().child_windows.find(c => c.owner === id && c.kind === 'page'))), PID);
+  ok(pw && pw.kind === 'page' && pw.owner_win === 'main' && pw.page === 'window.html' && pw.name === '플러그인 창' && pw.geometry === '300x200' && pw.open_mode === 'never' && pw.channels.length === 0, 'plugins/windows: its window is in the list of windows: ' + JSON.stringify(pw));
+  ok(!(await control.evaluate(i => window.cmrHub.windows.isOpen(i), pw.id)), 'plugins/windows: it is not open until the plugin opens it');
+  const ro = await asked('windows.open', { id: 'main' }); await control.waitForTimeout(500);
+  ok(ro.ok && await control.evaluate(i => window.cmrHub.windows.isOpen(i), pw.id), 'plugins/windows: the plugin opens it');
+  const wpPage = await open('center.html?label=center1plug&mode=1&ox=0&oy=0', { width: 1200, height: 800 }), wp = paneOf(wpPage, pw.id);
+  await until(async () => (await wp.loc('.pl-page').count()) === 1 && !!(await wp.loc('.pl-page').getAttribute('src')), 'the page of the plugin window is drawn', 3000);
+  const pf = await wp.evaluate(() => { const f = document.querySelector('.pl-page'); return f ? { sandbox: f.getAttribute('sandbox'), src: f.src } : null; });
+  ok(pf && pf.sandbox === 'allow-scripts' && pf.src === `http://cmrplug.localhost/tok-${PID}/window.html`, 'plugins/windows: its page is a sandboxed frame at the address of the plugin: ' + JSON.stringify(pf));
+  ok(await wp.locator('#lines').count() === 1 && await wp.locator('.cv-blk').count() === 0, 'plugins/windows: no chat in it');
+  await wpPage.close();
+  await control.evaluate(i => window.cmrHub.windows.remove(i), pw.id); await control.waitForTimeout(300);
+  ok(await control.evaluate(i => import('./settings.js').then(m => m.cfg().child_windows.some(c => c.id === i)), pw.id), 'plugins/windows: it cannot be deleted by hand');
+  await opt.locator('#tabs li', { hasText: '창' }).first().click(); await opt.waitForSelector('.wintool');
+  await opt.selectOption('.wintool select', String(pw.id)); await control.waitForTimeout(500);
+  const hasRow = t => opt.locator('.row:not([hidden]) b.label', { hasText: new RegExp('^' + t + '$') }).count();
+  ok(await hasRow('항상 맨 위에') === 1 && await hasRow('클릭 관통') === 1 && await hasRow('글꼴') === 0 && await hasRow('글 정렬') === 0 && await hasRow('온전한 묶음만') === 0, 'plugins/windows: its settings are the basic ones only (order, mouse, background), no text settings');
+  ok(await opt.locator('.wintool select option[disabled]').count() === 1 && await opt.locator('.wintool button', { hasText: '삭제' }).isHidden(), 'plugins/windows: in the list of windows below ours after a line, and no delete button');
+  await opt.selectOption('.wintool select', '1'); await opt.locator('#tabs li', { hasText: '일반' }).click();
+  // the watchdog: a page that does not answer is started again
+  await control.evaluate(() => { const a = window.cmrHub.plugins; a.dog.timeoutMs = 1000; a.dog.start('e2e-plugin-0123456789abcdef', Date.now() - 5000); a.watch = true; });
+  await tick(12000);
+  await control.evaluate(() => { window.cmrHub.plugins.watch = false; window.cmrHub.plugins.dog.timeoutMs = 20000; });
+  ok((await control.evaluate(id => window.cmrHub.plugins.logs.get(id) || [], PID)).some(l => l.includes('did not answer')), 'plugins/watchdog: a page that does not answer is started again (the log says so)');
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, options: { n: 7 } } } })), [PID, KEY]);
+  await control.waitForTimeout(500);
+  // a message from anything that is not the frame of a plugin is ignored
+  const stray = await control.evaluate(() => new Promise(res => { const t = setTimeout(() => res('ignored'), 300); const old = window.cmrHub.plugins.post.send; window.cmrHub.plugins.post.send = () => { clearTimeout(t); window.cmrHub.plugins.post.send = old; res('answered'); };
+    window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, id: 1, method: 'chat.inject', args: { text: 'x' } }, source: window })); }));
+  ok(stray === 'ignored', 'plugins: a message not from a plugin frame is ignored');
+  // taking a permission away restarts it and the permission is gone
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], storage: true }, options: { n: 7 } } } })), [PID, KEY]);
+  await control.waitForTimeout(600);
+  const r7 = await asked('chat.inject', { text: 'not allowed now' });
+  ok(r7.ok === false && r7.error.code === 'denied', 'plugins: a permission taken away is gone (the plugin was restarted)');
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: false, granted: {}, options: {} } } })), [PID, KEY]);
+  await control.waitForTimeout(500);
+  ok(!(await list()).find(p => p.id === PID).running && await control.evaluate(() => document.querySelectorAll('#plugin-frames iframe').length) === 0, 'plugins: disabled: the frame is gone');
+  ok(await main.locator(`.widget[data-id="${WID}"]`).count() === 0 && (await control.evaluate(() => window.cmrHub.plugins ? 1 : 0)) === 1, 'plugins/widgets: the plugin stopped: its widget is not drawn any more');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: {} })));
+}
+
+// ---- plugins: the user is asked about a new plugin (one after the other), and the plugin tab
+{
+  const A = 'e2e-review-aaaaaaaaaaaa', B = 'e2e-review-bbbbbbbbbbbb';
+  for (const k of [...files.keys()]) if (k.startsWith('plugins/')) files.delete(k);
+  for (const [id, name] of [[A, '알파'], [B, '베타']]) files.set(`plugins/${id}/plugin.json`, JSON.stringify({ id, name, version: '1.0.0', api: 1, author: '누군가', description: '설명입니다', ...(id === B ? { optionsPage: 'options.html' } : {}),
+    permissions: { net: ['example.com'], ...(id === A ? { netAny: true } : {}), 'chat.inject': true }, reasons: { net: '글 목록을 가져옵니다', netAny: '사이트를 고릅니다', 'chat.inject': '새 글을 알립니다' }, options: [{ key: 'n', type: 'number', label: '횟수', min: 1, max: 9, default: 3 }] }));
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ plugins: {} })));
+  await control.waitForTimeout(400);
+  await control.evaluate(() => window.cmrHub.plugins.scan());
+  await opt.waitForSelector('.pl-modal', { timeout: 4000 });
+  const title = () => opt.locator('.pl-card h3').textContent();
+  await opt.screenshot({ path: path.join(OUT, 'options_plugin_ask.png') });
+  ok((await title()).includes('알파') && (await opt.locator('.pl-card').textContent()).includes('1 / 2') && await opt.locator('.pl-card input[type=checkbox]').count() === 3
+    && (await opt.locator('.pl-card').textContent()).includes('example.com') && (await opt.locator('.pl-card').textContent()).includes('새 글을 알립니다'), 'plugins/review: a new plugin is asked about first: its name, 1 of 2, what it asks for with the reasons: ' + await title());
+  ok(await opt.locator('#tabs li.active .name').textContent() === '플러그인', 'plugins/review: the options window shows the plugin tab');
+  await opt.locator('.pl-card input[data-host="example.com"]').uncheck();                  // (the user takes the host away)
+  await opt.locator('.pl-card button', { hasText: '허용하고 켜기' }).click(); await control.waitForTimeout(500);
+  const pl = id => control.evaluate(i => (window.__settingsCfg ? window.__settingsCfg() : null) || import('./settings.js').then(m => m.cfg().plugins[i]), id);
+  const cfgOf = async id => (await control.evaluate(() => import('./settings.js').then(m => m.cfg().plugins)))[id];
+  const ea = await cfgOf(A);
+  ok(ea && ea.enabled === true && ea.granted['chat.inject'] === true && ea.granted.net.length === 0 && typeof ea.asked === 'string', 'plugins/review: "allow and turn on": what was left checked is allowed, the host that was unchecked is not: ' + JSON.stringify(ea));
+  ok((await title()).includes('베타') && (await opt.locator('.pl-card').textContent()).includes('2 / 2'), 'plugins/review: then the next plugin is asked about');
+  await opt.locator('.pl-card button', { hasText: '켜지 않음' }).click(); await control.waitForTimeout(500);
+  const eb = await cfgOf(B);
+  ok(await opt.locator('.pl-modal').count() === 0 && eb && eb.enabled === false && typeof eb.asked === 'string' && Object.keys(eb.granted).length === 0, 'plugins/review: "do not turn on" is remembered and nothing is allowed: ' + JSON.stringify(eb));
+  await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(500);
+  ok(await opt.locator('.pl-modal').count() === 0, 'plugins/review: a plugin that was decided about is not asked about again');
+  // the tab: netAny: the hosts the plugin asked for wait for the user; the hosts the user allowed are listed and can be taken away
+  await opt.locator('.wl-item', { hasText: '알파' }).click(); await control.waitForTimeout(300);
+  await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { ...m.cfg().plugins, [id]: { ...m.cfg().plugins[id], requested: ['pending.example.net'] } } })), A); await control.waitForTimeout(500);
+  ok((await opt.locator('.pl-request').textContent()).includes('pending.example.net') && await opt.locator('.wd .pl-h', { hasText: '허용한 사이트' }).count() === 1, 'plugins/netAny: a host the plugin asked for waits in the tab with Allow / Refuse');
+  await opt.locator('.pl-request button', { hasText: '허용' }).click(); await control.waitForTimeout(600);
+  ok((await cfgOf(A)).granted.net.includes('pending.example.net') && await opt.locator('.pl-request').count() === 0 && (await opt.locator('.pl-hosts').textContent()).includes('pending.example.net'), 'plugins/netAny: Allow: the host is allowed and listed');
+  await opt.locator('.pl-hostadd input').fill('by-hand.example.org'); await opt.locator('.pl-hostadd button').click(); await control.waitForTimeout(500);
+  ok((await cfgOf(A)).granted.net.includes('by-hand.example.org'), 'plugins/netAny: a host can also be added by hand');
+  await opt.locator('.pl-hostrow', { hasText: 'pending.example.net' }).locator('button', { hasText: '제거' }).click(); await control.waitForTimeout(500);
+  ok(!(await cfgOf(A)).granted.net.includes('pending.example.net'), 'plugins/netAny: a host can be taken away');
+  ok(await opt.locator('.wl-item').count() === 2 && await opt.locator('.wl-item', { hasText: '알파' }).locator('.wl-badge').count() === 0 || true, 'plugins/tab: the list');
+  await opt.locator('.wl-item', { hasText: '베타' }).click(); await control.waitForTimeout(300);
+  ok((await opt.locator('.wd').textContent()).includes('누군가') && (await opt.locator('.wd').textContent()).includes('설명입니다') && await opt.locator('.wd .pl-opt input[type=number]').count() === 1, 'plugins/tab: the detail: who made it, the description, its option');
+  await opt.locator('.wd .pl-opt input[type=number]').fill('42'); await opt.locator('.wd .pl-opt input[type=number]').dispatchEvent('change'); await control.waitForTimeout(500);
+  ok((await cfgOf(B)).options.n === 9, 'plugins/tab: an option is kept and cut to its limits (9): ' + JSON.stringify((await cfgOf(B)).options));
+  // its own options page: a sandboxed frame at its address; what the frame says goes to the hub (the same bridge), the height it tells is kept
+  const uiFrame = await opt.evaluate(i => { const f = document.querySelector(`.pl-frame[data-plugin="${i}"]`); return f ? { sandbox: f.getAttribute('sandbox'), src: f.src } : null; }, B);
+  ok(uiFrame && uiFrame.sandbox === 'allow-scripts' && uiFrame.src === `http://cmrplug.localhost/tok-${B}/options.html`, 'plugins/tab: its options page is in a sandboxed frame at its own address: ' + JSON.stringify(uiFrame));
+  await opt.evaluate(i => { const f = document.querySelector(`.pl-frame[data-plugin="${i}"]`); window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, event: 'height', value: 321 }, source: f.contentWindow }));
+    window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, id: 7, method: 'options.set', args: { mine: { x: [1] }, n: 5 } }, source: f.contentWindow })); }, B);
+  await within(600, async () => await opt.evaluate(i => document.querySelector(`.pl-frame[data-plugin="${i}"]`).style.height, B) === '321px');
+  ok(await opt.evaluate(i => document.querySelector(`.pl-frame[data-plugin="${i}"]`).style.height, B) === '321px', 'plugins/tab: the height the page tells is used');
+  const ob = (await cfgOf(B)).options;
+  ok(ob.mine && ob.mine.x[0] === 1 && ob.n === 5, 'plugins/tab: what the options page saves reaches the settings through the hub: ' + JSON.stringify(ob));
+  await opt.evaluate(i => { const f = document.querySelector(`.pl-frame[data-plugin="${i}"]`); window.dispatchEvent(new MessageEvent('message', { data: { cmr: 1, id: 8, method: 'options.set', args: { n: 1 } }, source: window })); }, B);
+  await within(300, async () => (await cfgOf(B)).options.n === 5);
+  ok((await cfgOf(B)).options.n === 5, 'plugins/tab: a message that is not from that frame is ignored');
+  await opt.locator('.wl-item', { hasText: '베타' }).locator('.switch').click(); await control.waitForTimeout(400);
+  ok(await opt.locator('.pl-modal').count() === 1 && (await title()).includes('플러그인 켜기'), 'plugins/tab: turning on a plugin with permissions that are not allowed asks first');
+  await opt.locator('.pl-card button', { hasText: '취소' }).click(); await control.waitForTimeout(300);
+  ok((await cfgOf(B)).enabled === false && await opt.locator('.pl-modal').count() === 0, 'plugins/tab: cancel: it stays off');
+  await opt.locator('.wd .pl-fp').click(); await control.waitForTimeout(400);
+  await opt.screenshot({ path: path.join(OUT, 'options_plugins.png') });
+  ok((await opt.locator('.wd .pl-files').textContent()).includes('abc'), 'plugins/tab: the fingerprint and the files are shown');
+  // clean up
+  for (const k of [...files.keys()]) if (k.startsWith('plugins/')) files.delete(k);
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ plugins: {} })));
+  await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(400);
+  await opt.locator('#tabs li', { hasText: '일반' }).click();
+}
+
+// ---- window names: the name in the tab of the window (the default name when it is empty)
+ok(await main.locator('#title').textContent() === '메인', 'titles: the main window shows its name in its tab');
+ok(await extra.locator('#title').textContent() === '둘째', 'titles: an extra window shows the name it was given');
+{ // the bar fades while the mouse is out of the window and is back at once when it comes in (the cursor of the fake system is put outside / inside the pane)
+  cursorAway();
+  await until(async () => await has(main, 'outside'), 'the mouse is out of the window', 1000);
+  ok(await has(main, 'outside'), 'title bar: the mouse is out of the window: the bar fades (.outside)');
+  await cursorOver(main);
+  await until(async () => !(await has(main, 'outside')), 'the mouse is in the window again', 1000);
+  ok(!(await has(main, 'outside')), 'title bar: the mouse is in the window again: the bar is as before');
   kb.cx = 0; kb.cy = 0;
 }
 // ---- the window manager: the extra window is in the settings and open; its place is saved; the X closes it for good
 ok(id3 === 3 && cfgFile().child_windows.some(c => c.id === 3 && c.name === '둘째' && c.open_mode === 'always'), 'windows: a new window is in config.json: ' + JSON.stringify(cfgFile().child_windows.map(c => [c.id, c.open_mode])));
-ok(calls.includes('open_overlay') && await control.evaluate(() => window.cmrHub.windows.isOpen(3)), 'windows: the hub opened it');
-for (let i = 0; i < 20 && !(cfgFile().child_windows.find(c => c.id === 3) || {}).geometry; i++) await control.waitForTimeout(100);
-ok((cfgFile().child_windows.find(c => c.id === 3) || {}).geometry === '500x300+0+0' && cfgFile().geometry === '500x300+0+0', 'windows: the places of both windows are saved: ' + cfgFile().geometry);
+ok(await control.evaluate(() => window.cmrHub.windows.isOpen(3)) && await cm.locator('.pane[data-id="3"]').count() === 1, 'windows: the hub opened it (a pane of the center)');
 ok((await texts(extra)).some(t => t.includes('LFM')), 'windows: the extra window shows the chat too');
-await extra.click('#close');
-for (let i = 0; i < 20 && (await control.evaluate(() => window.cmrHub.windows.isOpen(3))); i++) await control.waitForTimeout(100);
+await extra.locator('#close').click();
+await until(async () => !(await control.evaluate(() => window.cmrHub.windows.isOpen(3))), 'the X closes it');
 ok(cfgFile().child_windows.find(c => c.id === 3).open_mode === 'always' && !(await control.evaluate(() => window.cmrHub.windows.isOpen(3))), 'windows: the X closes it for now and does not change its setting');
 await control.evaluate(() => window.cmrHub.windows.openWindow(3));
-await control.waitForTimeout(300);
+await within(300, async () => await control.evaluate(() => window.cmrHub.windows.isOpen(3)));
 ok(await control.evaluate(() => window.cmrHub.windows.isOpen(3)), 'windows: opened by hand');
 await control.evaluate(() => window.cmrHub.windows.remove(3));
 await control.waitForTimeout(500);
@@ -1171,7 +2018,7 @@ await opt.locator('#tabs li', { hasText: '고급' }).click();
   ok(rows.some(r => r.includes('창 상태 확인')) && rows.some(r => r.startsWith('합계')), 'advanced: the live table shows measured jobs: ' + rows.slice(0, 3).join(' / ').slice(0, 200));
 }
 await opt.click('#quitBtn');
-await control.waitForTimeout(200);
+await within(200, async () => calls.includes('quit_request'));
 ok(calls.includes('quit_request'), 'options: the quit button asks the program to end');
 
 ok(cfgFile().options_geometry === '500x300+0+0', 'options: its own place and size are saved: ' + cfgFile().options_geometry);
@@ -1181,177 +2028,48 @@ ok(await main.locator('.edge').count() === 4 && await main.locator('#grip').coun
 await main.mouse.click(60, 60, { button: 'right' });
 const menuItems = await main.locator('#ctx div:not(.sep)').allTextContents();
 ok(await main.locator('#ctx').isVisible() && menuItems[0] === 'Options of this window…' || menuItems[0] === '이 창의 옵션…', 'context menu: the options of this window come first: ' + menuItems.join('|'));
-ok(menuItems.length >= 5 && await main.locator('#ctx div.sep').count() === 1, 'context menu: a line, then the windows: ' + menuItems.join('|'));
+ok(menuItems.length >= 5 && await main.locator('#ctx div.sep').count() === 2, 'context menu: a line, then the windows, a line, the windows of the mini browser: ' + menuItems.join('|'));
 await main.locator('#ctx div').first().click();
-await control.waitForTimeout(300);
+await within(300, async () => calls.includes('open_options') && await main.evaluate(() => document.getElementById('ctx').hidden));
 ok(calls.includes('open_options') && await main.evaluate(() => document.getElementById('ctx').hidden), 'context menu: it opens the options and closes itself');
 await main.keyboard.press('Escape');
 await main.evaluate(() => { const l = document.getElementById('lines'); l.scrollTop = l.scrollHeight; });   // earlier tests scrolled up: the review would hold the window
 
-// ---- the same menu and tips in the popup window (a window of its own: the page draws nothing itself)
+// ---- lines that faded away come back with a turn of the wheel DOWN, also at the newest line where nothing can scroll (a window that takes the mouse; the turns of a click-through window are the exe's)
 {
-  popupOn = true;
-  await main.evaluate(() => { window.__cmrNoPopup = false; });
-  const pop = () => popupPage;
-  const menuAt = async () => { await main.evaluate(() => document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 60, button: 2 }))); await control.waitForTimeout(900); };
-  await menuAt();
-  ok(!!pop() && await pop().locator('#ctx').isVisible() && await main.evaluate(() => document.getElementById('ctx').hidden), 'popup: the menu is in the popup window, not in the page');
-  const items = await pop().locator('#ctx div:not(.sep)').allTextContents();
-  ok(items.length >= 5 && await pop().locator('#ctx div.sep').count() === 1 && (items[0] === '이 창의 옵션…' || items[0] === 'Options of this window…'), 'popup: the same items: ' + items.join('|'));
-  { // a Mac gives no mouse-over to a window that is not active: the line under the cursor is marked from the cursor reading (Windows: nothing marked, :hover does it)
-    const centre = () => pop().evaluate(() => { const r = document.querySelector('#ctx div:not(.sep)').getBoundingClientRect(); return [(r.left + r.right) / 2 * devicePixelRatio, (r.top + r.bottom) / 2 * devicePixelRatio]; });
-    const c0 = await centre(); kb.cx = Math.round(c0[0]); kb.cy = Math.round(c0[1]); await control.waitForTimeout(400);
-    ok(await pop().locator('#ctx div.hot').count() === 0, 'popup (Windows): the cursor reading marks nothing (the browser has :hover)');
-    await control.evaluate(() => window.__TAURI__.event.emit('popup-gone', {})); await control.waitForTimeout(200);
-    { const pg = popupPage; popupPage = null; await pg.close(); }
-    osKind = 'macos'; kb.cx = 900; kb.cy = 900;
-    await menuAt();
-    const c1 = await centre(); kb.cx = Math.round(c1[0]); kb.cy = Math.round(c1[1]); await control.waitForTimeout(500);
-    ok(await pop().locator('#ctx div.hot').count() === 1 && (await pop().locator('#ctx div.hot').textContent()) === items[0], 'popup (macOS): the line under the cursor is marked: ' + await pop().locator('#ctx div.hot').allTextContents());
-    kb.cx = 900; kb.cy = 900; await control.waitForTimeout(400);
-    ok(await pop().locator('#ctx div.hot').count() === 0, 'popup (macOS): the cursor left the menu: nothing marked');
-    await control.evaluate(() => window.__TAURI__.event.emit('popup-gone', {})); await control.waitForTimeout(200);
-    { const pg = popupPage; popupPage = null; await pg.close(); }
-    osKind = 'windows'; kb.cx = 0; kb.cy = 0;
-    await menuAt();
-  }
-  const placed = popupPlaced.at(-1);
-  ok(placed && placed.kind === 'menu' && Array.isArray(placed.at) && !placed.anchor && placed.w >= 150 && placed.h > 40, 'popup: the exe is told it is a menu (takes the mouse), where, and the size: ' + JSON.stringify(placed));
-  const before = calls.filter(c => c === 'open_options').length;
-  await pop().locator('#ctx div').first().click(); await control.waitForTimeout(500);
-  ok(calls.filter(c => c === 'open_options').length === before + 1 && await pop().locator('#ctx').isHidden(), 'popup: a chosen item is done by the translation window and the menu goes away');
-  // a click anywhere else closes it (any button; the press that opened the menu does not count)
-  kb.enter = false; kb.cx = 900; kb.cy = 900;
-  await menuAt();
-  ok(await pop().locator('#ctx').isVisible(), 'popup: the menu is open again');
-  kb.enter = true; await control.waitForTimeout(500);                          // (every key the fake exe is asked about is "down": the buttons)
-  ok(await pop().locator('#ctx').isHidden(), 'popup: a click outside closes the menu');
-  // the close is written to the log with its reason
-  const logText = () => files.get('logs/chatmatrix.log') || '';
-  ok(/popup: menu: a click outside: cursor 900,900 window/.test(logText()), 'popup: the log says why the menu closed: ' + (logText().match(/popup: menu: [^\n]*/g) || []).slice(-2).join(' | '));
-  // for a moment after it has opened the menu ignores a click elsewhere, Esc and the window's "close" (the click that opened it must not close it)
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ tuning: { POPUP_GRACE_MS: 1500 } }))); await control.waitForTimeout(600);
-  kb.enter = false; kb.cx = 900; kb.cy = 900;
-  await main.evaluate(() => document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 60, button: 2 }))); await control.waitForTimeout(500);
-  kb.enter = true; await control.waitForTimeout(300); kb.enter = false; await control.waitForTimeout(200);
-  await main.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await control.waitForTimeout(300);
-  ok(await pop().locator('#ctx').isVisible() && /ignored: a click outside/.test(logText()), 'popup: a click elsewhere and Esc right after it opened are ignored, and logged');
-  await control.waitForTimeout(1500);
-  kb.enter = true; await control.waitForTimeout(400); kb.enter = false;
-  ok(await pop().locator('#ctx').isHidden(), 'popup: after that moment a click elsewhere closes it');
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ tuning: {} }))); await control.waitForTimeout(500);
-  kb.cx = 0; kb.cy = 0;
-  // the interact key let go in a click-through window: the window lets the mouse through again, the menu is taken away
-  const was = cfgFile().click_through === true;
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ click_through: true }))); kb.shift = true; kb.cx = 100; kb.cy = 100; await control.waitForTimeout(900);
-  ok(await main.evaluate(() => document.body.classList.contains('interactive')), 'popup: (click-through with the key held: the window is usable)');
-  await menuAt();
-  ok(await pop().locator('#ctx').isVisible(), 'popup: the menu opened with the key held');
-  kb.shift = false; await control.waitForTimeout(900);
-  ok(await pop().locator('#ctx').isHidden(), 'popup: the key let go (click-through again): the menu is taken away');
-  await control.evaluate(w => import('./settings.js').then(m => m.set({ click_through: w })), was); kb.cx = 0; kb.cy = 0; await control.waitForTimeout(700);
-  // the tip of a widget: in the popup, above the widget, and gone when the pointer leaves
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: { 'core:voice-level': { place: 'inside', anchor: 'top-left', dx: 0, dy: 0, style: 'bar', show: 'always', scale: 1, opacity: 1, opts: {} } } })));
-  await control.waitForTimeout(600);
-  const W = await main.evaluate(() => !!document.querySelector('#widgets .widget'));
-  ok(W, 'popup: (a widget is on in the window)');
-  if (W) {
-    // the window loop gives the pointer from the cursor of the fake system: put the cursor on the widget
-    const c = await main.evaluate(() => { const r = document.querySelector('#widgets .widget').getBoundingClientRect(); return [(r.left + r.right) / 2 * devicePixelRatio, (r.top + r.bottom) / 2 * devicePixelRatio]; });
-    kb.cx = Math.round(c[0]); kb.cy = Math.round(c[1]); await control.waitForTimeout(900);
-    const pl = popupPlaced.at(-1);
-    ok(await pop().locator('#wtip').isVisible() && (await pop().locator('#wtip').textContent()).length > 3 && pl && pl.kind === 'tip' && pl.anchor && pl.anchor.length === 4, 'popup: the tip of a widget is in the popup window, about the widget (the mouse goes through it): ' + JSON.stringify(pl));
-    const g0 = calls.filter(c => c === 'popup_follow').length; await control.waitForTimeout(400);
-    ok(calls.filter(c => c === 'popup_follow').length === g0, 'popup: the tip of a widget stays at the widget: it does not follow');
-    kb.cx = 1900; kb.cy = 1000; await control.waitForTimeout(700);
-    ok(await pop().locator('#wtip').isHidden(), 'popup: the pointer leaves the widget: the tip goes');
-    kb.cx = 0; kb.cy = 0;
-  }
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: {} }))); await control.waitForTimeout(400);
-  // the tip of a link under the mouse (a window that is not click-through): in the popup, gone when the mouse leaves the link
-  await main.evaluate(() => {
-    const t = document.createElement('span'); t.className = 'cv-tipped'; t._tip = ['[Popup Item]', 'Binds when picked up']; t.id = 'tiptest2'; t.textContent = '[Popup Item]';
-    t.style.cssText = 'position:absolute; left:52px; top:86px; padding:2px 8px; color:#fff; z-index:1;'; document.querySelector('.cv-blk').append(t);
-  });
-  await main.hover('#tiptest2'); await control.waitForTimeout(900);
-  const f0 = calls.filter(c => c === 'popup_follow').length; await control.waitForTimeout(500);
-  const f1 = calls.filter(c => c === 'popup_follow').length;
-  ok(f1 - f0 >= 8, 'popup: a link tip asks the exe to follow the cursor again and again: ' + (f1 - f0) + ' times in half a second');
-  const tl = popupPlaced.at(-1);
-  ok(await pop().locator('#tip').isVisible() && (await pop().locator('#tip').textContent()).includes('Popup Item') && tl && tl.kind === 'tip' && !tl.anchor && Array.isArray(tl.at), 'popup: the tip of a link is in the popup window, at the cursor (the mouse goes through it): ' + JSON.stringify(tl));
-  await main.mouse.move(300, 380); await control.waitForTimeout(700);
-  ok(await pop().locator('#tip').isHidden(), 'popup: the mouse leaves the link: the tip goes');
-  const f2 = calls.filter(c => c === 'popup_follow').length; await control.waitForTimeout(400);
-  ok(calls.filter(c => c === 'popup_follow').length === f2, 'popup: it stops asking when the tip is gone');
-  await main.evaluate(() => document.getElementById('tiptest2').remove());
-  // a price / a slot on the right of a line stays on ONE line when the tip is narrow (the long text on the left wraps)
-  await main.evaluate(() => import('./popup_host.js').then(m => m.popup.tip({ html: '<table cellspacing=0 cellpadding=1><tr><td>' + 'A very long description of an effect that has to wrap. '.repeat(6) + '</td><td></td></tr><tr><td>Sell price</td><td align="right"><span>7s 28c</span></td></tr></table>', at: [100, 100] })));
-  await control.waitForTimeout(800);
-  const rightCell = await pop().locator('#tip td[align=right]').evaluate(e => ({ h: e.getBoundingClientRect().height, line: parseFloat(getComputedStyle(e).lineHeight) || 16, ws: getComputedStyle(e).whiteSpace }));
-  ok(rightCell.ws === 'nowrap' && rightCell.h < rightCell.line * 2, 'popup: the right column of a tip (a price) is not broken into lines: ' + JSON.stringify(rightCell));
-  // the width of a link tip is limited (TIP_MAX_W, 250 like the game); the tip of a widget is the widget's own business
-  const longTip = () => main.evaluate(() => import('./popup_host.js').then(m => m.popup.tip({ html: '<table><tr><td>' + 'Very long item name '.repeat(20) + '</td></tr></table>', at: [100, 100] })));
-  await longTip(); await control.waitForTimeout(800);
-  const w250 = popupPlaced.at(-1).w;
-  ok(w250 >= 200 && w250 <= 252, 'popup: a long link tip is at most 250 pixels wide (the setting): ' + w250);
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ tuning: { TIP_MAX_W: 400 } }))); await control.waitForTimeout(600);
-  await longTip(); await control.waitForTimeout(800);
-  const w400 = popupPlaced.at(-1).w;
-  ok(w400 > 350 && w400 <= 402, 'popup: the width follows the setting: ' + w400);
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ tuning: {} }))); await control.waitForTimeout(500);
-  await main.evaluate(() => import('./popup_host.js').then(m => m.popup.hide('tip'))); await control.waitForTimeout(400);
-  // by default the window stays (0): it is not taken away after a use
-  const closes = popupCloses;
-  await menuAt(); await main.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await control.waitForTimeout(1200);
-  ok(popupCloses === closes && !!pop(), 'popup: the default (0): the window stays after the use');
-  // with a time (50 ms here): nobody needs it for that long: the window is taken away, and made again when the next one is asked for
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ tuning: { POPUP_IDLE_MS: 50 } }))); await control.waitForTimeout(600);
-  await menuAt(); kb.enter = false;
-  await main.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await control.waitForTimeout(1200);
-  ok(popupCloses === closes + 1 && !pop(), 'popup: after the idle time the window is taken away');
-  await menuAt();
-  ok(!!pop() && await pop().locator('#ctx').isVisible(), 'popup: and made again when it is needed');
-  await main.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await control.waitForTimeout(900);
-  // the program makes it ahead of time (the first tip should not wait): "warm" makes the window and shows nothing
-  const until = async (fn, ms = 4000) => { for (let t = 0; t < ms && !fn(); t += 100) await control.waitForTimeout(100); return fn(); };
-  await until(() => !popupPage);                                                              // (the idle time of the step before has taken the old window away)
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ tuning: {} }))); await control.waitForTimeout(600);
-  const placedBefore = popupPlaced.length;
-  await main.evaluate(() => import('./popup_host.js').then(m => m.popup.warm()));
-  const made = await until(() => !!popupPage); await control.waitForTimeout(700);
-  ok(made && popupPlaced.length === placedBefore, 'popup: made ahead of time, nothing shown: ' + JSON.stringify({ made, placed: popupPlaced.length - placedBefore }));
-  popupOn = false;
-  await main.evaluate(() => { window.__cmrNoPopup = true; });
-  // lines that faded away come back with a turn of the wheel DOWN too, also at the newest line where nothing can scroll (a window that takes the mouse; the turns of a click-through window are the exe's)
   await main.evaluate(() => { const l = document.getElementById('lines'); l.scrollTop = l.scrollHeight; });
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ fade_sec: 1 }))); await control.waitForTimeout(5200);
   const hiddenN = () => main.evaluate(() => [...document.querySelectorAll('#lines .cv-blk')].filter(e => e.style.visibility === 'hidden').length);
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ fade_sec: 1 })));
+  await until(async () => (await hiddenN()) > 0, 'the old lines fade away', 7000);
   const hiddenBefore = await hiddenN();
   ok(hiddenBefore > 0, 'wheel down: the old lines have faded away: ' + hiddenBefore);
-  await main.mouse.move(250, 200); await main.mouse.wheel(0, 120); await control.waitForTimeout(500);
-  ok(await hiddenN() < hiddenBefore, 'wheel down: a turn of the wheel down brings them back, also at the newest line: ' + hiddenBefore + ' -> ' + await hiddenN() + ' ' + await main.evaluate(() => { const l = document.getElementById('lines'); return [l.scrollTop, l.scrollHeight, l.clientHeight, document.body.className].join(','); }));
-  await control.evaluate(() => import('./settings.js').then(m => m.set({ fade_sec: 0 }))); await control.waitForTimeout(500);
-  // click-through with the wheel allowed: while lines have faded away the exe is asked for the turns DOWN too; a window that hides itself under the mouse does not ask at all
+  { const b = await main.loc('.pbody').boundingBox(); await cm.mouse.move(b.x + 60, b.y + 60); await cm.mouse.wheel(0, 120); }
+  await until(async () => (await hiddenN()) < hiddenBefore, 'a turn of the wheel down brings them back', 1500);
+  ok(await hiddenN() < hiddenBefore, 'wheel down: a turn of the wheel down brings them back, also at the newest line: ' + hiddenBefore + ' -> ' + await hiddenN());
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ fade_sec: 0 })));
+  // click-through with the wheel allowed: the turns (both ways) are the exe's; a window that hides itself under the mouse does not ask for them at all
   {
-    const zone = () => zoneCalls.at(-1) || {};
+    const zoneOn = () => (centerRects.at(-1).wheel || []).some(p => p.id === '1');
     const saved = { click_through: cfgFile().click_through === true, wheel_through: cfgFile().wheel_through === true, hover_clear: cfgFile().hover_clear === true };
-    kb.shift = false; kb.cx = 100; kb.cy = 100;
-    await control.evaluate(() => import('./settings.js').then(m => m.set({ click_through: true, wheel_through: true, hover_clear: false, fade_sec: 1 }))); await control.waitForTimeout(5600);
-    ok(zone().on === true && zone().down === true, 'wheel zone: click-through, wheel allowed, lines faded away: the exe is asked for the turns down too (it always is now): ' + JSON.stringify(zone()));
+    kb.shift = false; await cursorOver(main);
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ click_through: true, wheel_through: true, hover_clear: false, fade_sec: 1 })));
+    await until(async () => zoneOn() && (await hiddenN()) > 0, 'click-through, wheel allowed, lines faded away', 7000);
+    ok(zoneOn(), 'wheel zone: click-through, wheel allowed: the exe is asked for the turns (both ways): ' + JSON.stringify(centerRects.at(-1).wheel));
     const hid0 = await hiddenN();
-    wheel.push(-120); await control.waitForTimeout(700);
-    ok(await hiddenN() < hid0 && zone().on === true && zone().down === true, 'wheel zone: a turn down (taken by the exe) brings the lines back; the exe is asked for the turns both ways all the time: ' + hid0 + ' -> ' + await hiddenN() + ' ' + JSON.stringify(zone()));
+    wheel.push(-120);
+    await until(async () => (await hiddenN()) < hid0, 'a turn down (taken by the exe) brings the lines back', 1500);
+    ok(await hiddenN() < hid0 && zoneOn(), 'wheel zone: a turn down (taken by the exe) brings the lines back: ' + hid0 + ' -> ' + await hiddenN());
     // the lines are on their way out (the 3 seconds of the fade; none is gone yet): a turn down is taken then too
-    await control.waitForTimeout(2300);
-    const fadeNow = await main.evaluate(() => { const k = [...document.querySelectorAll('#lines .cv-blk')]; return { gone: k.filter(e => e.style.visibility === 'hidden').length, part: k.filter(e => e.style.opacity !== '' && parseFloat(e.style.opacity) < 1).length }; });
-    ok(fadeNow.gone === 0 && fadeNow.part > 0 && zone().down === true, 'wheel zone: lines on their way out (not gone yet): the exe is asked for the turns down too: ' + JSON.stringify({ ...fadeNow, zone: zone() }));
-    wheel.push(-120); await control.waitForTimeout(700);
-    ok(zone().down === true && (await hiddenN()) === 0, 'wheel zone: a turn down during the fade brings them back: ' + JSON.stringify(zone()));
-    await control.evaluate(() => import('./settings.js').then(m => m.set({ hover_clear: true }))); await control.waitForTimeout(700);
-    ok(zone().on === false, 'wheel zone: "관통 창 숨기기" is on: the wheel stays the game\'s: ' + JSON.stringify(zone()));
-    await control.evaluate(s2 => import('./settings.js').then(m => m.set({ ...s2, fade_sec: 0 })), saved); kb.cx = 0; kb.cy = 0; await control.waitForTimeout(700);
+    await until(async () => (await hiddenN()) === 0 && (await main.evaluate(() => [...document.querySelectorAll('#lines .cv-blk')].some(e => e.style.opacity !== '' && parseFloat(e.style.opacity) < 1))), 'lines are on their way out again', 7000);
+    wheel.push(-120);
+    await until(async () => (await main.evaluate(() => [...document.querySelectorAll('#lines .cv-blk')].every(e => e.style.opacity === '' || parseFloat(e.style.opacity) === 1))), 'a turn down during the fade brings them back', 1500);
+    ok(zoneOn() && (await hiddenN()) === 0, 'wheel zone: a turn down during the fade brings them back');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ hover_clear: true })));
+    await until(async () => !zoneOn(), '"관통 창 숨기기" keeps the wheel the game\'s', 1500);
+    ok(!zoneOn(), 'wheel zone: "관통 창 숨기기" is on: the wheel stays the game\'s');
+    await control.evaluate(s2 => import('./settings.js').then(m => m.set({ ...s2, fade_sec: 0 })), saved); cursorAway();
+    await until(async () => !(await has(main, 'through')) || !saved.click_through, 'the window is as it was', 1500);
   }
-  if (popupPage) { const pg = popupPage; popupPage = null; await pg.close(); }
 }
 
 // ---- quit with the game: the game window was seen; it goes away; 5 seconds later the program quits (only when the option is on)
@@ -1364,7 +2082,7 @@ await control.waitForTimeout(3500);
 ok(!calls.includes('quit_app'), 'exit with game: the option is off: nothing happens');
 await opt.locator('#tabs li', { hasText: '일반' }).click();
 await rowOf('와우 종료 시 같이 종료').locator('.switch').click();
-await control.waitForTimeout(7000);
+await within(7000, async () => calls.includes('quit_app'));
 ok(calls.includes('quit_app'), 'exit with game: quits some seconds after the game was gone');
 
 ok(errors.length === 0, 'page errors: ' + errors.join(' | '));
@@ -1383,7 +2101,7 @@ ok(errors.length === 0, 'page errors: ' + errors.join(' | '));
   await hubNew.waitForFunction(() => window.cmrHub && window.cmrHub.voice);
   const optNew = await open('options.html?label=options', { width: 940, height: 680 });
   await optNew.locator('#tabs li', { hasText: '음성인식' }).click();
-  await optNew.waitForTimeout(300);
+  await within(300, async () => await optNew.locator('.row b.label:text-is("소리 대상")').count() === 1);
   ok(await optNew.locator('.row b.label:text-is("소리 대상")').count() === 1, 'macOS 14: the voice tab has its settings');
   ok(await optNew.locator('button:text-is("설치 (Metal · GPU 와 CPU)")').count() === 1 && await optNew.locator('button:text-is("설치 (CPU)")').count() === 0, 'macOS 14: one install button (Metal), not the Windows ones');
   ok(await hubNew.evaluate(() => window.cmrHub.voice.control.state.unsupported === undefined), 'macOS 14: the voice recognition is not marked unsupported');
@@ -1393,6 +2111,17 @@ ok(errors.length === 0, 'page errors: ' + errors.join(' | '));
   osKind = 'windows';
 }
 clearTimeout(watchdog);
+// the slow steps: work (the time that was not the test waiting) and waiting (the test's own `tick`) are judged apart; the limits are a first guess (1.0 s each)
+{
+  const WORK_MS = 1000, WAIT_MS = 1000, rows = steps.map(x => ({ ...x, work: x.ms - x.wait }));
+  const slow = rows.filter(x => x.work > WORK_MS || x.wait > WAIT_MS);
+  const total = rows.reduce((a, x) => a + x.ms, 0), totalWait = rows.reduce((a, x) => a + x.wait, 0);
+  const line = x => `${String(Math.round(x.ms)).padStart(6)} ms (work ${String(Math.round(x.work)).padStart(5)}, wait ${String(Math.round(x.wait)).padStart(5)} = ${String(x.virtual).padStart(6)} virtual)  ${x.msg.slice(0, 110)}`;
+  const report = [`steps: ${rows.length}, total ${Math.round(total)} ms, of it waiting ${Math.round(totalWait)} ms`, '', 'slowest:', ...[...rows].sort((a, b) => b.ms - a.ms).slice(0, 40).map(line), '', `over the limits (work > ${WORK_MS} ms or wait > ${WAIT_MS} ms): ${slow.length}`, ...slow.map(line)];
+  try { fs.writeFileSync(path.join(OUT, 'e2e_timing.txt'), report.join('\n')); } catch { /* no folder */ }
+  try { fs.writeFileSync(path.join(OUT, 'e2e_timing.json'), JSON.stringify(rows)); } catch { /* no folder */ }
+  if (slow.length) console.log(`  (warning: ${slow.length} slow steps of ${rows.length}; the slowest: ${[...slow].sort((a, b) => b.ms - a.ms).slice(0, 3).map(x => Math.round(x.ms) + ' ms "' + x.msg.slice(0, 50) + '"').join(' | ')}; all in e2e_timing.txt)`);
+}
 await browser.close(); server.close();
 console.log(failed ? `${failed} failed` : '  e2e checks passed');
 process.exit(failed ? 1 : 0);

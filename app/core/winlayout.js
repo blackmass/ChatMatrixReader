@@ -24,6 +24,21 @@ export function cascade(mainRect, n) {
   return [x + CASCADE * n, y + CASCADE * n];
 }
 
+// where a window with no saved place first appears: the middle of the work area of the main screen (what the menu bar, the dock or the task bar leave), `top` pixels of it kept free
+// above for the bar that stands over the window. When a window already stands there (`taken`: [{ x, y }], the upper left corners), the next one is a step lower and to the right.
+export function firstPlace(size, area, taken = [], top = 0) {
+  const [ax, ay, aw, ah] = area, { w, h } = size;
+  const fit = (x, y) => x + w <= ax + aw && y + h <= ay + ah;
+  const x0 = Math.max(ax, Math.min(Math.round(ax + (aw - w) / 2), ax + aw - w)), y0 = Math.max(ay + top, Math.min(Math.round(ay + (ah - h) / 2), ay + ah - h));
+  const busy = (x, y) => taken.some(t => t && Number.isFinite(t.x) && Number.isFinite(t.y) && Math.abs(t.x - x) < CASCADE && Math.abs(t.y - y) < CASCADE);
+  for (let k = 0; k < 40; k++) {
+    const x = x0 + k * CASCADE, y = y0 + k * CASCADE;
+    if (k && !fit(x, y)) break;
+    if (!busy(x, y)) return [x, y];
+  }
+  return [x0, y0];                                    // (no room for one more step: the middle again)
+}
+
 export const MAIN_LABEL = 'main';
 export const labelOf = wid => (wid === 1 ? MAIN_LABEL : `win${wid}`);
 export const widOf = label => (label === MAIN_LABEL ? 1 : (/^win(\d+)$/.exec(label) ? parseInt(RegExp.$1, 10) : 0));

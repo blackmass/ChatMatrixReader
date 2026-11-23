@@ -2,6 +2,7 @@
 // the pointer is over it. No data of its own: it is given the settings (`set`), the states (`state`) and the pointer (`pointer`).
 // The pointer comes from the window loop (the system's cursor position), not from mouse events: it also works while the window is click-through.
 import { ANCHORS, KINDS, drawn } from './registry.js';
+import { cleanSvg, svgSrc, MAX_SVG_FILE } from '../core/svg.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const BATTERY_CELLS = 5;
@@ -20,6 +21,17 @@ export function buildView(kind, style) {
     root.append(fill, mark);
     return { root, update: s => { fill.style.width = (s.value || 0) * 100 + '%'; mark.hidden = typeof s.marker !== 'number'; if (typeof s.marker === 'number') mark.style.left = s.marker * 100 + '%'; } };
   }
+  if (k === 'icon') {
+    const root = el('div', 'w-icon'), img = el('img', 'w-img'), text = el('span', 'w-text');
+    img.alt = ''; img.draggable = false;
+    root.append(img, text);
+    let last = null;
+    return { root, update: s => {
+      const src = svgSrc(cleanSvg(s.svg || '', MAX_SVG_FILE));                       // (cleaned again here: this page draws nothing that was not)
+      if (src !== last) { last = src; if (src) img.src = src; else img.removeAttribute('src'); }
+      img.hidden = !src; text.textContent = s.text || ''; text.hidden = !s.text;
+    } };
+  }
   if (k === 'light') {
     const root = el('div', 'w-light'), dot = el('span', 'w-dot'), text = el('span', 'w-text');
     root.append(dot, text);
@@ -33,6 +45,7 @@ export function buildView(kind, style) {
 export class WidgetLayer {
   // root: the element the 8 containers are put into; defs: the Registry; `tipBox`: where the tip is written (made if not given)
   constructor({ root, registry, tipBox = null, sink = null }) {
+    this.onAction = null;                                // (id, 'click' | 'menu', item?) the user used a widget of a plugin (the window passes it on)
     this.sink = sink;                                    // where the tip is drawn when not here: a window of its own { usable(), show(text, rect), hide() }
     this.root = root; this.registry = registry;
     root.classList.add('wlayer');
@@ -44,7 +57,7 @@ export class WidgetLayer {
   }
   // the settings of the window: { id: entry } -> the widgets that are drawn (the others are taken away). -> the ids that are drawn
   set(widgets) {
-    const want = drawn(widgets), ids = new Set(want.map(w => w.id));
+    const want = drawn(widgets).filter(w => this.registry.get(w.id)), ids = new Set(want.map(w => w.id));       // (a widget nobody provides now, e.g. of a plugin that is off, is not drawn; its settings stay)
     for (const [id, it] of this.items) if (!ids.has(id)) { it.node.remove(); this.items.delete(id); }
     for (const e of want) {
       const def = this.registry.get(e.id), kind = def ? def.kind : 'text';
@@ -53,11 +66,13 @@ export class WidgetLayer {
       if (!it || it.kind !== kind || it.style !== style) {
         if (it) it.node.remove();
         const view = buildView(kind, style), node = el('div', 'widget'); node.dataset.id = e.id;
+        node.addEventListener('click', ev => { const w = this.items.get(e.id); if (ev.button === 0 && w && this.clickable(w) && this.onAction) { ev.stopPropagation(); this.onAction(e.id, 'click'); } });
         node.append(view.root);
         it = { view, node, kind, style, entry: e, state: this.states.get(e.id) || null, title: def ? def.label : e.id };
         this.items.set(e.id, it);
       }
       it.entry = e;
+      it.node.classList.toggle('clickable', this.clickable(it));
       this.place(it);
       this.paint(it);
     }
@@ -72,10 +87,22 @@ export class WidgetLayer {
     const order = [...this.items.keys()];
     [...box.children].sort((a, b) => order.indexOf(a.dataset.id) - order.indexOf(b.dataset.id)).forEach(n => box.append(n));
   }
+  // may the user click this widget (a widget of a plugin that asked for it, or that has a menu)
+  clickable(it) { const def = this.registry.get(it.entry.id); return !!(def && def.owner !== 'core' && (def.clickable || this.menuOf(it).length)); }
+  // the items of its menu: the state's (a plugin changes them while it runs), else the definition's
+  menuOf(it) { const def = this.registry.get(it.entry.id), s = it.state; return (s && Array.isArray(s.menu) ? s.menu : def && def.menu) || []; }
+  // the widget an element belongs to (for the right-click menu of the window): { id, title, owner, menu, clickable } or null
+  itemOf(node) {
+    const w = node && node.closest ? node.closest('.widget') : null;
+    const it = w && this.items.get(w.dataset.id);
+    if (!it) return null;
+    const def = this.registry.get(it.entry.id);
+    return { id: it.entry.id, title: it.title, owner: def ? def.owner : '', menu: this.menuOf(it), clickable: this.clickable(it) };
+  }
   state(id, st) {
     this.states.set(id, st);
     const it = this.items.get(id);
-    if (it) { it.state = st; this.paint(it); }
+    if (it) { it.state = st; it.node.classList.toggle('clickable', this.clickable(it)); this.paint(it); }
   }
   paint(it) {
     const s = it.state || { active: false, value: 0, marker: null, tone: 'idle', text: '', tip: '' }, e = it.entry;

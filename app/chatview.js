@@ -2,14 +2,17 @@
 // operations it returns (['insert', i, block] ['replace', i, block] ['delete', i, n] ['clear']) into DOM, and keeps the page equal to
 // `model.blocks`. Port of chatview.py: the same look settings, expressed as CSS (hanging indent, group gap, text shadow ...).
 //
-//   const view = new ChatView(scrollElement);          the element needs the classes of chatview.css (see overlay.html)
+//   const view = new ChatView(scrollElement);          the element needs the classes of chatview.css (see center.html)
 //   view.setLook({ size: 15, shadow: true, ... }, model)
 //   view.apply(feed.handle(event), feed.model)         after every change of the model
 import * as theme from './core/theme.js';
 import * as fade from './core/fade.js';
 import { T } from './core/timings.js';
 import { add as perfAdd } from './core/perf.js';
+import * as urls from './core/urls.js';
 
+// A click on a link of a line (a plugin put it there): `linkHandler.fn(id)`; on a web address in the text: `linkHandler.url(address, event)`. Both are set by the window page.
+export const linkHandler = { fn: null, url: null, urls: true };           // (urls: false = the addresses stay plain text: the option "채팅 주소를 링크로 표시")
 export const FADE_MS = 3000;           // (defaults, the values in use are T.*; see core/timings.js) how long a line takes to fade out once its time is up (tuning.py)
 export const FADE_TICK_MS = 33;        // how often fading lines are drawn
 export const FADE_IDLE_MS = 250;       // how often the age of the lines is looked at while none is fading
@@ -50,6 +53,10 @@ export class ChatView {
     this.now = now;
     this.list = document.createElement('div');
     this.list.className = 'cv-list';
+    this.list.addEventListener('click', e => {
+      const u = e.button === 0 && e.target.closest ? e.target.closest('.cv-url') : null;
+      if (u && linkHandler.url) { e.stopPropagation(); linkHandler.url(u.dataset.url, e); return; }
+      const s = e.button === 0 && e.target.closest ? e.target.closest('.cv-link') : null; if (s && linkHandler.fn) { e.stopPropagation(); linkHandler.fn(s.dataset.link); } });
     scroll.classList.add('cv-scroll');
     scroll.appendChild(this.list);
     this.look = { ...DEFAULT_LOOK };
@@ -70,7 +77,7 @@ export class ChatView {
     this.list.addEventListener('mouseover', e => this.showTip(e));
     this.list.addEventListener('mousemove', e => this.moveTip(e));
     this.list.addEventListener('mouseout', () => { this.tip.style.display = 'none'; this.polled = false; this.hideSunk(); });
-    this.sink = null;                     // where the tip is drawn when not here: a window of its own (popup_host.js, set by the window page): { usable(), show(html, x, y), hide() }
+    this.sink = null;                     // where the tip is drawn when not here: a window of its own (the control center draws it on top: center.js): { usable(), show(html, x, y), hide() }
     this.polled = false;                  // the tip on the screen was put there by tipAtPoint (the pointer of a click-through window), not by the mouse events
     this.setLook({});
   }
@@ -143,11 +150,18 @@ export class ChatView {
     let base = model.color(b);
     if (b.style === 'trans' && s.trans_color) base = s.trans_color;
     for (const p of b.pieces) {
-      const span = document.createElement('span');
-      span.textContent = p.text.replace(/️/g, '');
-      span.style.color = theme.pieceColor(p, base);
-      if (p.tip && p.tip.length) { span.className = 'cv-tipped'; span._tip = p.tip; }
-      el.appendChild(span);
+      const text = p.text.replace(/️/g, '');
+      // the plain text of a line (not an item, a name, a link of a plugin): a web address in it is a link of its own, "[discord.gg/abc]"; the click asks before anything opens (center.js)
+      const plain = linkHandler.urls && p.role == null && p.quality == null && !(p.tip && p.tip.length) && !p.link;
+      for (const part of plain ? urls.split(text) : [{ text }]) {
+        const span = document.createElement('span');
+        span.textContent = part.text;
+        if (part.url) { span.className = 'cv-url cv-tipped'; span.dataset.url = part.url; span._tip = [part.url]; el.appendChild(span); continue; }
+        span.style.color = theme.pieceColor(p, base);
+        if (p.tip && p.tip.length) { span.className = 'cv-tipped'; span._tip = p.tip; }
+        if (p.link) { span.classList.add('cv-link'); span.dataset.link = p.link; }
+        el.appendChild(span);
+      }
     }
     return el;
   }
@@ -213,7 +227,7 @@ export class ChatView {
     const last = starts.length - 1;
     let first = max > 0 && starts.length > max ? starts.length - max : 0;           // the oldest group that stays
     if (whole) {
-      const edge = this.scroll.getBoundingClientRect().top + (this.inset || 0);          // (inset: the part of the top the title bar covers, see overlay.js)
+      const edge = this.scroll.getBoundingClientRect().top + (this.inset || 0);          // (inset: the part of the top the title bar covers, see pane.js)
       for (let g = last; g >= first; g--) {                              // from the newest back: the first one that starts above the edge is cut, so are all older ones
         if (kids[starts[g]].getBoundingClientRect().top < edge - 1) { first = g === last ? last : g + 1; break; }     // (the newest stays, even when it is taller than the window)
       }
@@ -273,11 +287,11 @@ export class ChatView {
     const el = e.target.closest?.('.cv-tipped');
     if (this.sunk()) {
       if (!el || el.parentElement.style.visibility === 'hidden') { if (this._sunkEl) this.hideSunk(); return; }
-      if (el !== this._sunkEl) { this._sunkEl = el; this.sinkShow(el, e.clientX, e.clientY, theme.tipHtml(el._tip)); }
+      if (el !== this._sunkEl) { this._sunkEl = el; this.sinkShow(el, e.clientX, e.clientY, theme.tipHtml(el._tip, true)); }
       return;
     }
     if (!el || el.parentElement.style.visibility === 'hidden') { this.tip.style.display = 'none'; return; }
-    this.tip.innerHTML = theme.tipHtml(el._tip);
+    this.tip.innerHTML = theme.tipHtml(el._tip, true);
     this.tip.style.display = 'block';
     this.moveTip(e);
   }
@@ -294,12 +308,12 @@ export class ChatView {
     const el = x === null || x === undefined ? null : document.elementFromPoint(x, y)?.closest?.('.cv-tipped');
     if (!el || el.parentElement.style.visibility === 'hidden') { this.hideTip(); return false; }
     if (this.sunk()) {
-      if (el !== this._tipEl || !this.polled) { this._tipEl = el; this.polled = true; this.sinkShow(el, x, y, theme.tipHtml(el._tip)); }
+      if (el !== this._tipEl || !this.polled) { this._tipEl = el; this.polled = true; this.sinkShow(el, x, y, theme.tipHtml(el._tip, true)); }
       return true;
     }
     // The tip stays where it first appeared (the 0.1 s pointer poll would make a following tip jerky); it moves only when the pointer goes to another link.
     if (el !== this._tipEl || !this.polled) {
-      this.tip.innerHTML = theme.tipHtml(el._tip); this._tipEl = el;
+      this.tip.innerHTML = theme.tipHtml(el._tip, true); this._tipEl = el;
       this.tip.style.display = 'block'; this.polled = true;
       this.placeTip(x, y);
     }

@@ -16,7 +16,7 @@ export default {
         note: '구글은 문맥을 판단하지 못해서, 뜻이 하나뿐인 단어만 적용됩니다.' },
       { key: 'glossary_mode', type: 'select', label: '단어장 전달 방식', keywords: 'ai 전체 목록 혼합 토큰',
         options: [['full', '전체'], ['list', '선별'], ['mixed', '복합']],
-        hints: { full: '단어장 전체를 프롬프트에 넣습니다. (기본)',
+        hints: { full: '단어장 전체를 프롬프트에 넣습니다. (기본) 단어장이 100줄을 넘으면 AI 서버가 한 번에 읽을 수 있는 양(컨텍스트)을 넘길 수 있으니, 이 설정을 "선별" 또는 "복합"으로 바꾸세요.',
           list: '문장에 나온 단어의 항목만 골라 문장 앞에 붙입니다. 큰 단어장이나 작은 모델에 유리합니다.',
           mixed: '뜻이 하나면 단어 뒤 괄호에, 뜻이 여럿이거나 메모가 있으면 앞에 목록으로 붙입니다. (실험)' } },
       { key: 'glossary_style', type: 'select', label: '단어를 바꾸는 모양', keywords: '괄호 치환', options: Object.entries(GLOSSARY_STYLES) },

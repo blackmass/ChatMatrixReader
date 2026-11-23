@@ -25,7 +25,7 @@ use core_graphics::window::{
     copy_window_info, kCGNullWindowID, kCGWindowBounds, kCGWindowLayer, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly, kCGWindowName,
     kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID,
 };
-use objc2::runtime::{AnyObject, Bool};
+use objc2::runtime::{AnyObject, Bool, Sel};
 use objc2::{class, msg_send, sel};
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -43,6 +43,7 @@ extern "C" {
     fn CGSSetWindowBackgroundBlurRadius(connection: i32, window: i32, radius: i32) -> i32;
     // (private) the tags of a window in the window server; the bit 1 << 16 is "clicking this window does not activate its program"
     fn CGSSetWindowTags(connection: i32, window: i32, tags: *const i32, size: i32) -> i32;
+    fn CGSClearWindowTags(connection: i32, window: i32, tags: *const i32, size: i32) -> i32;
 }
 #[link(name = "objc")]
 extern "C" {
@@ -425,6 +426,93 @@ pub fn keep_awake() {
     });
 }
 
+// ---- a window that is never the key window (and so never takes the keyboard from the game) unless it is told that a text box of its page needs it.
+// NOT done by changing the class of the window (object_setClass): the web view of the window watches the window with key-value observing, which is tied to the class, and a
+// window whose class was changed makes the program abort when the web view leaves it ("Cannot remove an observer ... because it is not registered"). Instead the method
+// canBecomeKeyWindow of the window's class is replaced by one that asks a list first and calls the old method for every window that is not in the list.
+static KEY_ALLOWED: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+static NO_KEY: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+static ORIGINALS: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());          // (class, the method it had)
+extern "C" {
+    fn object_getClass(obj: *const AnyObject) -> *const c_void;
+    fn class_getSuperclass(cls: *const c_void) -> *const c_void;
+    fn class_getName(cls: *const c_void) -> *const c_char;
+    fn class_getInstanceMethod(cls: *const c_void, name: Sel) -> *const c_void;
+    fn method_getImplementation(m: *const c_void) -> *const c_void;
+    fn method_getTypeEncoding(m: *const c_void) -> *const c_char;
+    fn class_replaceMethod(cls: *const c_void, name: Sel, imp: *const c_void, types: *const c_char) -> *const c_void;
+}
+extern "C" fn can_become_key(this: *mut AnyObject, cmd: Sel) -> Bool {
+    let me = this as isize;
+    if NO_KEY.lock().map(|l| l.contains(&me)).unwrap_or(false) {
+        return Bool::new(KEY_ALLOWED.lock().map(|l| l.contains(&me)).unwrap_or(false));
+    }
+    // a window that is not one of these: what its class did before
+    let mut cls = unsafe { object_getClass(this) };
+    while !cls.is_null() {
+        let orig = ORIGINALS.lock().ok().and_then(|l| l.iter().find(|e| e.0 == cls as usize).map(|e| e.1));
+        if let Some(f) = orig {
+            let f: extern "C" fn(*mut AnyObject, Sel) -> Bool = unsafe { std::mem::transmute(f) };
+            return f(this, cmd);
+        }
+        cls = unsafe { class_getSuperclass(cls) };
+    }
+    Bool::YES
+}
+/// The window becomes one that does not become the key window (a click on its page does not give it the keyboard). Before set_noactivate_light.
+/// (Windows: a web window is kept from being brought over its center by a press, see win.rs guard_z. The Mac cannot be kept from it: what is over its center is put back by the loop of center.rs.)
+pub fn guard_z(_hwnd: isize, _label: &str) {}
+pub fn set_not_rude(_hwnd: isize) {}
+pub fn no_transitions(_hwnd: isize) {}
+pub fn show_below(_hwnd: isize, _above: isize) {}
+pub fn describe(hwnd: isize) -> String { if hwnd == 0 { "none".into() } else { format!("program {}", exe_of(hwnd)) } }          // (only for the log)
+pub fn owner_of(_hwnd: isize) -> isize { 0 }
+pub fn is_topmost(hwnd: isize) -> bool { on_main(|| unsafe { let level: isize = msg_send![obj(hwnd), level]; level >= LEVEL_FLOATING }) }
+pub fn z_order_global(hwnds: &[isize]) -> Vec<isize> { z_order(hwnds) }          // (only for the log: the windows of the list that are on the screen, from the front)
+pub fn window_at(_x: i32, _y: i32) -> isize { 0 }
+pub fn is_visible(_hwnd: isize) -> bool { true }
+pub fn short(hwnd: isize) -> String { exe_of(hwnd) }
+pub fn top_windows(_n: usize) -> Vec<isize> { Vec::new() }
+pub fn focus_owner() -> (isize, isize) { (0, 0) }
+pub fn make_no_key(hwnd: isize) {
+    on_main(|| unsafe {
+        let mut cls = object_getClass(hwnd as *const AnyObject);
+        // (a window that is watched by key-value observing has a class made by the system on top of its own: the method goes to the window's own class)
+        if CStr::from_ptr(class_getName(cls)).to_string_lossy().starts_with("NSKVONotifying_") { cls = class_getSuperclass(cls); }
+        let have = ORIGINALS.lock().map(|l| l.iter().any(|e| e.0 == cls as usize)).unwrap_or(true);
+        if !have {
+            let m = class_getInstanceMethod(cls, sel!(canBecomeKeyWindow));
+            if !m.is_null() {
+                let orig = method_getImplementation(m) as usize;
+                if let Ok(mut l) = ORIGINALS.lock() { l.push((cls as usize, orig)); }
+                class_replaceMethod(cls, sel!(canBecomeKeyWindow), can_become_key as extern "C" fn(*mut AnyObject, Sel) -> Bool as *const c_void, method_getTypeEncoding(m));
+            }
+        }
+        if let Ok(mut l) = NO_KEY.lock() { if !l.contains(&hwnd) { l.push(hwnd); } }
+    });
+}
+/// A window that is being faded (the web window of the mini browser): while it is less than solid it is NOT "opaque", when it is solid again it is. Left "opaque" while it is see-through, the system
+/// draws the window against black instead of what is behind it: the page darkens instead of fading (found out by trying: the other ways to draw it again did not help).
+pub fn fade_begin(hwnd: isize) {
+    on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setOpaque: Bool::NO]; });
+}
+pub fn fade_end(hwnd: isize) {
+    on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setOpaque: Bool::YES]; });
+}
+
+/// The page of the window has a text box that needs the keyboard (true), or it does not any more (false).
+pub fn allow_key(hwnd: isize, on: bool) {
+    if let Ok(mut l) = KEY_ALLOWED.lock() { l.retain(|&h| h != hwnd); if on { l.push(hwnd); } }
+}
+/// A window of ours is going away: no list keeps its address any more (a later call must not touch it).
+pub fn forget(hwnd: isize) {
+    if let Ok(mut l) = KEEP.lock() { l.retain(|&h| h != hwnd); }
+    if let Ok(mut l) = PANELS.lock() { l.retain(|&h| h != hwnd); }
+    if let Ok(mut l) = KEY_ALLOWED.lock() { l.retain(|&h| h != hwnd); }
+    if let Ok(mut l) = NO_KEY.lock() { l.retain(|&h| h != hwnd); }
+    if let Ok(mut l) = TAGGED.lock() { l.retain(|e| e.0 != hwnd); }
+}
+
 /// A window of ours that must not take the game's keyboard or hide while the game is in front. (On Windows: the "no activate" style.)
 pub fn set_noactivate(hwnd: isize, on: bool) {
     if let Ok(mut l) = KEEP.lock() {
@@ -432,6 +520,27 @@ pub fn set_noactivate(hwnd: isize, on: bool) {
         if on { l.push(hwnd); }
     }
     if on { on_main(|| { make_panel(hwnd); prevent_activation(hwnd); prepare(hwnd); }); }
+}
+
+/// Like set_noactivate but WITHOUT turning the window into a panel (no change of its class: see make_no_key). For the window of the web: the window server's tag, "not hidden
+/// when another program is active" and the kept style are enough together with make_no_key.
+pub fn set_noactivate_light(hwnd: isize, on: bool) {
+    if let Ok(mut l) = KEEP.lock() {
+        l.retain(|&h| h != hwnd);
+        if on { l.push(hwnd); }
+    }
+    if on { on_main(|| { prevent_activation(hwnd); prepare(hwnd); }); }
+    else {
+        // The window may be activated by a click now (a text box of its page: the web window, see webwin.rs "prep"): the window server's tag "does not activate the program" is taken off,
+        // and put again by the next call with `on` (TAGGED forgets the window).
+        on_main(|| unsafe {
+            let number: isize = msg_send![obj(hwnd), windowNumber];
+            if number <= 0 { return; }
+            let tags: [i32; 2] = [1 << 16, 0];
+            CGSClearWindowTags(CGSDefaultConnectionForThread(), number as i32, tags.as_ptr(), 32);
+            if let Ok(mut l) = TAGGED.lock() { l.retain(|e| e.0 != hwnd); }
+        });
+    }
 }
 
 /// Every poll of the page: the window stays what it was made (the window library may change it when it changes one of its own flags).
@@ -466,9 +575,33 @@ pub fn set_blur(hwnd: isize, on: bool, state: i32, _r: u8, _g: u8, _b: u8, _alph
     })
 }
 
+/// (Windows only: the client area of a window is put at an exact rectangle; a window here has no frame of its own that would be in the way)
+pub fn set_client_rect(_hwnd: isize, _x: i32, _y: i32, _w: i32, _h: i32) -> bool { false }
+
+/// `hwnd` goes directly below `above` without taking the focus.
+pub fn place_below(hwnd: isize, above: isize) {
+    on_main(|| unsafe {
+        let n: isize = msg_send![obj(above), windowNumber];
+        let _: () = msg_send![obj(hwnd), orderWindow: -1isize, relativeTo: n];             // NSWindowBelow
+    });
+}
+
 /// The window goes to the top of the ordinary windows without taking the focus.
 pub fn raise_top(hwnd: isize) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), orderFrontRegardless]; });
+}
+
+/// The windows of `hwnds` that are on the screen, from the front to the back (the order the system has them in now).
+pub fn z_order(hwnds: &[isize]) -> Vec<isize> {
+    on_main(|| unsafe {
+        let list = windows();
+        let mut ranked: Vec<(usize, isize)> = hwnds.iter().filter_map(|&h| {
+            let n: isize = msg_send![obj(h), windowNumber];
+            list.iter().position(|x| x.number as isize == n).map(|p| (p, h))
+        }).collect();
+        ranked.sort();
+        ranked.into_iter().map(|(_, h)| h).collect()
+    })
 }
 
 /// Topmost on / off for a window. On: the level of floating windows (above the game, also while another program is in front). Off: an ordinary
@@ -486,20 +619,12 @@ pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
     });
 }
 
-/// Puts the window directly above the game window (the level stays ordinary: whatever covers the game stays above it). Cheap when it is there already.
-pub fn place_above(hwnd: isize, game: isize) {
-    if game <= 0 { return; }
+/// A small window that must be seen over everything of ours (the address box over the center): a level above the floating windows, to the front.
+pub fn raise_above_all(hwnd: isize) {
     on_main(|| unsafe {
         let w = obj(hwnd);
-        let number: isize = msg_send![w, windowNumber];
-        let list = windows();
-        let ours = list.iter().position(|x| x.number as isize == number);
-        let theirs = list.iter().position(|x| x.number as isize == game);
-        let Some(t) = theirs else { return };      // (the game is not on the screen: nothing to put the window above)
-        if let Some(o) = ours { if o + 1 == t { return; } }               // already the window right above the game (the list is front to back)
-        let level: isize = msg_send![w, level];
-        if level != LEVEL_NORMAL { let _: () = msg_send![w, setLevel: LEVEL_NORMAL]; }
-        let _: () = msg_send![w, orderWindow: 1isize, relativeTo: game];
+        let _: () = msg_send![w, setLevel: LEVEL_FLOATING + 1];
+        let _: () = msg_send![w, orderFrontRegardless];
     });
 }
 
@@ -603,8 +728,8 @@ pub fn installed_fonts() -> Vec<String> {
 
 // ------------------------------------------------------------------------------------------------- the wheel over a click-through window
 // A click-through window gets no mouse events, so the wheel over it would go to the game. An event tap (its own thread) sees every wheel turn of the session: a window
-// that asked for it (wheel_zone) has the turns over it taken away from the game (the tap swallows them) and told to the window at once (the sink: main.rs emits
-// 'wheel-turn' to it; wheel_since is the other way, as on Windows). Same job as the
+// that asked for it (a pane of a control center that is click-through: set_pane_zones) has the turns over it taken away from the game (the tap swallows them) and told to its page at once (the sink: main.rs emits
+// 'wheel-turn' to it). Same job as the
 // mouse hook of win.rs. The tap can change events, so it needs the permission "Accessibility" (the one the auto-paste asks for) and may ask for "Input Monitoring":
 // it is made when the first window asks for the wheel (not at the start), and tried again every 3 s while it cannot be made.
 static ASKED_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -716,43 +841,26 @@ fn ensure_hook() -> bool {
     made
 }
 
-/// The rectangle of a window of ours in the points of the event tap's screen (top left origin, y down).
-fn zone_rect(hwnd: isize) -> [f64; 4] {
-    on_main(|| unsafe {
-        let f: objc2_foundation::NSRect = msg_send![obj(hwnd), frame];
-        let screen_h = CGDisplay::main().bounds().size.height;
-        [f.origin.x, screen_h - (f.origin.y + f.size.height), f.origin.x + f.size.width, screen_h - f.origin.y]
-    })
-}
-
 pub fn start_wheel_hook() {}
 
-/// A window asks for the wheel turns over it (`usable` is not used here: only windows the mouse goes through ask). false = it cannot be had (no permission yet).
-pub fn wheel_zone(hwnd: isize, on: bool, _usable: bool, down: bool) -> bool {
-    if !on {
-        if let Ok(mut z) = ZONES.lock() { z.retain(|&(h, _, _)| h != hwnd); }
+/// The panes of a control center that want the wheel (in place of the earlier ones of that center): (key, rectangle in pixels). The tap works in points (top left origin).
+/// false = the tap cannot be had yet (no permission).
+pub fn set_pane_zones(center: isize, zones: Vec<(isize, [f64; 4])>) -> bool {
+    let owner = |k: isize| (-k) / 100000 - 1 == center;
+    if zones.is_empty() {
+        if let Ok(mut z) = ZONES.lock() { z.retain(|e| !(e.0 < 0 && owner(e.0))); }
         return true;
     }
     if !ensure_hook() { return false; }
-    let rect = zone_rect(hwnd);
+    let s = scale();
     if let Ok(mut z) = ZONES.lock() {
-        z.retain(|&(h, _, _)| h != hwnd);
-        z.push((hwnd, down, rect));
+        z.retain(|e| !(e.0 < 0 && owner(e.0)));
+        z.extend(zones.into_iter().map(|(k, r)| (k, true, [r[0] / s, r[1] / s, r[2] / s, r[3] / s])));
     }
     true
 }
-
-/// The turns told to `hwnd` after number `seq`: (the newest number, the deltas). Also keeps the rectangle of the window up to date (it may have been moved).
-pub fn wheel_since(hwnd: isize, seq: u64) -> (u64, Vec<i16>) {
-    let known = ZONES.lock().map(|z| z.iter().any(|e| e.0 == hwnd)).unwrap_or(false);
-    if known {
-        let rect = zone_rect(hwnd);
-        if let Ok(mut z) = ZONES.lock() { for e in z.iter_mut() { if e.0 == hwnd { e.2 = rect; } } }
-    }
-    let list = WHEEL.lock().map(|l| l.clone()).unwrap_or_default();
-    let newest = list.iter().map(|e| e.0).max().unwrap_or(seq).max(seq);
-    (newest, list.iter().filter(|e| e.0 > seq && e.1 == hwnd).map(|e| e.2).collect())
-}
+/// (the turns come one by one through the sink on macOS)
+pub fn wheel_since_panes(seq: u64) -> (u64, Vec<(isize, i16)>) { (seq, Vec::new()) }
 
 // ------------------------------------------------------------------------------------------------- the options hot key
 /// Not used on macOS: main.rs registers Ctrl+Option+O with the system's hot key service (no permission needed).

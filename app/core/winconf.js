@@ -7,14 +7,15 @@ import { normalizeWidgets } from '../widgets/registry.js';
 export const SPEECH_CODES = ['!MS', '!MY', '!ME', '!MW', '!MP', '!BE', '!BW'];
 export const ETC = '!ETC';
 export const KNOWN = ['S', 'Y', 'E', 'P', 'PL', 'R', 'RL', 'RW', 'I', 'IL', 'G', 'O', 'W', 'B', 'WT', 'BT', 'CM',
-  ...Array.from({ length: 10 }, (_, i) => `C${i + 1}`), '!NPC', '!VC'];
+  ...Array.from({ length: 10 }, (_, i) => `C${i + 1}`), '!NPC', '!VC', '!PLG'];
 export const VOICE_ID = 2;
 export const ALIGNS = ['left', 'center', 'right'];
 export const HEADS = ['detail', 'basic', 'nochan', 'body'];
 export const MODES = ['always', 'voice', 'never'];
 export const KEYS = {
-  id: 0, name: '', open_mode: 'never', channels: [], geometry: '', font_family: '', font_size: 0, bg_opacity: 1.0, text_opacity: 1.0, tab_opacity: 1.0,
+  id: 0, name: '', open_mode: 'never', channels: [], geometry: '', font_family: '', font_size: 0, bg_opacity: 0.99, text_opacity: 1.0, tab_opacity: 1.0,
   topmost: true, topmost_wow_only: false, click_through: false, hover_clear: false, blur: 0, shadow: false, head_mode: 'basic', align: 'left', bottom: false,
+  owner: '', owner_win: '', kind: '', page: '',     // a window of a PLUGIN: the plugin's id, the name the plugin gave it, kind 'page' (the page of the plugin is shown instead of the chat), the page (core/plugins.js)
   dock_to: 0,                          // an extra window: the id of the window it is a TAB of (0 = a window of its own); see dockHost
   clear_on_open: false,                // an extra window: starts empty when it is opened (the hub's earlier lines are not given to it)
 };
@@ -31,6 +32,9 @@ export const FOLLOW = new Set([...Object.keys(OPT_NUM), ...OPT_STR, 'font_family
 const EMPTY_TEXT = new Set([...OPT_STR, 'font_family']);       // '' is "empty" for these (an extra window follows window 1, the main window uses the default)
 // The settings that belong to the WINDOW (its place, its background, how it takes the mouse, its bar): a window that is a tab of another one has the other's
 // (the window is one). The rest (font, lines, channels ...) is the tab's own.
+// The background of a window is at most 99 %: at 100 % the web view (the engine) draws the text of the window now with sub-pixel smoothing (thicker, brighter) and now with grey smoothing (thinner, dimmer),
+// switching by itself as the layers of the page change (its layer is whole, so it may use the sub-pixel one). Under 100 % it is always grey. 99 % cannot be told from 100 % by the eye.
+export const MAX_BG_OPACITY = 0.99;
 export const HOST_KEYS = new Set(['geometry', 'topmost', 'topmost_wow_only', 'click_through', 'hover_clear', 'blur', 'bg_opacity', 'text_opacity', 'tab_opacity', 'hide_tools', 'hide_tabs',
   'hide_frame', 'lock_window', 'widgets', 'open_mode', 'wheel_through', 'through_tips', 'interact_keys', 'auto_copy']);
 export const MAIN_KEY = { align: 'text_align', bottom: 'bottom_stick', shadow: 'shadow_on', name: 'main_name' };       // (names that differ in the main window's top level)
@@ -80,10 +84,10 @@ export function normalize(items) {
     d.channels = Array.isArray(d.channels) ? d.channels.filter(c => typeof c === 'string') : [];
     if ('opacity' in it && !('bg_opacity' in it) && !('text_opacity' in it)) d.bg_opacity = d.text_opacity = it.opacity;
     try {
-      d.bg_opacity = Math.min(1.0, Math.max(0.03, pyFloat(d.bg_opacity)));
+      d.bg_opacity = Math.min(MAX_BG_OPACITY, Math.max(0.03, pyFloat(d.bg_opacity)));
       d.text_opacity = Math.min(1.0, Math.max(0.2, pyFloat(d.text_opacity)));
       d.font_size = pyInt(d.font_size);
-    } catch { d.bg_opacity = d.text_opacity = 1.0; d.font_size = 0; }
+    } catch { d.bg_opacity = MAX_BG_OPACITY; d.text_opacity = 1.0; d.font_size = 0; }
     try { d.tab_opacity = Math.min(1.0, Math.max(0.05, pyFloat(d.tab_opacity))); } catch { d.tab_opacity = 1.0; }
     try { d.blur = Math.min(3, Math.max(0, pyInt(d.blur))); } catch { d.blur = 0; }
     for (const k of ['topmost', 'topmost_wow_only', 'click_through', 'hover_clear', 'bottom', 'shadow', 'clear_on_open']) d[k] = truthy(d[k]);
@@ -99,11 +103,21 @@ export function normalize(items) {
     if (d.topmost_wow_only) d.topmost = false;
     if (typeof d.name !== 'string') d.name = '';
     try { d.dock_to = Math.max(0, pyInt(d.dock_to)); } catch { d.dock_to = 0; }
+    d.owner = typeof d.owner === 'string' && /^[a-z0-9_-]{1,100}$/.test(d.owner) ? d.owner : '';
+    d.owner_win = typeof d.owner_win === 'string' && /^[a-z0-9_-]{1,24}$/.test(d.owner_win) ? d.owner_win : '';
+    d.page = typeof d.page === 'string' && /^[A-Za-z0-9_\-./]{1,200}\.html$/.test(d.page) && !d.page.includes('..') && !d.page.startsWith('/') && !d.page.includes('//') ? d.page : '';
+    d.kind = d.kind === 'page' && d.owner && d.page ? 'page' : d.kind === 'web' && d.owner ? 'web' : '';          // (a page window needs its plugin and its page; a web window its plugin: the page is the plugin's to open)
+    if (d.kind === 'web') { d.page = ''; d.click_through = false; d.cookies = truthy(it.cookies); d.hide_ui = truthy(it.hide_ui); d.shift_scroll = truthy(it.shift_scroll); d.rclick_close = truthy(it.rclick_close); d.rclick_copy = 'rclick_copy' in it ? truthy(it.rclick_copy) : true; }          // (a web window is used with the mouse: it is not click-through; `cookies`: the login of the window is kept)
+    else { delete d.cookies; delete d.hide_ui; delete d.shift_scroll; delete d.rclick_close; delete d.rclick_copy; }
+    if (!d.kind) { d.owner = ''; d.owner_win = ''; d.page = ''; }
     if (d.dock_to === d.id) d.dock_to = 0;
     out.push(d);
   }
   if (!seen.has(VOICE_ID)) out.push(newConf(VOICE_ID, ['!VC']));
   out.sort((a, b) => a.id - b.id);
+  // a window that is a tab of a window that is not there (it was deleted): a window made later with that number must not get it as a tab
+  const ids = new Set(out.map(d => d.id));
+  for (const d of out) if (d.dock_to > 1 && !ids.has(d.dock_to)) d.dock_to = 0;
   return out;
 }
 
@@ -114,6 +128,9 @@ export const dockHost = (items, id) => { items = items || []; const h = rawDock(
 // the ids of the windows that are tabs of window `host`, in the order of the list
 export const dockedOf = (items, host) => (items || []).filter(c => dockHost(items, c.id) === host).map(c => c.id);
 
+// the list without the windows `ids`: a window is only known by its number, and a new window may get the number of one that is gone, so nothing may keep pointing at it
+// (the tabs of it become windows of their own). The settings of the windows that go are in their own entries: they go with them.
+export const without = (items, ids) => (items || []).filter(c => !ids.includes(c.id)).map(c => (ids.includes(Number(c.dock_to)) ? { ...c, dock_to: 0 } : c));
 export const nextId = items => Math.max(VOICE_ID, ...items.map(d => d.id)) + 1;
 
 // is this setting of an extra window empty (it follows window 1)? Only for the settings in FOLLOW

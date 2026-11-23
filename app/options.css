@@ -130,7 +130,13 @@ textarea.logtext { height: 340px; font-size: 11px; }
 #changed .unit { margin-left: .25em; }
 
 /* the quit button at the bottom of the side menu */
-#quitBtn { margin-top: auto; height: 32px; }
+/* the project's pages, small, over the restart button */
+#links { margin-top: auto; margin-bottom: -4px; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 10px; font-size: 11px; }
+#links a { color: var(--dim); text-decoration: none; cursor: pointer; }
+#links a:hover { color: var(--accent); text-decoration: underline; }
+#restartBtn { height: 32px; margin-bottom: 6px; }
+#quitBtn { height: 32px; }
+#restartBtn:hover { border-color: var(--accent); color: var(--accent); }
 #quitBtn:hover { border-color: var(--bad); color: var(--bad); }
 /* the translation test at the right of the page title (the tabs about translation) */
 #hright { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; font-size: 12px; }
@@ -284,3 +290,65 @@ input.colortext.follow-input { width: 150px; }
 .sg-sub { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .sg-head { padding: 6px 10px 3px; color: var(--dim); font-size: 11px; border-top: 1px solid #2f3137; margin-top: 3px; }
 .sg-head:first-child { border-top: 0; margin-top: 0; }
+
+/* ---- the plugin tab and the window that asks for the permissions of a plugin */
+.pl-listbar { display: flex; padding: 2px 2px 6px; }
+.pl-empty { padding: 6px; }
+.pl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.pl-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pl-fp { background: none; border: 1px solid #4a4d55; border-radius: 8px; color: var(--dim); font: 11px Consolas, "Cascadia Mono", Menlo, monospace; padding: 1px 8px; cursor: pointer; white-space: nowrap; }
+.pl-fp:hover, .pl-fp.known { color: var(--accent); border-color: var(--accent); }
+.pl-files { border: 1px solid #3a3d45; border-radius: 6px; background: #1b1d21; padding: 6px 8px; margin: 6px 0; max-height: 160px; overflow: auto; font: 11px Consolas, "Cascadia Mono", Menlo, monospace; user-select: text; }
+.pl-hash { display: block; color: var(--accent); margin-bottom: 4px; word-break: break-all; }
+.pl-desc { margin: 8px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.pl-run { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.pl-h { margin: 12px 0 4px; font-size: 13px; color: var(--accent); }
+.pl-line { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.pl-perm { margin: 6px 0 10px; }
+.pl-perm-head label, .pl-host { display: block; cursor: pointer; }
+.pl-host { margin: 3px 0 0 20px; }
+.pl-missing, .pl-warning { display: block; color: #ffb36b; margin-top: 4px; }
+.pl-opt { margin: 8px 0; display: flex; flex-direction: column; gap: 3px; }
+.pl-opt input[type=text], .pl-opt input[type=number], .pl-opt select { max-width: 360px; }
+.pl-loghead { display: flex; align-items: center; justify-content: space-between; }
+.pl-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.pl-card { background: var(--card); border: 1px solid var(--accent); border-radius: 10px; padding: 8px 20px 18px; max-width: 560px; width: 100%; max-height: 90vh; overflow: auto; }
+.pl-card h3 { color: var(--accent); }
+.pl-ask { margin: 12px 0 4px; font-weight: bold; }
+.pl-warn { display: block; margin: 10px 0; }
+.pl-buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
+.pl-card small, .pl-detail small.note { display: block; }
+.pl-frame { display: block; width: 100%; border: 0; background: transparent; color-scheme: normal; }
+.pl-hosts { margin: 4px 0; }
+.pl-hostrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.pl-hostrow code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pl-request { border: 1px solid var(--accent); border-radius: 6px; padding: 5px 8px; }
+.pl-hostadd { display: flex; gap: 8px; margin: 6px 0; }
+.pl-hostadd input { max-width: 260px; }
+
+/* 기록: the resource table */
+.resmon { display: flex; flex-direction: column; gap: 6px; }
+.res-total { font-weight: 600; }
+.res-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.res-table th, .res-table td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line, #3c3f46); white-space: nowrap; }
+.res-table td:nth-child(n+3), .res-table th:nth-child(n+3) { text-align: right; }
+.res-table tr.res-main td { font-weight: 600; }
+
+/* 미니 브라우저 tab: the two pages above the picker, the bookmark lines */
+.bt { display: flex; flex-direction: column; gap: 10px; }
+.subtabs { display: flex; gap: 8px; }
+.subtabs button { height: 34px; padding: 0 18px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); color: var(--text); cursor: pointer; font-size: 14px; }
+.subtabs button:hover { background: #2b2d33; }
+.subtabs button.on { border-color: var(--accent); color: var(--accent); background: #2f2e28; font-weight: bold; }
+.bm { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.bm-row { display: flex; gap: 6px; align-items: center; }
+.bm-row input:first-child { width: 170px; flex: none; }
+.bm-row input:nth-child(2) { flex: 1; min-width: 0; }
+.bm-row button { height: 28px; min-width: 30px; }
+.bm-row input.bad { border-color: var(--bad); }
+.bm-empty { color: var(--dim); margin: 4px 0; }
+.bm-add { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* what is left of a plugin that is gone (options/orphans.js) and the logins that no window has (tab 미니 브라우저) */
+.orphan-note p { margin: 4px 2px; line-height: 1.6; color: #c9ccd1; }
+.stored code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8">
+<style>
+  /* nothing is drawn here: the frame and the colours are those of the page behind (the center); this window is only the letters and the caret */
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #a { box-sizing: border-box; width: 100%; height: 100%; margin: 0; padding: 0 9px; border: 0; background: transparent; color: #fff; caret-color: #ffe08a;
+       font: 12px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; outline: none; }
+  #a::selection { background: rgba(224, 184, 74, .45); }
+</style></head>
+<body>
+  <input id="a" autocomplete="off" spellcheck="false">
+  <script src="common.js"></script>
+  <script type="module" src="address.js"></script>
+</body>
+</html>

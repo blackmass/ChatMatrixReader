@@ -1,0 +1,129 @@
+/* the tools in the bar of a pane (the same look as the buttons of a window of 3.1.1) */
+.pane .pspace { flex: 1; }
+.pane .ptools { display: flex; align-items: center; gap: 2px; height: 20px; padding: 0 3px; background: linear-gradient(rgba(54, 72, 71, var(--tab-alpha, 1)), rgba(42, 56, 54, var(--tab-alpha, 1))); border: 1px solid rgba(138, 106, 48, var(--tab-alpha, 1)); border-bottom: 0; border-radius: 4px 4px 0 0; }
+.pane .ptools button { border: 0; background: none; color: #e6c66e; width: 22px; height: 18px; padding: 0; font-size: 13px; cursor: pointer; display: grid; place-items: center; }
+.pane .ptools button:hover { color: #ffe08a; background: rgba(255, 255, 255, .08); }
+.pane .pvoice[data-state="on"] { color: #5fd07a; } .pane .pvoice[data-state="starting"] { color: #e6c14a; } .pane .pvoice[data-state="error"] { color: #f0705a; }
+.pane .pvoice .waves { display: none; } .pane .pvoice[data-state="on"] .waves, .pane .pvoice[data-state="starting"] .waves { display: inline; }
+
+/* A control center (3.2): a transparent page over all the screens; the translation windows are panes in it (pane.js). */
+html, body.center { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; -webkit-user-select: none; user-select: none;
+  font: 13px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; color: #fff; }
+.pane { position: absolute; display: flex; flex-direction: column; }
+.pane .pbar { flex: none; height: 22px; display: flex; align-items: flex-end; cursor: move; }
+.pane .ptabs { display: flex; align-items: flex-end; gap: 3px; min-width: 0; max-width: 65%; }
+.pane .ptab { padding: 0 12px; height: 20px; line-height: 20px; color: #e6c66e; background: linear-gradient(rgba(54, 72, 71, var(--tab-alpha, 1)), rgba(42, 56, 54, var(--tab-alpha, 1))); border: 1px solid rgba(138, 106, 48, var(--tab-alpha, 1)); border-bottom: 0; border-radius: 4px 4px 0 0; text-shadow: 0 1px 1px #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pane .ptab.on { background: linear-gradient(rgba(68, 96, 95, var(--tab-alpha, 1)), rgba(52, 72, 74, var(--tab-alpha, 1))); border-color: rgba(217, 164, 65, var(--tab-alpha, 1)); color: #ffe08a; }
+.pane .ptab:not(.on):hover { color: #ffe08a; }
+.pane .ptab.alert { color: #ffb347; border-color: rgba(255, 150, 40, .9); }
+.pane .plines.off { opacity: 0; pointer-events: none; }
+.pane .pbody { position: relative; flex: 1; min-height: 0; }
+.pane .pbg { position: absolute; inset: 0; background: rgba(30, 31, 34, var(--bg-alpha, 1)); border-radius: 0 4px 4px 4px; }
+.pane .plines { position: absolute; inset: 4px 8px; color: #fff; }
+.pane .pgrip { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, .45) 50%); }
+
+.pane .pwidgets { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+
+/* the right-click menu (the same as style.css gives a window of 3.1.1) */
+#ctx { position: fixed; z-index: 50; min-width: 150px; max-height: 96vh; overflow-y: auto; padding: 4px 0; background: #25272c; border: 1px solid #3c3f46; border-radius: 6px;
+       box-shadow: 0 4px 14px rgba(0, 0, 0, .5); font: 12px "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif; color: #dcdde0; user-select: none; }
+#ctx div { padding: 5px 14px 5px 22px; white-space: nowrap; cursor: default; position: relative; }
+#ctx div:hover:not(.off):not(.sep), #ctx div.hot:not(.off):not(.sep) { background: #3a3d44; }       /* (.hot: a Mac gives no mouse-over to a window that is not active: pane.js could mark the line under the cursor) */
+#ctx div.off { color: #6c6f77; }
+#ctx div.sep { height: 1px; padding: 0; margin: 4px 0; background: #3c3f46; }
+#ctx div.on::before { content: '✔'; position: absolute; left: 6px; color: #e0b84a; }
+#ctx { z-index: 2147483000; }
+
+/* ---- the state of a window (pane.js tick): the classes through / interactive / outside / hover-clear / has-alert / locked / hide-* are those of the body of a window of 3.1.1 */
+.pane.hover-clear { opacity: 0; }
+.pane .ptabs, .pane .ptools { transition: opacity .15s; }
+/* A window the mouse goes through (and nobody uses at the moment) looks the way the options "평소에 … 숨기기" say, like any other window: the name tab, the icons and the frame are there unless those hide them.
+   Nothing of it takes the mouse (the clicks go to the game; no place is told to the program for it). A tab with a new line shows always. */
+.pane.through:not(.interactive) .pbar { pointer-events: none; }
+.pane .pbody::after { content: ''; position: absolute; inset: 0; box-sizing: border-box; border: 1px solid #3c3f46; border-radius: 0 4px 4px 4px; pointer-events: none; z-index: 3; display: none; }
+.pane.interactive .pbody::after { display: block; }
+.pane.through:not(.interactive) .pbody::after { display: block; }
+/* "평소에 인터페이스 숨기기": hidden while the mouse is out of the window, shown (quickly) when it comes in */
+.pane.outside.hide-tools .ptools, .pane.outside.hide-tabs .ptab { opacity: 0; transition: opacity .4s; }
+.pane.outside.hide-frame .pgrip { display: none; }
+.pane.outside.hide-frame .pbody::after { border-color: transparent; }
+.pane .ptab.alert { color: #ffb347; border-color: rgba(255, 150, 40, .9); opacity: 1 !important; }
+.pane .ptab.alert::before { content: '●'; font-size: 8px; margin-right: 5px; vertical-align: 1px; }
+.pane.has-alert.hide-tabs.outside .ptab.alert { opacity: 1; transition: none; }
+.pane.locked .pbar { cursor: default; }
+.pane.locked .pgrip { display: none !important; }
+
+/* reading the earlier chat while the window is click-through (the wheel up over it): a coloured frame and a way back down */
+.pane.review .pbody::after { display: block; border: 2px solid #e0a030; }
+.pane .ptobottom { display: none; position: absolute; right: 18px; bottom: 18px; z-index: 30; padding: 4px 10px; border: 1px solid #e0a030; border-radius: 12px;
+  background: rgba(40, 34, 20, .95); color: #f0c060; font: 12px 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; cursor: pointer; }
+.pane.review .ptobottom { display: block; }
+
+/* a widget of a plugin that can be clicked takes the mouse while its window does (widgets.css says it for the body of a window of 3.1.1: here the state is the pane's) */
+.pane.interactive .wlayer .widget.clickable { pointer-events: auto; cursor: pointer; }
+
+/* the window of a plugin: its page is in the text area instead of the chat */
+.pane .plines.page { inset: 0; overflow: hidden; padding: 0; clip-path: none !important; }
+.pl-page { display: block; width: 100%; height: 100%; border: 0; background: transparent; color-scheme: normal; }
+.pl-page-off { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9aa0a6; font-size: 13px; }
+
+/* the mouse is out of the window: the whole bar fades slowly to half (like the game's chat frames); back at once when it comes in */
+.pane .pbar { opacity: 1; transition: opacity .15s; }
+.pane.outside .pbar { opacity: .5; transition: opacity 3s ease-in; }
+
+/* the edges for resizing (pane.js): none at the top, that is the bar; only while the window takes the mouse and is not locked */
+.pane .pedge { position: absolute; z-index: 20; display: none; }
+.pane.interactive .pedge { display: block; }
+.pane.locked .pedge { display: none !important; }
+.pane .e-l { left: 0; top: 22px; bottom: 14px; width: 5px; cursor: ew-resize; }
+.pane .e-r { right: 0; top: 22px; bottom: 14px; width: 5px; cursor: ew-resize; }
+.pane .e-b { left: 14px; right: 14px; bottom: 0; height: 5px; cursor: ns-resize; }
+.pane .e-bl { left: 0; bottom: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+
+/* a web window: the bar and the strips are ours, the page is a window of the system under this one (webpane.js); nothing is drawn over it but a thin frame and the line that shows while it scrolls.
+   The bar is one band across the whole width (a tab line like a browser's can be put into it later); the frame is one pixel, the strips that take the mouse are wider than it. */
+.webpane .pbody { pointer-events: none; }
+.webpane .pbody::after { display: block; border: 1px solid #8a6a30; border-top: 0; border-radius: 0; }
+.webpane .pbar { align-items: center; box-sizing: border-box; background: linear-gradient(#364847, #2a3836); border: 1px solid #8a6a30; }
+.webpane .ptabs { flex: 1; min-width: 0; max-width: none; align-items: center; gap: 0; }
+.webpane .pspace { display: none; }
+.webpane .ptab, .webpane .ptab.on { flex: 1; min-width: 0; height: 20px; line-height: 20px; padding: 0 10px; background: none; border: 0; border-radius: 0; color: #e6c66e; text-shadow: 0 1px 1px #000; }
+.webpane .ptools { height: 20px; padding: 0; background: none; border: 0; border-radius: 0; gap: 0; }
+.webpane .ptools button { width: 24px; height: 20px; }
+.webpane .pscroll { position: absolute; right: 3px; top: 4px; width: 4px; height: 40px; border-radius: 2px; background: rgba(230, 198, 110, .75); box-shadow: 0 0 2px #000; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 4; }
+.webpane.locked .pedge, .webpane.locked .pgrip { display: none !important; }
+.webpane .pedge, .webpane .pgrip { display: block; }
+.webpane .pgrip { background: none; }
+
+/* the address bar of a window of the mini browser: one field across the bar */
+.webpane .paddrbar { flex: none; height: 22px; box-sizing: border-box; display: flex; align-items: center; background: linear-gradient(#2a3836, #243130); border: 1px solid #8a6a30; border-top: 1px solid #5b4a22; border-bottom: 0; }
+.pane .paddrbar { opacity: 1; transition: opacity .15s; }
+.pane.outside .paddrbar { opacity: .5; transition: opacity 3s ease-in; }
+.webpane .paddr { flex: 1; min-width: 0; height: 18px; line-height: 16px; box-sizing: border-box; margin: 0 4px; padding: 0 8px; border: 1px solid #5b4a22; border-radius: 3px; background: rgba(0, 0, 0, .28); color: #f1d98a;
+  font: 12px 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
+.webpane .paddr .phold { display: none; color: #8a7a4a; }
+.webpane .paddr.empty .phold { display: inline; }
+.webpane .phome, .webpane .pmode { flex: none; width: 22px; height: 18px; margin: 0; padding: 0; border: 0; background: none; color: #e6c66e; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1; }
+.webpane .phome:hover, .webpane .pmode:hover { color: #ffe08a; background: rgba(255, 255, 255, .08); }
+.webpane .paddrbar { position: relative; }
+.webpane .pbar { position: relative; }
+.webpane .pcopied { position: absolute; right: 74px; top: 2px; height: 16px; line-height: 16px; padding: 0 6px; border-radius: 3px; background: rgba(20, 24, 26, .92); border: 1px solid #8a6a30; color: #ffe08a; font-size: 11px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
+.webpane .pzoom { position: absolute; right: 30px; top: 2px; height: 16px; line-height: 16px; padding: 0 6px; border-radius: 3px; background: rgba(20, 24, 26, .92); border: 1px solid #8a6a30; color: #ffe08a; font-size: 11px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
+.webpane .paddr:hover { border-color: #8a6a30; }
+.webpane .paddr.editing { border-color: #e0b84a; background: #14181a; }
+body.mac .webpane .paddr.editing { background: rgba(20, 24, 26, .35); }          /* (macOS: the box is put over it a moment late the first time: what is behind may show through) */
+.webpane .paddr.editing .ptxt, .webpane .paddr.editing .phold { visibility: hidden; }
+
+/* "평소에 인터페이스 숨기기" of a web window: the bars, the address and the frame go (slowly) when the mouse is away, and come back at once when it is over the window */
+.webpane .pbar, .webpane .paddrbar, .webpane .pbody::after { transition: opacity .15s; }
+.webpane.hide-ui.away .pbar, .webpane.hide-ui.away .paddrbar, .webpane.hide-ui.away .pbody::after { opacity: 0; transition: opacity 1.2s ease-in .3s; }
+
+/* the bar below the text (a box that touches the top of its monitor: frame.js barBelow): the same bar, turned over */
+.pane.flip { flex-direction: column-reverse; }
+.pane.flip .pbar { align-items: flex-start; }
+.pane.flip .ptab { border: 1px solid rgba(138, 106, 48, var(--tab-alpha, 1)); border-top: 0; border-radius: 0 0 4px 4px; }
+.pane.flip .ptab.on { border-color: rgba(217, 164, 65, var(--tab-alpha, 1)); }
+.pane:not(.webpane).flip .ptools { border: 1px solid rgba(138, 106, 48, var(--tab-alpha, 1)); border-top: 0; border-radius: 0 0 4px 4px; }          /* (the box of the buttons is open towards the text, like the tabs: here the top) */
+.webpane.flip .pbar { align-items: center; border-top: 0; border-bottom: 1px solid #8a6a30; }
+.webpane.flip .paddrbar { border-top: 0; border-bottom: 1px solid #5b4a22; }
+.webpane.flip .pbody::after { border-top: 1px solid #8a6a30; border-bottom: 0; }

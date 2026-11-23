@@ -5,6 +5,8 @@
 import { log, fmt } from './log.js';
 import { tr } from './i18n.js';
 import * as winconf from './winconf.js';
+import * as debuglog from './debuglog.js';
+import { defaultBrowser, normalizeBrowsers, normalizeBookmarks } from './browsers.js';
 import { pyInt, truthy } from './winconf.js';
 import { normalizeWidgets } from '../widgets/registry.js';
 import { DEFAULT_PROMPT, DEFAULT_EXTRA_PROMPT, DEFAULT_SEND_EXTRA_PROMPT, DEFAULT_SEND_PROMPT } from './prompts.js';
@@ -88,7 +90,7 @@ export const DEFAULTS = {
     voice_oa_timeout: 30,   // openai: seconds to wait for the server
     // window
     tab_opacity: 1.0,   // how solid the tabs and the icon box of the title bar are (1 = whole)
-    bg_opacity: 1.0,   // background (the dark area)
+    bg_opacity: 0.99,   // background (the dark area; at most 99 %: winconf.js MAX_BG_OPACITY)
     text_opacity: 1.0,   // text, title bar, scrollbar
     topmost: true,   // above every other window
     exit_with_game: false,   // quit this program 5 s after the game has been closed
@@ -139,10 +141,17 @@ export const DEFAULTS = {
     last_pos: null,   // [x, y] where the matrix was found last time (looked at first, every second)
     full_scan_sec: 30,   // whole-screen search while the matrix is missing: at most this often (seconds)
     // plugins (docs/PLUGINS.md)
-    plugins: {},                           // plugin id -> { enabled: bool, granted: [permission names] }
+    plugins: {},                           // plugin id -> { enabled: bool, granted: { net: [host], 'chat.inject': bool, storage: bool }, options: { key: value } } (app/plugin_host.js). The login of a web window is a setting of the window (child_windows[].cookies) since 3.2.0
     widgets: {},                           // the widgets of the main window: { 'owner:name': { place, anchor, dx, dy, style, show, scale, opacity, opts } } (docs/WIDGETS.md)
     wheel_through: false,                  // click-through windows: the wheel over them may scroll (reading the earlier chat); off = nothing but the tooltip gets through
+    browser_windows: [defaultBrowser(1)],  // the windows of the mini browser (core/browsers.js): window 1 is always there
+    bookmarks: [],                         // the bookmarks of the mini browser: [{ name, url }]
+    web_render: 'auto',                    // the web window of a plugin is drawn by: 'auto' (the web view decides: the graphics card when there is one) | 'cpu' (the processor) | 'gpu' (the graphics card, always)
+    center_scale: 0,                       // 3.2: the size of the translation windows' contents: 0 = as the main screen has it, else a percent (100 ... 200)
     through_tips: true,                    // click-through windows: the tip of a link (item, quest ...) under the mouse is shown (the page cannot see the mouse: the window loop does)
+    debug_log: debuglog.defaults(),         // 3.2: the areas of the detailed log that are on (Options > 기록 > 상세 기록; all off)
+    chat_links: true,                      // 3.2: a web address in the chat is a link: [discord.gg/abc] (a click asks where to open it). Off: it stays plain text
+    read_matrix: true,                     // 3.2: the screen is read for the chat matrix (off: only the overlay is used; read once at the start)
     auto_copy: false,                      // the text selected in a window is copied when the mouse leaves the window
     tuning: {},                            // options tab 고급: { NAME: value } of the timers in core/timings.js (missing = the default)
 };
@@ -179,9 +188,17 @@ export function normalize(saved) {
   if (!isObj(cfg.plugins)) cfg.plugins = {};
   cfg.widgets = normalizeWidgets(cfg.widgets);
   if (!isObj(cfg.tuning)) cfg.tuning = {};
+  cfg.browser_windows = normalizeBrowsers(cfg.browser_windows);
+  cfg.bookmarks = normalizeBookmarks(cfg.bookmarks);
+  cfg.web_render = ['auto', 'cpu', 'gpu'].includes(cfg.web_render) ? cfg.web_render : 'auto';
+  cfg.center_scale = Number(cfg.center_scale) >= 50 && Number(cfg.center_scale) <= 300 ? Math.round(Number(cfg.center_scale)) : 0;
   cfg.wheel_through = cfg.wheel_through === true;
   cfg.through_tips = cfg.through_tips !== false;
   cfg.auto_copy = cfg.auto_copy === true;
+  cfg.read_matrix = cfg.read_matrix !== false;
+  cfg.chat_links = cfg.chat_links !== false;
+  if (typeof cfg.bg_opacity === 'number' && cfg.bg_opacity > winconf.MAX_BG_OPACITY) cfg.bg_opacity = winconf.MAX_BG_OPACITY;          // (window 1: see MAX_BG_OPACITY)
+  cfg.debug_log = debuglog.normalize(cfg.debug_log);
   const gi = cfg.glossary_inline; delete cfg.glossary_inline;
   if (truthy(gi)) cfg.glossary_mode = 'list';                 // (replaced by glossary_mode)
   const mp = cfg.manual_pos; delete cfg.manual_pos;           // (removed option) an old manual position becomes the first guess

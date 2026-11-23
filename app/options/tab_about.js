@@ -1,4 +1,4 @@
-// 정보: version, the newest release, the log. (The credits and the sizes of the parts of 2.0 come later, with the plugin list.)
+// 정보: version, the newest release, the licenses. (The credits and the sizes of the parts of 2.0 come later, with the plugin list.)
 import { tr } from '../core/i18n.js';
 import { files } from '../fs.js';
 import * as version from '../core/version.js';
@@ -44,7 +44,7 @@ function licensesRow() {
 }
 
 export default {
-  id: 'about', title: '정보', subtitle: '버전, 업데이트, 로그, 라이선스',
+  id: 'about', title: '정보', subtitle: '버전, 업데이트, 라이선스',
   cards: [
     { title: '업데이트', rows: [
       { key: 'check_updates', type: 'check', label: '새 버전 확인', keywords: '업데이트 릴리스 github',
@@ -52,9 +52,6 @@ export default {
     ] },
     { title: '사용한 기술과 라이선스', note: '이 프로그램은 MIT 라이선스이고, 아래 기술을 바탕으로 만들었습니다. 음성인식 엔진과 모델을 받는 곳은 음성인식 탭의 "받는 곳과 라이선스"에도 있습니다.', rows: [
       { type: 'custom', block: true, label: '라이선스', keywords: '라이선스 license mit 저작권 오픈소스 기술 라이브러리 tauri whisper notices', build: licensesRow },
-    ] },
-    { title: '로그', note: '문제가 생기면 이 내용을 복사해서 알려 주세요. 파일은 프로그램 폴더의 logs/chatmatrix.log 입니다.', rows: [
-      { type: 'logview', label: '최근 로그', files, path: 'logs/chatmatrix.log', last: 400, rows: 20, keywords: '로그 log 기록 오류' },
     ] },
   ],
 

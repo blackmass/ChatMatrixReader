@@ -9,6 +9,9 @@ type Handle = isize; // HWND / HDC / HBITMAP are all pointer-sized
 struct POINT { x: i32, y: i32 }
 
 #[repr(C)]
+struct GuiThreadInfo { size: u32, flags: u32, active: Handle, focus: Handle, capture: Handle, menu_owner: Handle, move_size: Handle, caret: Handle, rc: [i32; 4] }
+
+#[repr(C)]
 #[derive(Default)]
 struct RECT { left: i32, top: i32, right: i32, bottom: i32 }
 
@@ -44,8 +47,10 @@ struct CompositionData { attribute: i32, data: *mut c_void, size: usize }
 #[link(name = "user32")]
 extern "system" {
     fn GetDC(hwnd: Handle) -> Handle;
+    fn SetPropW(hwnd: Handle, name: *const u16, data: Handle) -> i32;
     fn ReleaseDC(hwnd: Handle, hdc: Handle) -> i32;
     fn GetCursorPos(p: *mut POINT) -> i32;
+    fn SetLayeredWindowAttributes(hwnd: Handle, key: u32, alpha: u8, flags: u32) -> i32;
     fn GetAsyncKeyState(vk: i32) -> i16;
     fn GetForegroundWindow() -> Handle;
     fn SetForegroundWindow(hwnd: Handle) -> i32;
@@ -61,6 +66,11 @@ extern "system" {
     fn IsWindowVisible(hwnd: Handle) -> i32;
     fn IsIconic(hwnd: Handle) -> i32;
     fn GetWindow(hwnd: Handle, cmd: u32) -> Handle;
+    fn GetTopWindow(hwnd: Handle) -> Handle;
+    fn WindowFromPoint(p: POINT) -> Handle;
+    fn GetAncestor(hwnd: Handle, flags: u32) -> Handle;
+    fn GetGUIThreadInfo(thread: u32, info: *mut GuiThreadInfo) -> i32;
+    fn GetClassNameW(hwnd: Handle, buf: *mut u16, max: i32) -> i32;
     fn GetWindowRect(hwnd: Handle, r: *mut RECT) -> i32;
     fn GetClientRect(hwnd: Handle, r: *mut RECT) -> i32;
     fn ClientToScreen(hwnd: Handle, p: *mut POINT) -> i32;
@@ -208,6 +218,29 @@ pub fn has_keyboard(hwnd: isize) -> bool {
     unsafe { GetForegroundWindow() == hwnd }
 }
 
+/// The shell takes a window that covers a whole screen for a full-screen program and keeps the taskbar down while it is on top. The property "NonRudeHWND" tells it this one is not (the control
+/// centers cover all the screens but are transparent).
+pub fn set_not_rude(hwnd: isize) {
+    let name: Vec<u16> = "NonRudeHWND\0".encode_utf16().collect();
+    unsafe { SetPropW(hwnd, name.as_ptr(), 1); }
+}
+
+/// (macOS only: a window that never becomes the key window unless allowed; on Windows the "no activate" style does it)
+pub fn make_no_key(_hwnd: isize) {}
+/// Only the "may it be activated" bit, nothing else is redrawn (a text box of a page or of the bar is used: the big center must not be redone by the system: the pictures of the other screens
+/// went black for a moment). The first time (no tool window style yet) it is the whole thing.
+pub fn set_noactivate_light(hwnd: isize, on: bool) {
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if on && style & 0x80 == 0 { set_noactivate(hwnd, true); return; }
+        if let Ok(mut l) = KEEP.lock() { l.retain(|&h| h != hwnd); if on { l.push(hwnd); } }
+        let new = if on { style | WS_EX_NOACTIVATE } else { style & !WS_EX_NOACTIVATE };
+        if new != style { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new); }
+    }
+}
+pub fn allow_key(_hwnd: isize, _on: bool) {}
+pub fn forget(_hwnd: isize) {}
+
 /// Asks once more for the keyboard (macOS needs this: see mac.rs). Windows: grab_focus has already waited for it.
 pub fn ask_keyboard(_hwnd: isize) {}
 
@@ -264,6 +297,19 @@ pub fn keep_style(hwnd: isize) {
 pub fn ex_style(hwnd: isize) -> isize {
     unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) }
 }
+
+/// The transparency of a window (0 = invisible, 1 = opaque): the "layered" style and one number for the whole window (what is drawn in it, too).
+pub fn set_alpha(hwnd: isize, alpha: f64) {
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if style & 0x8_0000 == 0 { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | 0x8_0000); }           // WS_EX_LAYERED
+        SetLayeredWindowAttributes(hwnd, 0, (alpha.clamp(0.0, 1.0) * 255.0).round() as u8, 0x2);         // LWA_ALPHA
+    }
+}
+
+/// (macOS: see mac.rs; here nothing: a layered window fades by itself)
+pub fn fade_begin(_hwnd: isize) {}
+pub fn fade_end(_hwnd: isize) {}
 
 pub fn set_noactivate(hwnd: isize, on: bool) {
     if let Ok(mut l) = KEEP.lock() {
@@ -447,14 +493,14 @@ pub fn find_game(known: isize, title: &str) -> Option<GameWindow> {
 
 // ---------------------------------------------------------------------------------------------- the wheel over a click-through window
 // A click-through window gets no mouse messages, so the wheel over it would go to the game. A low-level mouse hook (its own thread) sees every
-// wheel turn: a window that asked for it (wheel_zone) has the turns over it taken away from the game (the hook swallows them) and told
-// to the window (wheel_since), which then lets the user scroll back through the chat.
+// wheel turn: a pane of a control center that is click-through has the turns over it taken away from the game (the hook swallows them) and told
+// to its page (center_wheel), which then lets the user scroll back through the chat.
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 static WHEEL: Mutex<Vec<(u64, isize, i16)>> = Mutex::new(Vec::new());      // (number, window, delta)
-static ZONES: Mutex<Vec<(isize, bool, bool)>> = Mutex::new(Vec::new());    // windows that want the wheel: (window, usable, down)  usable = the window takes the mouse itself; down = the turns DOWN too
 static WHEEL_SEQ: AtomicU64 = AtomicU64::new(0);
+static PANE_ZONES: Mutex<Vec<(isize, isize, [f64; 4])>> = Mutex::new(Vec::new());   // the panes of the control centers that want the wheel: (center, key, rectangle l, t, r, b in pixels)
 
 #[repr(C)]
 struct MsllHook { pt: POINT, mouseData: u32, flags: u32, time: u32, dwExtraInfo: usize }
@@ -476,25 +522,16 @@ unsafe extern "system" fn wheel_proc(code: i32, w: usize, l: isize) -> isize {
     if code == 0 && w == 0x020A {                                          // WM_MOUSEWHEEL
         let info = &*(l as *const MsllHook);
         let delta = (info.mouseData >> 16) as i16;
-        // a window the mouse goes through (usable = false): only the turns UP are taken (the game would scroll its own chat with them); the turns DOWN too
-        // while the window asks for them (`down`: it has lines that faded away and a turn down brings them back).
-        // A usable window gets the wheel from Windows itself, except while Shift / Ctrl / Alt is held (Windows then keeps the wheel for the program
-        // in front, not for the window under the mouse): those turns, both ways, are taken here.
-        let modifier = GetAsyncKeyState(0x10) < 0 || GetAsyncKeyState(0x11) < 0 || GetAsyncKeyState(0x12) < 0;
-        if let Ok(zones) = ZONES.try_lock() {
-            for &(h, usable, down) in zones.iter() {
-                // (a window the mouse goes through takes the turns both ways: the wheel over it is not for the game; `down` is no longer asked)
-                let _ = down;
-                if !(if usable { modifier } else { true }) {
-                    continue;
-                }
-                let mut r = RECT::default();
-                if IsWindow(h) != 0 && GetWindowRect(h, &mut r) != 0 && info.pt.x >= r.left && info.pt.x < r.right && info.pt.y >= r.top && info.pt.y < r.bottom {
+        // the panes of the control centers that are click-through (center.rs): the wheel over them is not for the program in front
+        if let Ok(zones) = PANE_ZONES.try_lock() {
+            let (px, py) = (info.pt.x as f64, info.pt.y as f64);
+            for &(_, key, r) in zones.iter() {
+                if px >= r[0] && px < r[2] && py >= r[1] && py < r[3] {
                     if let Ok(mut list) = WHEEL.try_lock() {
-                        list.push((WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, h, delta));
+                        list.push((WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, key, delta));
                         if list.len() > 200 { list.remove(0); }
                     }
-                    return 1;                                              // the program in front does not get this turn
+                    return 1;
                 }
             }
         }
@@ -512,25 +549,97 @@ pub fn start_wheel_hook() {
     });
 }
 
-pub fn wheel_zone(hwnd: isize, on: bool, usable: bool, down: bool) -> bool {
-    if let Ok(mut z) = ZONES.lock() {
-        z.retain(|&(h, _, _)| h != hwnd);
-        if on { z.push((hwnd, usable, down)); }
+/// The panes of a control center that want the wheel (all of them, in place of the earlier ones of that center): (key, rectangle l, t, r, b in pixels). Always true on Windows.
+pub fn set_pane_zones(center: isize, zones: Vec<(isize, [f64; 4])>) -> bool {
+    if let Ok(mut z) = PANE_ZONES.lock() {
+        z.retain(|e| e.0 != center);
+        z.extend(zones.into_iter().map(|(k, r)| (center, k, r)));
     }
     true
 }
 
-/// The turns told to `hwnd` after number `seq`: (the newest number, the deltas).
-pub fn wheel_since(hwnd: isize, seq: u64) -> (u64, Vec<i16>) {
+/// The turns told to the panes (their keys are negative) after number `seq`: (the newest number, (key, delta)).
+pub fn wheel_since_panes(seq: u64) -> (u64, Vec<(isize, i16)>) {
     let list = WHEEL.lock().map(|l| l.clone()).unwrap_or_default();
     let newest = list.iter().map(|e| e.0).max().unwrap_or(seq).max(seq);
-    (newest, list.iter().filter(|e| e.0 > seq && e.1 == hwnd).map(|e| e.2).collect())
+    (newest, list.iter().filter(|e| e.0 > seq && e.1 < 0).map(|e| (e.1, e.2)).collect())
 }
 
 // ---------------------------------------------------------------------------------------------- the title bar of the options window
 #[link(name = "dwmapi")]
 extern "system" {
     fn DwmSetWindowAttribute(hwnd: Handle, attr: u32, value: *const c_void, size: u32) -> i32;
+}
+
+/// (only for the log) What a window is: its class and its program (not its title).
+pub fn describe(hwnd: isize) -> String {
+    if hwnd == 0 { return "none".into(); }
+    let mut buf = [0u16; 128];
+    let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+    let class = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+    format!("class {class}, program {}", exe_of(hwnd))          // (no title: it may say what the user reads or does)
+}
+/// (only for the log) The top-level window under a point of the screen (0 = none).
+pub fn window_at(x: i32, y: i32) -> isize {
+    unsafe { let h = WindowFromPoint(POINT { x, y }); if h == 0 { 0 } else { let root = GetAncestor(h, 2); if root == 0 { h } else { root } } }          // GA_ROOT
+}
+/// (only for the log) The window that is active and the one that has the keyboard, in the program that is in front now: (active, focus).
+pub fn focus_owner() -> (isize, isize) {
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg == 0 { return (0, 0); }
+        let mut info = GuiThreadInfo { size: std::mem::size_of::<GuiThreadInfo>() as u32, flags: 0, active: 0, focus: 0, capture: 0, menu_owner: 0, move_size: 0, caret: 0, rc: [0; 4] };
+        if GetGUIThreadInfo(GetWindowThreadProcessId(fg, std::ptr::null_mut()), &mut info) == 0 { return (0, 0); }
+        (info.active, info.focus)
+    }
+}
+/// (only for the log) A window in a few words for a list: "class/program".
+pub fn short(hwnd: isize) -> String {
+    let mut buf = [0u16; 96];
+    let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+    format!("{}/{}", String::from_utf16_lossy(&buf[..n.max(0) as usize]), exe_of(hwnd))
+}
+/// (only for the log) The first `n` windows of the stack that can be seen and are not small, from the front.
+pub fn top_windows(n: usize) -> Vec<isize> {
+    let mut out = Vec::new();
+    unsafe {
+        let mut x = GetTopWindow(0);
+        let mut steps = 0;
+        while x != 0 && steps < 3000 && out.len() < n {
+            if IsWindowVisible(x) != 0 {
+                let mut r = RECT::default();
+                if GetWindowRect(x, &mut r) != 0 && r.right - r.left > 80 && r.bottom - r.top > 40 { out.push(x); }
+            }
+            x = GetWindow(x, 2);
+            steps += 1;
+        }
+    }
+    out
+}
+/// (only for the log) The owner of a window (0 = none) and whether it is a topmost one.
+pub fn owner_of(hwnd: isize) -> isize { unsafe { GetWindow(hwnd, 4) } }
+pub fn is_topmost(hwnd: isize) -> bool { unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & 0x8 != 0 } }
+/// (only for the log) The given windows in the order of the whole stack of windows, from the front (the topmost ones first), so a window of another band is found too.
+pub fn z_order_global(hwnds: &[isize]) -> Vec<isize> {
+    let mut out = Vec::new();
+    unsafe {
+        let mut x = GetTopWindow(0);
+        let mut n = 0;
+        while x != 0 && n < 5000 && out.len() < hwnds.len() {
+            if hwnds.contains(&x) { out.push(x); }
+            x = GetWindow(x, 2);
+            n += 1;
+        }
+    }
+    out
+}
+
+/// The window is not faded in and out by the system when it is shown or hidden (DWMWA_TRANSITIONS_FORCEDISABLED). The blur windows: the text goes at once, so the blur under it must go at once too.
+pub fn no_transitions(hwnd: isize) {
+    unsafe {
+        let on: i32 = 1;
+        DwmSetWindowAttribute(hwnd, 3, &on as *const i32 as *const c_void, 4);
+    }
 }
 
 /// Dark title bar in the colours of the options window (Windows 10: dark; Windows 11: the exact colours). Anything not supported is skipped.
@@ -601,40 +710,121 @@ fn after_game(game: isize) -> isize {
     }
 }
 
-/// Puts the window directly above the game window in the stacking order (no owner, no topmost): whatever covers the game (a browser ...)
-/// stays above it, the game's own focus and the taskbar are left alone. Cheap when the place is right already, so the page can ask often.
-pub fn place_above(hwnd: isize, game: isize) {
+/// The windows of `hwnds` that exist, from the front to the back of the screen (the order the system has them in now).
+pub fn z_order(hwnds: &[isize]) -> Vec<isize> {
+    let mut out = Vec::new();
+    if hwnds.is_empty() { return out; }
     unsafe {
-        if game == 0 || IsWindow(game) == 0 || IsWindow(hwnd) == 0 || IsWindowVisible(hwnd) == 0 || IsIconic(game) != 0 {
-            return;
+        let mut x = GetWindow(hwnds[0], 0);                                 // GW_HWNDFIRST: the top of the stack this window is in
+        let mut n = 0;
+        while x != 0 && n < 5000 && out.len() < hwnds.len() {
+            if hwnds.contains(&x) { out.push(x); }
+            x = GetWindow(x, 2);                                            // GW_HWNDNEXT
+            n += 1;
         }
-        let mine = std::process::id();
-        let pid_of = |h: isize| { let mut p = 0u32; GetWindowThreadProcessId(h, &mut p); p };
-        // from the game upwards: our own windows and hidden ones may stand there, anything else in between means we are not right above it
-        let mut x = game;
-        loop {
-            x = GetWindow(x, 3); // GW_HWNDPREV
-            if x == 0 {
-                break;
-            }
-            if x == hwnd {
-                return;
-            }
-            if pid_of(x) != mine && IsWindowVisible(x) != 0 {
-                break;
-            }
-        }
-        SetWindowPos(hwnd, after_game(game), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // NOMOVE | NOSIZE | NOACTIVATE
     }
+    out
 }
 
 /// Topmost on / off for a window, directly (the window library remembers its own idea of it and may skip a call that looks like no change).
 /// Off with `game`: the window is put directly above the game (not at the top of the ordinary windows: that would drag the game up with it).
+/// A small window that must be seen over everything of ours (the address box over the center): topmost, to the top of the topmost ones.
+pub fn raise_above_all(hwnd: isize) {
+    set_topmost(hwnd, true, 0);
+    raise_top(hwnd);
+}
+
 pub fn set_topmost(hwnd: isize, on: bool, game: isize) {
     unsafe {
         let after = if on { -1 } else if game != 0 && IsWindow(game) != 0 { after_game(game) } else { -2 }; // HWND_TOPMOST / above the game / HWND_NOTOPMOST
-        SetWindowPos(hwnd, after, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+        SetWindowPos(hwnd, after, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200);          // NOMOVE | NOSIZE | NOACTIVATE | NOOWNERZORDER (the owner of a window, the game, is not moved with it)
     }
+}
+
+/// A web window must not be brought over its center by the system when it is pressed (the center's edge and strips would be hidden for a moment, and the order of the windows is the center's to
+/// decide): the request of the system to put it at the top is taken out of the change of position, and the center is told that the window was pressed (webwin::raise_request).
+#[repr(C)]
+struct WindowPos { hwnd: isize, insert_after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32 }
+#[link(name = "comctl32")]
+extern "system" {
+    fn SetWindowSubclass(hwnd: Handle, proc_: unsafe extern "system" fn(Handle, u32, usize, isize, usize, usize) -> isize, id: usize, data: usize) -> i32;
+    fn DefSubclassProc(hwnd: Handle, msg: u32, wparam: usize, lparam: isize) -> isize;
+}
+unsafe extern "system" fn z_guard(hwnd: Handle, msg: u32, wparam: usize, lparam: isize, _id: usize, data: usize) -> isize {
+    if msg == 0x0046 && lparam != 0 {                                      // WM_WINDOWPOSCHANGING
+        let p = &mut *(lparam as *mut WindowPos);
+        if p.flags & 0x0004 == 0 {                                         // the order is to change (not SWP_NOZORDER)
+            // What a press does (found in the log): the system puts the window after some other window WITHOUT `SWP_NOACTIVATE` (flags 0x3), or at HWND_TOP. Everything this program asks of the order
+            // (directly under the center, topmost on / off) has SWP_NOACTIVATE (0x10), so it passes.
+            let raise = p.flags & 0x0010 == 0 || p.insert_after == 0;
+            if raise {
+                p.flags |= 0x0004;
+                if data != 0 { crate::webwin::raise_request(&*(data as *const String)); }
+            }
+        }
+    }
+    DefSubclassProc(hwnd, msg, wparam, lparam)
+}
+/// Call it from the thread that made the window.
+pub fn guard_z(hwnd: isize, label: &str) {
+    let data = Box::into_raw(Box::new(label.to_string())) as usize;
+    let ok = unsafe { SetWindowSubclass(hwnd, z_guard, hwnd as usize, data) };
+    if ok == 0 { crate::startup_log(&format!("web window {label}: the order guard could not be put on")); }
+}
+
+/// The CLIENT area of the window (what the page fills) is put at exactly this rectangle, whatever frame the window has around it (a window of the system may have an invisible one): it is put
+/// there, measured, and moved by what was wrong. true = it fits now.
+pub fn set_client_rect(hwnd: isize, x: i32, y: i32, w: i32, h: i32) -> bool {
+    unsafe {
+        let (mut l, mut t, mut ww, mut hh) = (x, y, w, h);
+        for _ in 0..3 {
+            SetWindowPos(hwnd, 0, l, t, ww, hh, 0x0004 | 0x0010);                // NOZORDER | NOACTIVATE
+            let mut c = RECT::default(); let mut o = POINT { x: 0, y: 0 };
+            if GetClientRect(hwnd, &mut c) == 0 || ClientToScreen(hwnd, &mut o) == 0 { return false; }
+            let (dx, dy, dw, dh) = (o.x - x, o.y - y, (c.right - c.left) - w, (c.bottom - c.top) - h);
+            if dx == 0 && dy == 0 && dw == 0 && dh == 0 { return true; }
+            l -= dx; t -= dy; ww -= dw; hh -= dh;
+        }
+        false
+    }
+}
+
+/// `hwnd` goes directly below `above` (and stays in its band: topmost or not) without taking the focus.
+pub fn place_below(hwnd: isize, above: isize) {
+    unsafe { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200); }          // NOMOVE | NOSIZE | NOACTIVATE | NOOWNERZORDER
+}
+
+/// A center, its blur windows and its web windows (`group`, from the front) are put in the state of the mode, one behind the other, in the order in which no window is ever over the one that is to be
+/// over it, not even between two calls: going UP (topmost, or the top of the ordinary windows) the front one goes first and each next one directly behind it; going DOWN (22: directly over the
+/// game) the one at the back goes first and each next one directly over it. State: 0 ordinary, 1 / 21 / 23 on top, 22 over the game; `was`: the state before (23 -> 22 puts the order first, then the owner).
+pub fn place_group(group: &[isize], state: u32, was: u32, game: isize) {
+    if group.is_empty() { return; }
+    let own = |owner: isize| { for h in group { set_owner(*h, owner); } };
+    let flags = 0x0001 | 0x0002 | 0x0010 | 0x0200;                                         // NOMOVE | NOSIZE | NOACTIVATE | NOOWNERZORDER
+    if state == 22 {
+        // the order first, the owner after, when the windows come from over everything (this program was in front: 23; or the windows are put for the first time: 99): an owner that is set
+        // while its window is over everything is lifted by the system under the window, over the windows of the user that were over it
+        let first = was == 23 || was == 99;
+        if !first { own(game); }
+        let n = group.len();
+        set_topmost(group[n - 1], false, game);
+        for i in (0..n - 1).rev() { set_topmost(group[i], false, group[i + 1]); }
+        if first { own(game); }
+    } else {
+        own(0);                                                                            // (the owner goes first: a window that is owned is not asked to be topmost)
+        unsafe {
+            SetWindowPos(group[0], if state == 0 { -2 } else { -1 }, 0, 0, 0, 0, flags);   // HWND_NOTOPMOST (the top of the ordinary windows) / HWND_TOPMOST
+            for i in 1..group.len() { SetWindowPos(group[i], group[i - 1], 0, 0, 0, 0, flags); }
+        }
+    }
+}
+
+/// Can the window be seen now (shown, not hidden)?
+pub fn is_visible(hwnd: isize) -> bool { unsafe { IsWindowVisible(hwnd) != 0 } }
+
+/// The window is shown and put directly below `above` in one call, without taking the focus (shown first and put there after, it would be at the top for a moment).
+pub fn show_below(hwnd: isize, above: isize) {
+    unsafe { SetWindowPos(hwnd, above, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040 | 0x0200); }          // NOMOVE | NOSIZE | NOACTIVATE | SHOWWINDOW | NOOWNERZORDER
 }
 
 /// The window goes to the top of the ordinary windows without taking the focus (what a click does to a normal window; ours do not take the focus).
