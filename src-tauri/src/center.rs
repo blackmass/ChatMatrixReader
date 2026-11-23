@@ -99,11 +99,22 @@ pub fn start(app: AppHandle) {
             let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(30))).await;
         };
         let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(SETTLE)).await;
-        for (label, _) in MODES { if let Some(w) = app.get_webview_window(label) { let _ = w.show(); } }
+        // shown with the transparency at 0, then brought up after the pages have had time to draw their first frame (a window that comes up may show its default background for a frame or two: it is not
+        // seen when nothing of the window is)
+        let mut hwnds: Vec<isize> = Vec::new();
+        for (label, _) in MODES {
+            if let Some(w) = app.get_webview_window(label) {
+                if let Ok(h) = hwnd_of(&w) { win::set_alpha(h, 0.0); hwnds.push(h); }
+                let _ = w.show();
+            }
+        }
+        let shown_ms = t0.elapsed().as_millis();
+        let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(350))).await;
+        for step in 1..=10 { for h in &hwnds { win::set_alpha(*h, step as f64 / 10.0); } let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(20))).await; }
         let ready: Vec<String> = READY.lock().map(|r| { let mut v: Vec<String> = r.iter().cloned().collect(); v.sort(); v }).unwrap_or_default();
         match ready_at {
-            Some(t) => crate::startup_log(&format!("centers: ready after {} ms, shown after {} ms", t.as_millis(), t0.elapsed().as_millis())),
-            None => crate::startup_log(&format!("centers: NOT all ready after {} ms ({:?}): shown anyway", t0.elapsed().as_millis(), ready)),
+            Some(t) => crate::startup_log(&format!("centers: ready after {} ms, shown (transparent) after {} ms, solid after {} ms", t.as_millis(), shown_ms, t0.elapsed().as_millis())),
+            None => crate::startup_log(&format!("centers: NOT all ready after {} ms ({:?}): shown anyway (transparent after {} ms, solid after {} ms)", FALLBACK.as_millis(), ready, shown_ms, t0.elapsed().as_millis())),
         }
     });
 }

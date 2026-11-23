@@ -35,7 +35,7 @@ export function startBrowsers({ settings, invoke, emit, listen, note = () => {},
     const g = parseGeom(b.geometry), label = browserLabel(id);
     const phone = mode === 'mobile' ? mobileProfile() : {};
     const size = g || (mode === 'pc' ? { w: 960, h: 640 } : { w: 360, h: 640 });
-    const args = { label, url, title: '', ua: phone.ua || '', ua_hints: phone.hints || null, allow: [], open_allow: ['*'], free: true, persist: !!b.persist, zoom: b.zoom || 1, key: browserKey(id), render: settings.cfg().web_render || 'auto', w: size.w, h: size.h };
+    const args = { label, url, title: '', ua: phone.ua || '', ua_hints: phone.hints || null, allow: [], open_allow: ['*'], free: true, persist: !!b.persist, zoom: b.zoom || 1, shift_scroll: !!b.shift_scroll, ctrl_zoom: b.ctrl_zoom !== false, key: browserKey(id), render: settings.cfg().web_render || 'auto', w: size.w, h: size.h };
     if (g) { args.x = g.x; args.y = g.y; }
     try { await invoke('web_open', { args }); } catch (e) { note('mini browser: ' + e); return; }
     const o = { label, title: '', timers: [], last: '', pending: null, saveAt: 0, navAt: 0, url, mode };

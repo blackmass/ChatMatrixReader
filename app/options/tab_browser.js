@@ -9,6 +9,7 @@ import { goneOwner, onGoneChange, goneNote } from './orphans.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const btn = (text, cls = '') => el('button', cls, text);
+const textBox = () => { const i = el('input'); i.type = 'text'; i.spellcheck = false; i.autocomplete = 'off'; return i; };          // (the style sheet of the options styles `input[type=text]`: a box without the type is not styled)
 
 // the window the rows show: 'b<number>' = a browser window, 'w<number>' = a web window of a plugin (its entry in the list of windows); `page`: 'settings' or 'bookmarks'
 let current = 'b' + B.DEFAULT_ID, page = 'settings';
@@ -64,6 +65,14 @@ const browserCard =
         get: cfg => cur(cfg).topmost_wow_only, patch: (cfg, v) => ({ browser_windows: list(cfg).map(b => (b.id === cur(cfg).id ? { ...b, topmost_wow_only: v, topmost: v ? false : b.topmost } : b)) }) },
       mine('idle_alpha', 1, { type: 'percent', min: 0.2, label: '마우스가 벗어나면 진하기', keywords: '투명도 불투명 흐리게 반투명 마우스 벗어나면 fade', show: hasWindow,
         note: '마우스가 창 위에 있을 때는 늘 선명하고, 벗어나면 잠시 뒤 이 진하기로 흐려집니다. 100%는 흐려지지 않습니다.' }),
+      mine('hide_ui', false, { type: 'check', label: '평소에 인터페이스 숨기기', keywords: '바 주소 테두리 프레임 숨김 가리기 인터페이스 hide', show: hasWindow,
+        note: '마우스가 창 위에 없을 때는 위쪽 바, 주소 줄, 테두리를 모두 숨기고 웹 페이지만 보입니다. 마우스를 올리면 바로 나타나고, 벗어나면 잠시 뒤 천천히 사라집니다.' }),
+      mine('ctrl_zoom', true, { type: 'check', label: 'Ctrl로 확대·축소', keywords: '컨트롤 줌 확대 축소 휠 단축키 핀치 zoom ctrl', show: hasWindow,
+        note: ['Ctrl+휠, Ctrl+더하기/빼기/0, 맥의 핀치로 페이지를 크게 또는 작게 합니다. 끄면 Ctrl+휠은 그냥 스크롤이 되고 확대·축소 키는 아무 일도 하지 않습니다.', '바꾼 뒤 창을 다시 열면 적용됩니다.'] }),
+      mine('shift_scroll', false, { type: 'check', label: 'Shift+휠로 가로 스크롤', keywords: '쉬프트 가로 스크롤 휠 옆으로 shift horizontal', show: hasWindow,
+        note: ['켜면 Shift+휠이 가로 스크롤이 됩니다. 끄면(기본) Shift+휠도 그냥 세로 스크롤입니다.', '바꾼 뒤 창을 다시 열면 적용됩니다.'] }),
+      mine('rclick_close', false, { type: 'check', label: '우클릭으로 창 닫기', keywords: '오른쪽 클릭 마우스 닫기 close right click', show: hasWindow,
+        note: '웹 페이지 위에서 마우스 오른쪽 버튼을 누르면 이 창이 닫힙니다. 위쪽 바에서는 닫히지 않습니다. 바로 적용됩니다.' }),
       mine('lock_window', false, { type: 'check', label: '창 고정', keywords: '이동 크기 조절 잠금 드래그 고정 lock', show: hasWindow,
         note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다.' }),
     ] };
@@ -77,6 +86,12 @@ const webCard =
       webRow('topmost', true, { type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시' }, v => ({ topmost: v, ...(v ? { topmost_wow_only: false } : {}) })),
       webRow('topmost_wow_only', false, { type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
         note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.' }, v => ({ topmost_wow_only: v, ...(v ? { topmost: false } : {}) })),
+      webRow('hide_ui', false, { type: 'check', label: '평소에 인터페이스 숨기기', keywords: '바 주소 테두리 프레임 숨김 가리기 인터페이스 hide',
+        note: '마우스가 창 위에 없을 때는 제목 바와 테두리를 숨기고 웹 페이지만 보입니다. 마우스를 올리면 바로 나타나고, 벗어나면 잠시 뒤 천천히 사라집니다.' }),
+      webRow('shift_scroll', false, { type: 'check', label: 'Shift+휠로 가로 스크롤', keywords: '쉬프트 가로 스크롤 휠 옆으로 shift horizontal',
+        note: ['켜면 Shift+휠이 가로 스크롤이 됩니다. 끄면(기본) Shift+휠도 그냥 세로 스크롤입니다.', '바꾼 뒤 창을 다시 열면 적용됩니다.'] }),
+      webRow('rclick_close', false, { type: 'check', label: '우클릭으로 창 닫기', keywords: '오른쪽 클릭 마우스 닫기 close right click',
+        note: '웹 페이지 위에서 마우스 오른쪽 버튼을 누르면 이 창이 닫힙니다. 제목 바에서는 닫히지 않습니다. 바로 적용됩니다.' }),
       webRow('lock_window', false, { type: 'check', label: '창 고정', keywords: '이동 크기 조절 잠금 드래그 고정 lock', note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다.' }),
       webRow('cookies', false, { type: 'check', label: '로그인 유지', keywords: '쿠키 로그인 저장 세션 계정',
         note: ['켜면 이 창에서 로그인한 정보(쿠키)를 프로그램 폴더에 보관해서 다음에 열어도 로그인이 유지됩니다.', '끄면(기본) 창을 닫을 때마다 모두 잊습니다. 플러그인마다 따로 보관됩니다.'] }),
@@ -208,7 +223,7 @@ function bookmarksPanel(ctx) {
     const items = fresh();
     if (!items.length) root.append(el('p', 'bm-empty', tr('즐겨찾기가 없습니다. 아래에서 추가하거나, 열린 미니 브라우저의 위쪽 막대를 우클릭해서 현재 페이지를 추가하세요.')));
     items.forEach((it, i) => {
-      const line = el('div', 'bm-row'), name = el('input'), url = el('input'), up = btn('↑'), down = btn('↓'), rm = btn('✕');
+      const line = el('div', 'bm-row'), name = textBox(), url = textBox(), up = btn('↑'), down = btn('↓'), rm = btn('✕');
       name.value = it.name; url.value = it.url; name.placeholder = tr('이름'); url.placeholder = 'https://';
       up.disabled = i === 0; down.disabled = i === items.length - 1; up.title = tr('위로'); down.title = tr('아래로'); rm.title = tr('삭제');
       name.onchange = () => save(fresh().map((x, j) => (j === i ? { ...x, name: name.value } : x)));
@@ -217,7 +232,7 @@ function bookmarksPanel(ctx) {
       up.onclick = () => swap(-1); down.onclick = () => swap(1); rm.onclick = () => save(fresh().filter((_, j) => j !== i));
       line.append(name, url, up, down, rm); root.append(line);
     });
-    const add = el('div', 'bm-row bm-add'), name = el('input'), url = el('input'), go = btn('추가');
+    const add = el('div', 'bm-row bm-add'), name = textBox(), url = textBox(), go = btn('추가');
     name.placeholder = tr('이름 (비우면 사이트 이름)'); url.placeholder = 'https://';
     go.onclick = () => {
       if (!B.isWebUrl(url.value.trim())) { url.classList.add('bad'); url.title = tr('http나 https로 시작하는 주소를 쓰세요'); return; }

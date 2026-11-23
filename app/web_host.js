@@ -76,7 +76,7 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, getR
     async open(id, { url, title = '', mobile = true }, patterns, openAllow = []) {
       const w = opts(id);
       const phone = mobile ? mobileProfile() : {};                    // (the same phone as a window of the mini browser: the user agent and the headers of the browser that say the same)
-      const args = { label: webLabel(id), url, title, ua: phone.ua || '', ua_hints: phone.hints || null, allow: patterns, open_allow: openAllow, persist: !!w.cookies, key: id, render: getRender(),
+      const args = { label: webLabel(id), url, title, ua: phone.ua || '', ua_hints: phone.hints || null, allow: patterns, open_allow: openAllow, persist: !!w.cookies, shift_scroll: !!w.shift_scroll, key: id, render: getRender(),
         w: Number.isFinite(w.w) ? w.w : null, h: Number.isFinite(w.h) ? w.h : null, x: Number.isFinite(w.x) ? w.x : null, y: Number.isFinite(w.y) ? w.y : null };
       if (args.w === null || args.h === null) { delete args.w; delete args.h; delete args.x; delete args.y; args.w = DEFAULT_W; args.h = DEFAULT_H; }
       await invoke('web_open', { args });

@@ -39,11 +39,16 @@ fn new_token() -> String {
     let part = || { let mut h = std::collections::hash_map::RandomState::new().build_hasher(); h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)); h.finish() };
     format!("{:016x}{:016x}", part(), part())
 }
+/// A line in logs/startup.log about the zoom and the channel of the pages (the first ones only): where a zoom is lost when it does not work.
+static DIAG: [std::sync::atomic::AtomicUsize; 2] = [std::sync::atomic::AtomicUsize::new(0), std::sync::atomic::AtomicUsize::new(0)];
+/// `zoom` = the lines about the zoom itself (they have their own count, so the many lines of the pages that load do not use it up).
+fn diag_in(zoom: bool, msg: String) { if DIAG[zoom as usize].fetch_add(1, std::sync::atomic::Ordering::Relaxed) < if zoom { 80 } else { 60 } { crate::startup_log(&format!("web: {msg}")); } }
+fn diag(msg: String) { diag_in(false, msg) }
 /// A command of a page: `raw` = "<secret>/<command>?<query>". Only the one that carries the secret of this window is carried out.
 fn dispatch(app: &AppHandle, label: &str, raw: &str) {
-    let Some((token, rest)) = raw.split_once('/') else { event("command refused: no secret".into()); return };
+    let Some((token, rest)) = raw.split_once('/') else { event("command refused: no secret".into()); diag(format!("{label}: command refused, no secret")); return };
     let ok = TOKENS.lock().ok().and_then(|m| m.get(label).cloned()).map_or(false, |t| t.len() == token.len() && t == token);
-    if !ok { event(format!("command refused: wrong secret ({label})")); return; }
+    if !ok { event(format!("command refused: wrong secret ({label})")); diag(format!("{label}: command refused, wrong secret")); return; }
     let (cmd, query) = match rest.split_once('?') { Some((c, q)) => (c, Some(q)), None => (rest, None) };
     command(app, label, cmd, query);
 }
@@ -79,16 +84,18 @@ fn event(text: String) { if let Ok(mut e) = EVENTS.lock() { if e.len() < 60 { e.
 // (the keys that make the windows usable, ctrl / shift / alt, would otherwise stop the page from scrolling)
 const KEYS: &str = r#"(() => {
   if (window.__cmrKeys) return; window.__cmrKeys = 1;
+  const SHIFT_SCROLL = __SHIFTSCROLL__, CTRL_ZOOM = __CTRLZOOM__;          // (what the user chose for this window: the sideways wheel, the zoom)
   const wheel = e => {
     if (!e.isTrusted || !(e.ctrlKey || e.shiftKey)) return;
-    if (e.ctrlKey && window.top === window.self) return;                     // (in the page itself: the zoom, see PAGE)
+    if (e.ctrlKey) { if (CTRL_ZOOM && window.top === window.self) return; }   // (in the page itself: the zoom, see PAGE. Not allowed, or in a frame: a plain turn of the wheel)
+    else if (SHIFT_SCROLL) return;                                            // (allowed: the browser scrolls sideways itself)
     e.preventDefault();
     let t = e.target;
     while (t && t !== document.documentElement && !(t.scrollHeight > t.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(t).overflowY))) t = t.parentElement;
     (t && t !== document.documentElement ? t : (document.scrollingElement || document.documentElement)).scrollBy(0, e.deltaY || e.deltaX);
   };
   const keys = e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0', '_'].includes(e.key)) e.preventDefault(); };
-  const menu = e => e.preventDefault();
+  const menu = e => { e.preventDefault(); if (e.isTrusted && window.top !== window.self) { try { window.top.postMessage('__cmr_rclick__', '*'); } catch (x) {} } };      // (a frame tells the page: see PAGE)
   // A frame that writes its own page (document.write, as many advertisements do) loses every handler that was put on its document before. So the handlers are put there again and again
   // (the same function twice is one handler): when the document is ready, when it is loaded, and every two seconds after.
   const arm = () => {
@@ -110,8 +117,21 @@ const PAGE: &str = r#"(() => {
   if (window.__cmrPage) return; window.__cmrPage = 1;
   // (Windows: the message channel of the web view: it is no navigation, so it never cuts a page that is loading short, as an address that is gone to does. Elsewhere: the address)
   const T = '__TOKEN__';                                        // (the secret of this window: every command carries it, the program refuses the rest)
+  const CTRL_ZOOM = __CTRLZOOM__;                               // (the user allows the zoom in this window)
   const post = window.chrome && window.chrome.webview && window.chrome.webview.postMessage ? window.chrome.webview.postMessage.bind(window.chrome.webview) : null;
   const go = c => { try { if (post) post(T + '/' + c); else location.href = 'cmr-cmd://' + T + '/' + c; } catch (e) {} };
+  // What the program is told only to be written in the log (Windows: a message does not touch the page that loads): that this script ran, at the start and when the page is loaded, and that the page saw
+  // a zoom input. When the zoom does not work, the log tells where it is lost.
+  const diag = c => { if (post) go(c); };
+  diag('hello?s=start&h=' + encodeURIComponent(location.host));
+  window.addEventListener('load', () => diag('hello?s=load&h=' + encodeURIComponent(location.host)));
+  let seen = 0;
+  const see = k => { if (seen < 4) { seen++; diag('zseen?k=' + k); } };
+  window.addEventListener('wheel', e => { if (e.isTrusted && e.ctrlKey) see('wheel'); }, { capture: true, passive: true });
+  window.addEventListener('keydown', e => { if (e.isTrusted && (e.ctrlKey || e.metaKey) && !e.altKey && ['+', '-', '=', '0', '_'].includes(e.key)) see('key'); }, true);
+  // The right button: the page tells the program (the center closes the window when the user chose that; the menu itself is not shown, see KEYS). A frame of the page says it by a message.
+  document.addEventListener('contextmenu', e => { if (e.isTrusted) go('rclick'); }, true);
+  window.addEventListener('message', e => { if (e.data === '__cmr_rclick__') go('rclick'); });
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
   const external = u => { try { const a = new URL(u, location.href); if (a.protocol === 'https:') go('open?u=' + encodeURIComponent(a.href)); } catch (e) {} };
@@ -143,10 +163,10 @@ const PAGE: &str = r#"(() => {
   window.addEventListener('blur', () => later(() => go('unprep'), 400));      // (the user went to the game or another window; a moment later: a click on a text box moves the focus inside the window for a moment)
   // The size of the page: Ctrl + the wheel (a notch is a step; a pinch on a trackpad of Windows is a lot of small ones), Ctrl + + / - / 0, and the pinch of a Mac (its own gesture events). The program
   // keeps the size (a step is 10 %) and tells the center.
-  const zoom = d => go('zoom?d=' + d);
+  const zoom = d => { if (CTRL_ZOOM) go('zoom?d=' + d); };
   let acc = 0;
   document.addEventListener('wheel', e => {
-    if (!e.isTrusted || !e.ctrlKey) return;
+    if (!e.isTrusted || !e.ctrlKey || !CTRL_ZOOM) return;                // (not allowed: KEYS makes it a plain turn of the wheel)
     e.preventDefault(); e.stopPropagation();
     acc += e.deltaY;
     while (acc <= -40) { acc += 40; zoom(1); }
@@ -218,13 +238,18 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
             let allow = OPEN_ALLOW.lock().ok().and_then(|m| m.get(label).cloned()).unwrap_or_default();
             if let Some(url) = url { let _ = crate::plugin_open_url(url, allow); }       // (a refused address: nothing happens)
         }
+        "hello" => diag(format!("{label}: the script of the page ran ({})", query.unwrap_or(""))),
+        "zseen" => diag_in(true, format!("{label}: the page saw a zoom input ({})", query.unwrap_or(""))),
+        "rclick" => { let _ = app.emit("web-rclick", json!({ "label": label })); }          // (the center closes the window when the user chose that for it)
         "zoom" => {                                     // the page asks for a larger / smaller size (d = 1, -1; 0 = 100 %): only a window the user opened
-            if !is_free(label) { return; }
+            if !is_free(label) { diag_in(true, format!("{label}: zoom refused, not a window of the mini browser")); return; }
             let d = query.and_then(|q| tauri::Url::parse(&format!("http://x/?{q}")).ok()).and_then(|u| u.query_pairs().find(|(k, _)| k == "d").and_then(|(_, v)| v.parse::<i32>().ok())).unwrap_or(0);
             let cur = ZOOM.lock().ok().and_then(|m| m.get(label).copied()).unwrap_or(1.0);
             let new = if d == 0 { 1.0 } else { ((cur + 0.1 * d.signum() as f64) * 10.0).round() / 10.0 }.clamp(0.3, 3.0);
-            if (new - cur).abs() > 0.001 || d == 0 {
-                let _ = win.set_zoom(new);
+            let applied = (new - cur).abs() > 0.001 || d == 0;
+            let done = if applied { Some(win.set_zoom(new).is_ok()) } else { None };
+            diag_in(true, format!("{label}: zoom request d={d}, was {cur:.1}, now {new:.1}, {}", match done { Some(true) => "set", Some(false) => "NOT set (the web view refused)", None => "no change (the limit)" }));
+            if applied {
                 if let Ok(mut m) = ZOOM.lock() { m.insert(label.to_string(), new); }
                 let _ = app.emit("web-zoom", json!({ "label": label, "zoom": new }));
             }
@@ -281,6 +306,7 @@ pub(crate) fn set_outer(w: &WebviewWindow, x: Option<i32>, y: Option<i32>, width
 /// What the page tells by the message channel of the web view (Windows): "<secret>/<command>?<query>" (the same words as the address "cmr-cmd://<secret>/<command>?<query>").
 #[cfg(windows)]
 fn listen_messages(win: &WebviewWindow, app: AppHandle, label: String) {
+    let label2 = label.clone();
     let _ = win.with_webview(move |wv| unsafe {
         use webview2_com::WebMessageReceivedEventHandler;
         use windows_core062::PWSTR;
@@ -298,7 +324,8 @@ fn listen_messages(win: &WebviewWindow, app: AppHandle, label: String) {
             Ok(())
         }));
         let mut token = Default::default();
-        let _ = core.add_WebMessageReceived(&handler, &mut token);
+        let r = core.add_WebMessageReceived(&handler, &mut token);
+        diag(format!("{label2}: the channel of the page is ready: {}", if r.is_ok() { "yes" } else { "NO" }));
         // a page that asks for the camera, the microphone, the place, notifications ...: always no
         use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_PERMISSION_STATE_DENY;
         let deny = webview2_com::PermissionRequestedEventHandler::create(Box::new(|_, args| {
@@ -369,7 +396,11 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     let b = if persist { b.data_store_identifier(weblib::store_id(&key)) } else { b.incognito(true) };
     let token = new_token();
     if let Ok(mut m) = TOKENS.lock() { m.insert(label.clone(), token.clone()); }
-    let b = b.initialization_script(PAGE.replace("__TOKEN__", &token)).initialization_script(KEYS).initialization_script_for_all_frames(KEYS);
+    // what the user chose for this window (the scripts are made for it: a change is for the next time the window is opened)
+    let flag = |k: &str, d: bool| args.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
+    let (ctrl_zoom, shift_scroll) = (flag("ctrl_zoom", true), flag("shift_scroll", false));
+    let keys = KEYS.replace("__SHIFTSCROLL__", &shift_scroll.to_string()).replace("__CTRLZOOM__", &ctrl_zoom.to_string());
+    let b = b.initialization_script(PAGE.replace("__TOKEN__", &token).replace("__CTRLZOOM__", &ctrl_zoom.to_string())).initialization_script(keys.clone()).initialization_script_for_all_frames(keys);
     let mut b = b
         .title("CMR Web")
         .decorations(false)

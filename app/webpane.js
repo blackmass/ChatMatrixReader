@@ -38,7 +38,7 @@ export class WebPane {
     const q = s => this.el.querySelector(s);
     q('.pback').onclick = () => invoke('web_cmd', { label: this.label, cmd: 'back' }).catch(() => {});
     q('.preload').onclick = () => invoke('web_cmd', { label: this.label, cmd: 'reload' }).catch(() => {});
-    q('.pclose').onclick = () => { this.save(); emit('web-close', { label: this.label }); };                  // (the hub closes it: it keeps the list of what is open)
+    q('.pclose').onclick = () => this.closeNow();
     q('.pbar').addEventListener('mousedown', e => { if (e.target.tagName === 'BUTTON') e.preventDefault(); });
     if (this.kind === 'browser') {
       q('.phome').onclick = () => { const c = this.conf() || {}; invoke('web_cmd', { label: this.label, cmd: 'goto', url: B.isWebUrl(c.start_url) ? c.start_url : B.START_URL }).catch(() => {}); };
@@ -81,11 +81,13 @@ export class WebPane {
   // every round of the center (the mouse is where the system says): the window is solid while the mouse is over it (or it is used: an address typed, its own menu open), and after a moment away it goes
   // to the solidity of its setting: slowly; back to solid quickly. The page is a window of the system: its own transparency (web_alpha); the bars and the frame are the center's, they go with it.
   tick(s) {
-    if (this.kind !== 'browser') return;
-    const idle = Math.min(1, Math.max(0.2, Number(this.opt('idle_alpha', 1)) || 1));
     const [cx, cy] = s.cursor, b = this.screenBox(), now = performance.now();
     const inside = cx >= b.x && cx < b.x + b.w && cy >= b.y && cy < b.y + b.h;
     const used = inside || !!this.el.querySelector('.paddr.editing') || (this.center.menuOwner && this.center.menuOwner()) === this;
+    // "평소에 인터페이스 숨기기": the bars, the address and the frame are hidden (slowly) while the mouse is away, and shown at once when it comes (the style sheet: .hide-ui.away)
+    this.el.classList.toggle('away', !used); this.el.classList.toggle('hide-ui', !!this.opt('hide_ui', false));
+    if (this.kind !== 'browser') return;
+    const idle = Math.min(1, Math.max(0.2, Number(this.opt('idle_alpha', 1)) || 1));
     let want = 1;
     if (!used && idle < 1) { if (!this.awayAt) this.awayAt = now; if (now - this.awayAt > 600) want = idle; } else this.awayAt = 0;
     // (the program does the fading of the page itself, from where it is now: one call for each change of the goal; the bars do the same by the style)
@@ -107,7 +109,7 @@ export class WebPane {
     b.title = pc ? tr('PC 화면입니다. 누르면 모바일 화면으로 바꿉니다.') : tr('모바일 화면입니다. 누르면 PC 화면으로 바꿉니다.');
   }
   // the whole window as this page draws it: [left, top, right, bottom] in css pixels of the page (the bar above the page included)
-  cover() { const r = this.rect; return [r.x, r.y - this.head, r.x + r.w, r.y + r.h]; }
+  cover() { const r = this.rect, top = this.boxY(); return [r.x, top, r.x + r.w, top + r.h + this.head]; }          // (the bar is below the page when `flip`: boxY)
   // `covers`: the windows in front of this one: what is under them is not drawn (a mask over this window's element); `mine`: this window's own place
   setClip(covers, mine) {
     const [l, t, rr, b] = mine, w = rr - l, h = b - t;
@@ -130,6 +132,10 @@ export class WebPane {
     st.webkitMaskSize = st.maskSize = '100% 100%'; st.webkitMaskRepeat = st.maskRepeat = 'no-repeat';
   }
   // the page was made larger or smaller: the size shows for a moment in the address line
+  // (the hub closes it: it keeps the list of what is open)
+  closeNow() { this.save(); emit('web-close', { label: this.label }); }
+  // the right button on the page (the page tells the program, the program the centers): the window closes when the user chose that for it. Read now, so a change of the option is at once.
+  rclick() { if (this.opt('rclick_close', false)) this.closeNow(); }
   setZoom(z) {
     const c = this.el.querySelector('.pzoom'); if (!c || !Number.isFinite(z)) return;
     c.textContent = Math.round(z * 100) + '%'; c.style.opacity = '1';

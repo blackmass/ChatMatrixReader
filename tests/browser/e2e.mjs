@@ -1012,6 +1012,12 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(async () => (await cp.locator('.webpane .pzoom').textContent()) === '120%', 'the size is shown in the address line');
     await until(() => cfgFile().browser_windows[0].zoom === 1.2, 'the window keeps the size', 3000);
     ok(opens().at(-1)[1].zoom === 1, 'browser/zoom: (the window was opened at 100 %)');
+    ok(opens().at(-1)[1].ctrl_zoom === true && opens().at(-1)[1].shift_scroll === false, 'browser/keys: the window is opened with the zoom on and the sideways wheel off (the way it was)');
+    // the right button on the page: nothing, unless the user chose it for the window (read at the moment of the click)
+    await control.evaluate(() => { window.__rc = 0; window.__TAURI__.event.listen('web-close', e => { if (e.payload && e.payload.label === 'web_b1') window.__rc++; }); });
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-rclick', { label: 'web_b1' }));
+    await cp.waitForTimeout(300);
+    ok(await control.evaluate(() => window.__rc) === 0, 'browser/rclick: a right click on the page does nothing while the option is off');
     // away from the mouse: it fades to the setting (slowly) and is solid again at once when the mouse is over it
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, idle_alpha: 0.5 } : b)) })));
     kb.cx = 5000; kb.cy = 5000;
@@ -1056,6 +1062,14 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await cmd('close', 2);
     await until(async () => (await cp.locator('.webpane').count()) === 1, 'the second window is closed');
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.filter(b => b.id !== 2) })));
+    // "평소에 인터페이스 숨기기": with the mouse away the bars, the address and the frame go (the class the style sheet works from); over the window they are there
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, hide_ui: true } : b)) })));
+    kb.cx = 5000; kb.cy = 5000;
+    await until(async () => { const c = await cp.locator('.webpane').getAttribute('class'); return c.includes('hide-ui') && c.includes('away'); }, 'with the mouse away the interface of the web window is hidden', 4000);
+    { const bx = centerRects.at(-1).panes.find(p => p.id === 'w1'); kb.cx = bx.x + bx.w / 2; kb.cy = bx.y + bx.h / 2; }
+    await until(async () => !(await cp.locator('.webpane').getAttribute('class')).includes('away'), 'with the mouse over it, the interface is shown', 4000);
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, hide_ui: false } : b)) })));
+    kb.cx = 0; kb.cy = 0;
     // the right button on the bar: the bookmarks, adding the page, the settings
     await cp.locator('.webpane .pbar').click({ button: 'right', position: { x: 40, y: 10 } });
     await until(async () => (await cp.locator('#ctx').isVisible()), 'the menu of the bar');
@@ -1086,6 +1100,13 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(() => opens().length === 3, 'the window is opened again');
     const a2 = opens().at(-1)[1];
     ok(a2.persist === true && a2.ua === '' && a2.url === 'https://x.y/z', 'browser/open: the settings of the window are used (PC page, the last address, the login kept): ' + JSON.stringify(a2));
+    // the right button on the page, the option on: the window closes at once (read at the click)
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, rclick_close: true } : b)) })));
+    await control.evaluate(() => { window.__rc = 0; });
+    await cm.evaluate(() => window.__TAURI__.event.emit('web-rclick', { label: 'web_b1' }));
+    await until(async () => (await cp.locator('.webpane').count()) === 0, 'browser/rclick: with the option on, a right click on the page closes the window');
+    ok(await control.evaluate(() => window.__rc) === 1, 'browser/rclick: it asks for the close once');
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, rclick_close: false } : b)) })));
     await cmd('close', 1); await cmd('clear', 1);
     await until(() => webCalls.some(c => c[0] === 'forget' && c[1] === 'browser1'), 'the login of a window that is not open: its folder is taken away');
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => ({ ...b, persist: false, mode: 'mobile', start_kind: 'url' })), bookmarks: [] })));
