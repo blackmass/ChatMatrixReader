@@ -1150,3 +1150,4 @@ Shift+휠로 가로 스크롤 = Scroll sideways with Shift + wheel
 상세 기록 = Detailed record
 창 포커스 = Window focus
 앞에 오는 창이 바뀔 때와, 마우스 왼쪽 버튼을 누르는 순간 커서 아래의 창과 키보드를 받는 창이 무엇인지 기록합니다. 다른 창 위에서 게임을 눌렀는데 게임에 포커스가 안 갈 때 켜세요. = Records which window comes to the front, and, when the left mouse button goes down, which window is under the cursor and which one has the keyboard. Turn it on when a click on the game over another window does not give the game the focus.
+99%까지 지정할 수 있습니다. 100%로 두면 웹뷰(엔진)가 글자를 그리는 방식이 수시로 바뀌어 글자 굵기와 밝기가 흔들리는 문제가 있어 제한했습니다. 눈으로는 100%와 구분되지 않습니다. = Up to 99 % can be set. At 100 % the web view (the engine) switches the way it draws the text by itself, and the thickness and brightness of the letters waver, so it is limited. The eye cannot tell it from 100 %.

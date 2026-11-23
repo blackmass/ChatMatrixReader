@@ -90,7 +90,7 @@ export const DEFAULTS = {
     voice_oa_timeout: 30,   // openai: seconds to wait for the server
     // window
     tab_opacity: 1.0,   // how solid the tabs and the icon box of the title bar are (1 = whole)
-    bg_opacity: 1.0,   // background (the dark area)
+    bg_opacity: 0.99,   // background (the dark area; at most 99 %: winconf.js MAX_BG_OPACITY)
     text_opacity: 1.0,   // text, title bar, scrollbar
     topmost: true,   // above every other window
     exit_with_game: false,   // quit this program 5 s after the game has been closed
@@ -197,6 +197,7 @@ export function normalize(saved) {
   cfg.auto_copy = cfg.auto_copy === true;
   cfg.read_matrix = cfg.read_matrix !== false;
   cfg.chat_links = cfg.chat_links !== false;
+  if (typeof cfg.bg_opacity === 'number' && cfg.bg_opacity > winconf.MAX_BG_OPACITY) cfg.bg_opacity = winconf.MAX_BG_OPACITY;          // (window 1: see MAX_BG_OPACITY)
   cfg.debug_log = debuglog.normalize(cfg.debug_log);
   const gi = cfg.glossary_inline; delete cfg.glossary_inline;
   if (truthy(gi)) cfg.glossary_mode = 'list';                 // (replaced by glossary_mode)

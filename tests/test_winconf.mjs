@@ -6,6 +6,9 @@ import { HERE, eq } from './helpers.mjs';
 for (const [fn, args, want] of JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'winconf.json'), 'utf8'))) {
   // 3.0 differs from 2.0 here on purpose: "only while the voice recognition is on" can be set for every extra window (2.0 allowed it for window 2 only)
   if (fn === 'normalize' && Array.isArray(args[0]) && args[0].length === 1 && args[0][0] && args[0][0].id === 5 && args[0][0].open_mode === 'voice') want.find(c => c.id === 5).open_mode = 'voice';
+  // (the background of a window is at most 99 % now, MAX_BG_OPACITY; the 2.0 answers say 100 %: they are compared as 99 %)
+  const cap = v => { if (Array.isArray(v)) v.forEach(cap); else if (v && typeof v === 'object') { if (typeof v.bg_opacity === 'number') v.bg_opacity = Math.min(0.99, v.bg_opacity); } return v; };
+  cap(want);
   const got = w[fn](...args);
   const no3 = v => { if (Array.isArray(v)) v.forEach(no3); else if (v && typeof v === 'object') { delete v.clear_on_open; delete v.dock_to; delete v.tab_opacity; delete v.owner; delete v.owner_win; delete v.kind; delete v.page; } return v; };       // (3.x only: an extra window can start empty)
   eq(no3(got), want, `${fn}(${JSON.stringify(args)})`);
@@ -77,4 +80,11 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   const kk = id => k.find(c => c.id === id);
   eq([kk(5).rclick_copy, kk(6).rclick_copy, 'rclick_copy' in kk(8)], [true, true, false], 'winconf: a web window copies with the right button unless told not to; the others have no such setting');
   eq([kk(5).shift_scroll, kk(5).rclick_close, kk(6).shift_scroll, kk(6).rclick_close, 'shift_scroll' in kk(8), 'rclick_close' in kk(8)], [true, true, false, false, false, false], 'winconf: the sideways wheel and the right button are settings of a web window only');
+}
+
+{
+  // the background of a window is at most 99 %: more is brought down, less stays, the default is 99 %
+  const l = w.normalize([{ id: 2, bg_opacity: 1 }, { id: 3, bg_opacity: 5 }, { id: 4, bg_opacity: 0.5 }, { id: 5 }]);
+  eq(l.map(c => c.bg_opacity), [0.99, 0.99, 0.5, 0.99], 'bg_opacity: at most 99 % (a window of 100 % or more is brought down), a lower value stays, the default is 99 %');
+  eq(w.MAX_BG_OPACITY, 0.99, 'bg_opacity: the limit is 99 %');
 }

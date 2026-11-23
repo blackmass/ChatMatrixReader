@@ -11,7 +11,9 @@ log.quiet = true;
 const no3 = c => { for (const w of (c && c.child_windows) || []) { delete w.clear_on_open; delete w.dock_to; delete w.tab_opacity; delete w.owner; delete w.owner_win; delete w.kind; delete w.page; } if (c) { delete c.whole_groups; delete c.hide_tools; delete c.hide_tabs; delete c.hide_frame; delete c.tab_alert; delete c.lock_window; delete c.tab_opacity; delete c.max_groups; delete c.send_place; delete c.main_name; } return c; };      // (3.x only: an extra window can start empty)
 const G = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config.json'), 'utf8'));
 const D = JSON.parse(fs.readFileSync(path.join(HERE, 'golden', 'config_defaults.json'), 'utf8'));
-const same = (a, b, msg) => { const x = canon(a), y = canon(b); if (x === y) check(true, msg); else { check(false, msg); console.log('   got     ', x.slice(0, 500)); console.log('   expected', y.slice(0, 500)); } };
+// (the background of a window is at most 99 % now, winconf.js MAX_BG_OPACITY; the 2.0 answers say 100 %: they are compared as 99 %)
+const cap = c => { const o = structuredClone(c); const f = w => { if (w && typeof w === 'object' && typeof w.bg_opacity === 'number') w.bg_opacity = Math.min(0.99, w.bg_opacity); }; f(o); for (const w of (o && o.child_windows) || []) f(w); return o; };
+const same = (a, b, msg) => { const x = canon(cap(a)), y = canon(cap(b)); if (x === y) check(true, msg); else { check(false, msg); console.log('   got     ', x.slice(0, 500)); console.log('   expected', y.slice(0, 500)); } };
 
 // the defaults: everything of 2.0, plus the add-on slot
 const mine = { ...DEFAULTS }; no3(mine); const added = Object.keys(mine).filter(k => !(k in D));
@@ -99,3 +101,5 @@ eq(normalize({ tuning: 5 }).tuning, {}, 'a broken tuning entry becomes {}');
 }
 
 eq([normalize({}).chat_links, normalize({ chat_links: false }).chat_links, normalize({ chat_links: 0 }).chat_links], [true, false, true], 'chat_links: on unless it is exactly false');
+
+eq([normalize({ bg_opacity: 1 }).bg_opacity, normalize({ bg_opacity: 0.17 }).bg_opacity, normalize({}).bg_opacity], [0.99, 0.17, 0.99], 'bg_opacity (window 1): at most 99 %, a lower value stays, the default is 99 %');

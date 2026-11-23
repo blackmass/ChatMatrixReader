@@ -777,6 +777,12 @@ ok((await rowOf('글 정렬').locator('select option').first().textContent()).st
 ok((await rowOf('글꼴').locator('input.wide').getAttribute('placeholder')).startsWith('창 1을 따름 · ') && await rowOf('글꼴').locator('input.wide').inputValue() === '', 'options/windows: the font box says what it follows (the empty box), and a new window follows');
 ok(await rowOf('배경 진하기').locator('button.def').isVisible() && await rowOf('시간 표시').locator('button.def').isVisible() && await rowOf('시간 표시').locator('button.def').textContent() === '기본값', 'options/windows: sliders and on / off switches have the "기본값" button, they do not follow');
 ok(await rowOf('시간 표시').locator('input[type=checkbox]').isChecked() && await rowOf('시간 표시').locator('button.def').isDisabled(), 'options/windows: a switch an extra window has no value for shows its default (on) and the 기본값 button is dim');
+// the background of a window is at most 99 % (at 100 % the engine draws the text now thick, now thin): the slider ends there, and a note says why
+{
+  const bg = rowOf('배경 진하기');
+  ok(await bg.locator('input[type=range]').getAttribute('max') === '99', 'options/windows: the slider of the background ends at 99 %');
+  ok((await bg.textContent()).includes('99%까지 지정할 수 있습니다') && (await bg.textContent()).includes('엔진'), 'options/windows: the note says why the limit is 99 %');
+}
 await rowOf('줄 간격').locator('input').fill('5'); await rowOf('줄 간격').locator('input').dispatchEvent('change');
 await within(1500, async () => cfgFile().child_windows.find(c => c.id === 3).line_spacing === 5 && cfgFile().line_spacing !== 5);
 ok(cfgFile().child_windows.find(c => c.id === 3).line_spacing === 5 && cfgFile().line_spacing !== 5, 'options/windows: an extra window gets its own value');

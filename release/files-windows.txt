@@ -11,3 +11,4 @@ plugins/README.txt
 README.md
 LICENSE
 THIRD-PARTY-NOTICES.txt
+docs/LM Studio.md

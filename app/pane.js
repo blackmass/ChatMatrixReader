@@ -143,7 +143,7 @@ export class Pane {
       this.seenGeo = sg;
       if (sg !== this.geo && !this.resizing) { this.place(); this.center.changed(this); }
     }
-    this.el.style.setProperty('--bg-alpha', String(Number(this.opt('bg_opacity', 1))));
+    this.el.style.setProperty('--bg-alpha', String(Math.min(winconf.MAX_BG_OPACITY, Number(this.opt('bg_opacity', 1)))));          // (never whole: see winconf.MAX_BG_OPACITY)
     for (const c of this.chats.values()) c.update();
     this.applyWidgets();
     this.style();

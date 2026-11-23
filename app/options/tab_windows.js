@@ -134,7 +134,8 @@ const tab = {
     { title: '배경과 조작', rows: [
       { win: true, key: 'blur', type: 'select', label: '배경 흐림', options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴',
         note: '윈도우의 문제로, 흐림을 켠 창이 여러 개 있으면 컴퓨터 전체가 느려질 수 있습니다. 한두 개 창에서만 쓰는 것을 권합니다.' },
-      { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, label: '배경 진하기', keywords: '투명도 불투명' },
+      { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, max: 0.99, label: '배경 진하기', keywords: '투명도 불투명',
+        note: '99%까지 지정할 수 있습니다. 100%로 두면 웹뷰(엔진)가 글자를 그리는 방식이 수시로 바뀌어 글자 굵기와 밝기가 흔들리는 문제가 있어 제한했습니다. 눈으로는 100%와 구분되지 않습니다.' },
       { win: true, key: 'tab_opacity', type: 'percent', min: 0.05, label: '탭 배경 진하기', keywords: '투명도 불투명 탭 상단 바 아이콘 버튼',
         note: '창 위쪽의 이름 탭과 기능 버튼 상자의 배경과 테두리가 얼마나 진한지 정합니다. 100%면 또렷하게 보이고, 낮추면 흐려져 게임 화면 위에서 덜 거슬립니다. 글자는 그대로입니다.' },
       { win: true, key: 'text_opacity', type: 'percent', min: 0.2, label: '글 진하기', keywords: '투명도 불투명' },

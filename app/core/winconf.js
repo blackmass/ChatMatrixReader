@@ -13,7 +13,7 @@ export const ALIGNS = ['left', 'center', 'right'];
 export const HEADS = ['detail', 'basic', 'nochan', 'body'];
 export const MODES = ['always', 'voice', 'never'];
 export const KEYS = {
-  id: 0, name: '', open_mode: 'never', channels: [], geometry: '', font_family: '', font_size: 0, bg_opacity: 1.0, text_opacity: 1.0, tab_opacity: 1.0,
+  id: 0, name: '', open_mode: 'never', channels: [], geometry: '', font_family: '', font_size: 0, bg_opacity: 0.99, text_opacity: 1.0, tab_opacity: 1.0,
   topmost: true, topmost_wow_only: false, click_through: false, hover_clear: false, blur: 0, shadow: false, head_mode: 'basic', align: 'left', bottom: false,
   owner: '', owner_win: '', kind: '', page: '',     // a window of a PLUGIN: the plugin's id, the name the plugin gave it, kind 'page' (the page of the plugin is shown instead of the chat), the page (core/plugins.js)
   dock_to: 0,                          // an extra window: the id of the window it is a TAB of (0 = a window of its own); see dockHost
@@ -32,6 +32,9 @@ export const FOLLOW = new Set([...Object.keys(OPT_NUM), ...OPT_STR, 'font_family
 const EMPTY_TEXT = new Set([...OPT_STR, 'font_family']);       // '' is "empty" for these (an extra window follows window 1, the main window uses the default)
 // The settings that belong to the WINDOW (its place, its background, how it takes the mouse, its bar): a window that is a tab of another one has the other's
 // (the window is one). The rest (font, lines, channels ...) is the tab's own.
+// The background of a window is at most 99 %: at 100 % the web view (the engine) draws the text of the window now with sub-pixel smoothing (thicker, brighter) and now with grey smoothing (thinner, dimmer),
+// switching by itself as the layers of the page change (its layer is whole, so it may use the sub-pixel one). Under 100 % it is always grey. 99 % cannot be told from 100 % by the eye.
+export const MAX_BG_OPACITY = 0.99;
 export const HOST_KEYS = new Set(['geometry', 'topmost', 'topmost_wow_only', 'click_through', 'hover_clear', 'blur', 'bg_opacity', 'text_opacity', 'tab_opacity', 'hide_tools', 'hide_tabs',
   'hide_frame', 'lock_window', 'widgets', 'open_mode', 'wheel_through', 'through_tips', 'interact_keys', 'auto_copy']);
 export const MAIN_KEY = { align: 'text_align', bottom: 'bottom_stick', shadow: 'shadow_on', name: 'main_name' };       // (names that differ in the main window's top level)
@@ -81,10 +84,10 @@ export function normalize(items) {
     d.channels = Array.isArray(d.channels) ? d.channels.filter(c => typeof c === 'string') : [];
     if ('opacity' in it && !('bg_opacity' in it) && !('text_opacity' in it)) d.bg_opacity = d.text_opacity = it.opacity;
     try {
-      d.bg_opacity = Math.min(1.0, Math.max(0.03, pyFloat(d.bg_opacity)));
+      d.bg_opacity = Math.min(MAX_BG_OPACITY, Math.max(0.03, pyFloat(d.bg_opacity)));
       d.text_opacity = Math.min(1.0, Math.max(0.2, pyFloat(d.text_opacity)));
       d.font_size = pyInt(d.font_size);
-    } catch { d.bg_opacity = d.text_opacity = 1.0; d.font_size = 0; }
+    } catch { d.bg_opacity = MAX_BG_OPACITY; d.text_opacity = 1.0; d.font_size = 0; }
     try { d.tab_opacity = Math.min(1.0, Math.max(0.05, pyFloat(d.tab_opacity))); } catch { d.tab_opacity = 1.0; }
     try { d.blur = Math.min(3, Math.max(0, pyInt(d.blur))); } catch { d.blur = 0; }
     for (const k of ['topmost', 'topmost_wow_only', 'click_through', 'hover_clear', 'bottom', 'shadow', 'clear_on_open']) d[k] = truthy(d[k]);
