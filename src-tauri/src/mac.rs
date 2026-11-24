@@ -397,7 +397,9 @@ fn prepare(hwnd: isize) {
     unsafe {
         let w = obj(hwnd);
         let _: () = msg_send![w, setHidesOnDeactivate: Bool::NO];                  // (a tool window is hidden while another program is active)
-        let behavior: usize = (1 << 0) | (1 << 8) | (1 << 6);                      // CanJoinAllSpaces | FullScreenAuxiliary | IgnoresCycle
+        // CanJoinAllSpaces | Stationary | FullScreenAuxiliary | IgnoresCycle. Stationary: Mission Control (the three fingers up) does not show the window as one more window of its own (the centers are windows of
+        // the size of the screen: they showed there as "CMR Center"); it stays where it is. If a Mac still shows them, the bit to try instead is Transient (1 << 3).
+        let behavior: usize = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 6);
         let _: () = msg_send![w, setCollectionBehavior: behavior];
         let _: () = msg_send![w, setHasShadow: Bool::NO];                          // (a translucent window gets a dark outline from the system's shadow)
     }
