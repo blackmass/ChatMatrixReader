@@ -809,6 +809,7 @@ extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _inf
                 }
             }
         }
+        if crate::debug_on("mouse") { wheel_log(at.x, at.y, target); }
         let Some(h) = target else { return event };
         if let Ok(mut lock) = LOCK.try_lock() { *lock = Some((h, Instant::now())); }
         match SINK.get() {
@@ -847,6 +848,7 @@ fn ensure_hook() -> bool {
     if !made && !ASKED_LISTEN.swap(true, Ordering::SeqCst) {
         unsafe { CGRequestListenEventAccess(); CGRequestPostEventAccess(); }       // (the system asks the user once: Input Monitoring, Accessibility)
     }
+    if crate::debug_on("mouse") { crate::debug_log("mouse", &format!("the tap of the wheel: {}", if made { "made" } else { "NOT made (the permission is missing?)" })); }
     if let Ok(mut h) = HOOK.lock() { *h = Some((made, Instant::now())); }
     made
 }
@@ -862,6 +864,36 @@ pub fn set_center_hwnd(center: isize, hwnd: isize) {
     if CENTER_NUMS.lock().map(|l| l.iter().any(|e| e.0 == center && e.1 == hwnd)).unwrap_or(false) { return; }
     let number: isize = on_main(|| unsafe { let n: isize = msg_send![obj(hwnd), windowNumber]; n });
     if let Ok(mut l) = CENTER_NUMS.lock() { l.retain(|e| e.0 != center); l.push((center, hwnd, number)); }
+}
+
+/// (only for the detailed log "mouse") What the check of `covered_by_other` sees: where the center is in the list of windows, and the first window that covers the point above it.
+fn diag_cover(center: isize, x: f64, y: f64) -> String {
+    let number = CENTER_NUMS.try_lock().ok().and_then(|l| l.iter().find(|e| e.0 == center).map(|e| e.2)).unwrap_or(0);
+    let me = std::process::id() as i32;
+    let list = windows();
+    let pos = list.iter().position(|w| w.number as isize == number);
+    let mut over = String::from("nothing");
+    for w in list.iter() {
+        if w.number as isize == number { break; }
+        if w.pid == me || w.layer >= 100 || w.w < 1.0 || w.h < 1.0 { continue; }
+        if x >= w.x && x < w.x + w.w && y >= w.y && y < w.y + w.h { over = format!("{} (layer {}, {}x{} at {},{}, number {})", w.owner, w.layer, w.w as i32, w.h as i32, w.x as i32, w.y as i32, w.number); break; }
+    }
+    format!("number {number}, found at {pos:?} of {} windows, covered by: {over}", list.len())
+}
+static WHEEL_LOG_AT: Mutex<Option<Instant>> = Mutex::new(None);
+/// (only for the detailed log "mouse", at most twice a second) A turn of the wheel the tap saw: where, which zones hold the point, what stands over each center there, and what was decided.
+fn wheel_log(x: f64, y: f64, target: Option<isize>) {
+    if let Ok(mut t) = WHEEL_LOG_AT.try_lock() {
+        if let Some(at) = *t { if at.elapsed() < Duration::from_millis(500) { return; } }
+        *t = Some(Instant::now());
+    } else { return; }
+    let zones: Vec<(isize, [f64; 4])> = ZONES.try_lock().map(|z| z.iter().map(|e| (e.0, e.2)).collect()).unwrap_or_default();
+    let mut text = format!("the wheel at ({:.0}, {:.0}): {} zones", x, y, zones.len());
+    for (h, r) in zones.iter() {
+        if x >= r[0] && x < r[2] && y >= r[1] && y < r[3] { let c = (-h) / 100000 - 1; text += &format!("; in the zone {h} of center {c}: {}", diag_cover(c, x, y)); }
+    }
+    text += &format!("; taken for {:?}", target);
+    crate::debug_log("mouse", &text);
 }
 
 /// Does a window of another program stand over the window of this center at this point (points, top left origin)? The windows on the screen from the front to the back (windows(): the system's own order) are
