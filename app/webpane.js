@@ -29,7 +29,7 @@ export class WebPane {
     this.el.addEventListener('pointerdown', () => this.center.raise(this), true);
     // the title with Shift or Ctrl: this page in the user's own browser. At the press (not at the click: the bar holds the pointer for dragging, and the click then goes to the bar), before the drag.
     this.el.querySelector('.pbar').addEventListener('pointerdown', e => {
-      if (e.button !== 0 || !(e.shiftKey || e.ctrlKey || e.metaKey) || !e.target.closest('.ptab')) return;
+      if (e.button !== 0 || !(e.shiftKey || e.ctrlKey || e.metaKey) || !e.target.closest('.ptab') || this.opt('click_through', false)) return;          // (a window the mouse goes through: those keys are what makes it usable, not "open in my browser")
       e.preventDefault(); e.stopImmediatePropagation();
       invoke('web_cmd', { label: this.label, cmd: 'external' }).catch(() => {});
     }, true);
@@ -65,7 +65,7 @@ export class WebPane {
     }
     const t = this.el.querySelector('.ptab');
     t.textContent = this.title || (this.url ? (() => { try { return new URL(this.url).host; } catch { return ''; } })() : '');
-    t.title = this.url + '\n' + tr('Shift 또는 Ctrl+클릭: 내 브라우저에서 열기');
+    t.title = this.opt('click_through', false) ? this.url : this.url + '\n' + tr('Shift 또는 Ctrl+클릭: 내 브라우저에서 열기');
   }
   // The address of a window of the mini browser is drawn here, but typed in a small window of the system (address.js): the center never takes the keyboard. A click on it asks the program to put that
   // window over this place; clicking anywhere else of this window (or closing it) puts it away.
@@ -100,7 +100,13 @@ export class WebPane {
     let changed = false;
     if (take !== this.interactive) { this.interactive = take; changed = true; }
     const pass = through && !take;
-    if (pass !== !!this.passing || (pass && now - this.passAt > 2000)) { this.passing = pass; this.passAt = now; invoke('web_through', { label: this.label, on: pass }).catch(() => {}); }   // (and again every 2 s while it goes through: nothing else may undo it)
+    // (the program is told when the state changes, and again every 2 s while the option is on: nothing else may undo it; `enabled` is for the page: with the option on, a click with Shift / Ctrl is a plain click)
+    const flagNew = this.sentThrough === undefined ? through : through !== this.sentThrough;
+    if (pass !== !!this.passing || flagNew || (through && now - this.passAt > 2000)) {
+      this.passing = pass; this.passAt = now;
+      if (flagNew) { this.sentThrough = through; this.showTitle(); }
+      invoke('web_through', { label: this.label, on: pass, enabled: through }).catch(() => {});
+    }
     this.el.classList.toggle('through', through); this.el.classList.toggle('interactive', take);
     // the turns of the wheel over a page that the mouse goes through are taken from the game when the user allowed it (the option "관통 중 휠 스크롤 허용"); the page scrolls (wheelScrolled)
     const zone = pass && !!(ctx.cfg && ctx.cfg.wheel_through);

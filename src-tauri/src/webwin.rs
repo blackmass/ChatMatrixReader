@@ -140,12 +140,14 @@ const PAGE: &str = r#"(() => {
   window.addEventListener('message', e => { if (e.data === '__cmr_rclick__') go('rclick'); });
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
+  window.__cmrThrough = __THROUGH__;                            // (the window is click-through: the program tells it when the option changes, see web_through. It is the interact keys that make the window usable then: a click with
+                                                                // Shift / Ctrl / Cmd is a plain click and never "open in my browser". A click with the wheel button and a link that says target=_blank still are)
   const external = u => { try { const a = new URL(u, location.href); if (a.protocol === 'https:') go('open?u=' + encodeURIComponent(a.href)); } catch (e) {} };
   const linkOf = e => (e.target && e.target.closest ? e.target.closest('a[href]') : null);
   document.addEventListener('click', e => {
     if (!e.isTrusted) return;
     const a = linkOf(e);
-    if (a && (e.ctrlKey || e.metaKey || e.shiftKey || a.target === '_blank')) { e.preventDefault(); e.stopPropagation(); external(a.href); }
+    if (a && (((e.ctrlKey || e.metaKey || e.shiftKey) && !window.__cmrThrough) || a.target === '_blank')) { e.preventDefault(); e.stopPropagation(); external(a.href); }
   }, true);
   document.addEventListener('auxclick', e => {
     if (!e.isTrusted || e.button !== 1) return;
@@ -436,9 +438,9 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     if let Ok(mut m) = TOKENS.lock() { m.insert(label.clone(), token.clone()); }
     // what the user chose for this window (the scripts are made for it: a change is for the next time the window is opened)
     let flag = |k: &str, d: bool| args.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
-    let (ctrl_zoom, shift_scroll, rclick_copy) = (flag("ctrl_zoom", true), flag("shift_scroll", false), flag("rclick_copy", true));
+    let (ctrl_zoom, shift_scroll, rclick_copy, through) = (flag("ctrl_zoom", true), flag("shift_scroll", false), flag("rclick_copy", true), flag("through", false));
     let keys = KEYS.replace("__SHIFTSCROLL__", &shift_scroll.to_string()).replace("__CTRLZOOM__", &ctrl_zoom.to_string());
-    let b = b.initialization_script(PAGE.replace("__TOKEN__", &token).replace("__CTRLZOOM__", &ctrl_zoom.to_string()).replace("__RCOPY__", &rclick_copy.to_string())).initialization_script(keys.clone()).initialization_script_for_all_frames(keys);
+    let b = b.initialization_script(PAGE.replace("__TOKEN__", &token).replace("__CTRLZOOM__", &ctrl_zoom.to_string()).replace("__RCOPY__", &rclick_copy.to_string()).replace("__THROUGH__", &through.to_string())).initialization_script(keys.clone()).initialization_script_for_all_frames(keys);
     let mut b = b
         .title("CMR Web")
         .decorations(false)
@@ -615,11 +617,15 @@ pub async fn web_alpha(app: AppHandle, label: String, alpha: f64, ms: Option<u64
 }
 
 /// A window of the web that the mouse goes through (click-through): what the center says when the user chose it for the window and the interact keys are not held. `on` false: it takes the mouse again.
+/// `enabled`: whether the user chose click-through for the window at all (what the page needs to know: see `__cmrThrough`).
 #[tauri::command]
-pub async fn web_through(app: AppHandle, label: String, on: bool) -> Result<(), String> {
+pub async fn web_through(app: AppHandle, label: String, on: bool, enabled: Option<bool>) -> Result<(), String> {
     if is_closing(&label) { return Ok(()); }
-    let hwnd = hwnd_of(&get(&app, &label)?)?;
+    let w = get(&app, &label)?;
+    let hwnd = hwnd_of(&w)?;
     win::set_clickthrough(hwnd, on);
+    // `enabled`: the user chose click-through for this window (it goes through only while the interact keys are not held): the page is told, it has no other way to know (PAGE: __cmrThrough)
+    if let Some(e) = enabled { let _ = w.eval(&format!("window.__cmrThrough={e}")); }
     Ok(())
 }
 

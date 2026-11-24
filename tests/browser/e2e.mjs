@@ -84,7 +84,7 @@ async function invoke(cmd, a = {}) {
     case 'web_info': return { exists: true, visible: true, position: [100, 50], size: [360, 640] };
     case 'web_cmd': webCalls.push(['cmd', a.label, a.cmd, a.url]); return null;
     case 'web_alpha': webCalls.push(['alpha', a.label, a.alpha]); return null;
-    case 'web_through': webCalls.push(['through', a.label, a.on]); return null;
+    case 'web_through': webCalls.push(['through', a.label, a.on, a.enabled]); return null;
     case 'web_wheel': webCalls.push(['wheel', a.label, a.x, a.y, a.delta]); return null;
     case 'web_ua': webCalls.push(['ua', a.label, a.ua, a.hints]); return null;
     case 'address_show': webCalls.push(['addr', a]); return null;
@@ -1129,6 +1129,7 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
       await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, click_through: true } : b)) })));
       const b1 = boxOf('w1'); kb.cx = b1.x + b1.w / 2; kb.cy = b1.y + b1.h / 2; kb.shift = false;
       await until(() => th() && th()[2] === true, 'browser/through: the page lets the mouse go (the exe is told)', 4000);
+      ok(th()[3] === true, 'browser/through: the page is told that the window is click-through (a click with Shift / Ctrl is then a plain click)');
       await until(() => boxOf('w1b') && boxOf('w1b').hit === false && boxOf('w1').hit === false, 'browser/through: the bar and the strips take nothing', 4000);
       kb.shift = true;
       await until(() => th()[2] === false, 'browser/through: the interact key with the pointer over it: it takes the mouse', 4000);
@@ -1153,6 +1154,7 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
       await control.evaluate(w => import('./settings.js').then(m => m.set({ wheel_through: w })), wt0);
       kb.cx = 0; kb.cy = 0;
       await until(() => th()[2] === false, 'browser/through: off: the page takes the mouse', 4000);
+      await until(() => webCalls.filter(c => c[0] === 'through' && c[1] === 'web_b1').at(-1)[3] === false, 'browser/through: off: the page is told it is not click-through any more', 4000);
     }
     // the order of the web windows: the center draws their frames by `z` and tells the program, which puts their pages in the same order; every translation window is above them all
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: [...m.cfg().browser_windows, { id: 2, name: '', mode: 'mobile', start_kind: 'url', start_url: 'https://www.google.com/', last_url: '', persist: false, topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1, idle_alpha: 1 }] })));
