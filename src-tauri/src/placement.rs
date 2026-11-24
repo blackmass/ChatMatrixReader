@@ -17,20 +17,28 @@ fn inside(area: Area, x: i32, y: i32, w: i32, h: i32) -> (i32, i32) {
     (x.min(area.x + area.w - w).max(area.x), y.min(area.y + area.h - h).max(area.y))
 }
 
-/// The send box for a window (top t, bottom b, left l), as wide as it, `gap` away from it. `mode`: "below" / "above" = always there; anything else ("auto"):
-/// under the window, and above it when under it the box would be cut off (the edge of the screen, the taskbar). Whatever is chosen, the box is kept inside the
-/// monitor (area); only a window as high as the screen leaves no room and the box then overlaps it.
-pub fn send_box(area: Area, mode: &str, l: i32, t: i32, b: i32, w: i32, h: i32, gap: i32) -> (i32, i32) {
+/// Is the rectangle wholly on the usable part of the screens, all the monitors together? Points along its top and its bottom side are looked at (the areas of monitors that stand beside each other have no
+/// gap between them, so a box that lies over both is on the screens).
+fn on_screens(areas: &[Area], x: i32, y: i32, w: i32, h: i32) -> bool {
+    let at = |px: i32, py: i32| areas.iter().any(|a| px >= a.x && px < a.x + a.w && py >= a.y && py < a.y + a.h);
+    (0..=8).all(|i| { let px = x + (w - 1) * i / 8; at(px, y) && at(px, y + h - 1) })
+}
+
+/// The send box for a window (top t, bottom b, left l; `bar`: the height of its bar, above t), as wide as it, `gap` away from it. It stays at the left of the window exactly (it is the window's: it has no
+/// edge of its own to stop at). `mode`: "below" / "above" = always there; anything else ("auto"): under the window, else above it, else ON it, at its top, over its bar (the window is as high as the screen:
+/// full screen, half of the screen; the newest lines are at the bottom of a window, they stay in view). A place is "there" when the box lies wholly on the screens (all the monitors together, without the task
+/// bar): so it follows the window over the border of two monitors without stopping. What is not on the screens is brought into `home`, the monitor of the window.
+pub fn send_box(areas: &[Area], home: Area, mode: &str, l: i32, t: i32, b: i32, w: i32, h: i32, gap: i32, bar: i32) -> (i32, i32) {
     let below = b + gap;
     let above = t - gap - h;
     let y = match mode {
         "below" => below,
         "above" => above,
         _ => {
-            if below + h <= area.y + area.h { below } else if above >= area.y { above } else if area.y + area.h - below > above - area.y { below } else { above }
+            if on_screens(areas, l, below, w, h) { below } else if on_screens(areas, l, above, w, h) { above } else { t - bar }
         }
     };
-    inside(area, l, y, w, h)
+    if on_screens(areas, l, y, w, h) { (l, y) } else { inside(home, l, y, w, h) }
 }
 
 #[cfg(test)]
@@ -40,48 +48,67 @@ mod tests {
     const MAIN: Area = Area { x: 0, y: 0, w: 1920, h: 1040 };           // (a taskbar of 40 at the bottom is not in the area)
     const UPPER: Area = Area { x: 0, y: -1040, w: 1920, h: 1040 };       // a second monitor above the main one
     const RIGHT: Area = Area { x: 1920, y: 0, w: 1920, h: 1080 };
+    const BAR: i32 = 22;
+
+    fn one(mode: &str, l: i32, t: i32, b: i32, w: i32) -> (i32, i32) { send_box(&[MAIN], MAIN, mode, l, t, b, w, 46, 2, BAR) }
 
     #[test]
     fn the_send_box_is_under_the_window_when_there_is_room() {
-        assert_eq!(send_box(MAIN, "auto", 100, 400, 700, 600, 46, 2), (100, 702));
+        assert_eq!(one("auto", 100, 400, 700, 600), (100, 702));
     }
 
     #[test]
     fn the_send_box_goes_above_a_window_at_the_bottom_of_the_screen() {
         // the window ends at the bottom of the usable area (the taskbar is below): under it would be cut off
-        assert_eq!(send_box(MAIN, "auto", 100, 700, 1040, 600, 46, 2), (100, 652));
+        assert_eq!(one("auto", 100, 700, 1040, 600), (100, 652));
         // under it there are only 20 pixels: still not enough
-        assert_eq!(send_box(MAIN, "auto", 100, 700, 1020, 600, 46, 2), (100, 652));
+        assert_eq!(one("auto", 100, 700, 1020, 600), (100, 652));
         // exactly enough room under it: stays under it
-        assert_eq!(send_box(MAIN, "auto", 100, 700, 992, 600, 46, 2), (100, 994));
+        assert_eq!(one("auto", 100, 700, 992, 600), (100, 994));
     }
 
     #[test]
-    fn the_send_box_uses_the_monitor_of_the_window_and_stays_in_it() {
-        // a window at the bottom of the upper monitor: above it, not under it on the main monitor
-        let (x, y) = send_box(UPPER, "auto", 100, -400, 0, 600, 46, 2);
-        assert!(y + 46 <= UPPER.y + UPPER.h && y >= UPPER.y, "{y}");
-        assert_eq!(x, 100);
-        // a window that sticks out to the right: the box is moved in
-        assert_eq!(send_box(MAIN, "auto", 1700, 400, 700, 600, 46, 2).0, 1320);
+    fn the_send_box_follows_the_window_over_the_border_of_two_monitors() {
+        let areas = [MAIN, RIGHT];
+        // a window that sticks out to the right onto the next monitor: the box stays at its left edge, as wide as it, over both
+        assert_eq!(send_box(&areas, MAIN, "auto", 1700, 400, 700, 600, 46, 2, BAR), (1700, 702));
+        // the window is on the monitor above: under it is the main monitor, that is on the screens as well
+        let areas = [UPPER, MAIN];
+        assert_eq!(send_box(&areas, UPPER, "auto", 100, -400, -20, 600, 46, 2, BAR), (100, -18));
+        // a window beside the main monitor at the bottom: above it
+        assert_eq!(send_box(&[MAIN, RIGHT], RIGHT, "auto", 2000, 900, 1080, 600, 46, 2, BAR), (2000, 852));
     }
 
     #[test]
-    fn a_window_as_high_as_the_screen_leaves_no_room_and_the_box_stays_on_the_screen() {
-        let (_, y) = send_box(MAIN, "auto", 0, 0, 1040, 600, 46, 2);
+    fn a_window_as_high_as_the_screen_gets_the_box_on_it_at_the_top() {
+        // no room under it, none above it: on the window, over its bar (the bar is the 22 above the text area)
+        assert_eq!(one("auto", 0, 22, 1040, 600), (0, 0));
+        assert_eq!(one("auto", 300, 200, 1040, 600).1, 152);                       // (a window that is low on the screen but has room above it: above it, as before)
+        // half of the screen (left half, full height): the same
+        assert_eq!(send_box(&[MAIN, RIGHT], MAIN, "auto", 0, 22, 1040, 960, 46, 2, BAR), (0, 0));
+        // never off the screen: a window whose top is at the top of the screen with its bar above it (flipped bar): brought in
+        let (_, y) = one("auto", 0, 0, 1040, 600);
         assert!(y >= MAIN.y && y + 46 <= MAIN.y + MAIN.h, "{y}");
     }
 
     #[test]
     fn the_send_box_can_be_told_where_to_be() {
-        assert_eq!(send_box(MAIN, "above", 100, 400, 700, 600, 46, 2), (100, 352));        // above although there is room under
-        assert_eq!(send_box(MAIN, "below", 100, 400, 700, 600, 46, 2), (100, 702));
+        assert_eq!(one("above", 100, 400, 700, 600), (100, 352));        // above although there is room under
+        assert_eq!(one("below", 100, 400, 700, 600), (100, 702));
         // "below" at the bottom of the screen is kept on the screen (it then overlaps the window), "above" at the top of it likewise
-        let (_, y) = send_box(MAIN, "below", 100, 700, 1040, 600, 46, 2);
-        assert_eq!(y, 994);
-        let (_, y) = send_box(MAIN, "above", 100, 10, 300, 600, 46, 2);
-        assert_eq!(y, 0);
-        assert_eq!(send_box(MAIN, "something else", 100, 400, 700, 600, 46, 2), (100, 702));       // an unknown word is "auto"
+        assert_eq!(one("below", 100, 700, 1040, 600).1, 994);
+        assert_eq!(one("above", 100, 10, 300, 600).1, 0);
+        assert_eq!(one("something else", 100, 400, 700, 600), (100, 702));       // an unknown word is "auto"
+    }
+
+    #[test]
+    fn what_is_off_every_screen_is_brought_into_the_monitor_of_the_window() {
+        // a window far off to the left: the box is brought in
+        let (x, _) = one("auto", -2000, 400, 700, 600);
+        assert_eq!(x, 0);
+        // no screens known: nothing moves it out of the monitor given
+        let (x, y) = send_box(&[], MAIN, "auto", 100, 400, 700, 600, 46, 2, BAR);
+        assert!(x >= 0 && y >= 0);
     }
 
 }

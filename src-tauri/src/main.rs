@@ -561,7 +561,13 @@ async fn native_open(app: AppHandle, id: i64, title: Option<String>, geometry: O
 /// The program closes the window of the system of translation window `id` (it is not open any more, or it has become a pane of a center). Not the X of the frame: that is asked of the hub (native-close).
 #[tauri::command]
 async fn native_close(app: AppHandle, id: i64) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window(&native_label(id)) { w.destroy().map_err(|e| e.to_string())?; }
+    let label = native_label(id);
+    // the send box that belongs to this window must not go with it (the system destroys the windows that a window owns when it is destroyed): it is let go first and is always on top again
+    if INPUT_OWNER.lock().ok().and_then(|o| o.clone()).as_deref() == Some(label.as_str()) {
+        if let Some(input) = app.get_webview_window("input") { if let Ok(ih) = hwnd_of(&input) { win::own_window(ih, 0); } let _ = input.set_always_on_top(true); }
+        if let Ok(mut o) = INPUT_OWNER.lock() { *o = None; }
+    }
+    if let Some(w) = app.get_webview_window(&label) { w.destroy().map_err(|e| e.to_string())?; }
     Ok(())
 }
 
@@ -580,6 +586,7 @@ fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<()
     let w = app.get_webview_window("input").ok_or("no input window")?;
     let e = |e: tauri::Error| e.to_string();
     let place = place.unwrap_or_else(|| "auto".into());
+    own_input(&app, &label);
     place_input(&app, &label, &place)?;
     if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = Some((label, place)); }       // (from now on the box follows its window: see on_window_event)
     w.show().map_err(e)?;
@@ -667,6 +674,20 @@ fn address_hide(app: AppHandle) {
 
 /// The window the open send box follows (its label) and where it goes ("auto" | "below" | "above"); None while there is no box.
 static INPUT_ANCHOR: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+/// The window of the system (its label) that owns the send box now: the box is above it and goes with it, and is not "always on top" (a window of the system that is behind other windows has its box behind them).
+/// None: the box belongs to nobody and is always on top (it goes with a pane of a control center, which is on top itself).
+static INPUT_OWNER: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// The send box belongs to the window of the system of translation window `label` when it has one, else to nobody (always on top). Told again each time the box is shown.
+fn own_input(app: &AppHandle, label: &str) {
+    let Some(input) = app.get_webview_window("input") else { return };
+    let Ok(ih) = hwnd_of(&input) else { return };
+    let owner = app.get_webview_window(&native_label_of(label)).filter(|w| w.is_visible().unwrap_or(false));
+    match owner.as_ref().and_then(|w| hwnd_of(w).ok()) {
+        Some(oh) => { let _ = input.set_always_on_top(false); win::own_window(ih, oh); if let Ok(mut o) = INPUT_OWNER.lock() { *o = owner.map(|w| w.label().to_string()); } }
+        None => { win::own_window(ih, 0); let _ = input.set_always_on_top(true); if let Ok(mut o) = INPUT_OWNER.lock() { *o = None; } }
+    }
+}
 
 /// Puts the send box next to the window `label`: its width, its height of 46 points (46 pixels times the scale of the monitor: a Retina screen has twice the pixels),
 /// its place by placement::send_box inside the monitor the window is on.
@@ -680,10 +701,13 @@ fn place_input(app: &AppHandle, label: &str, place: &str) -> Result<(), String> 
     };
     let pos = tauri::PhysicalPosition::new(px, py);
     let size = tauri::PhysicalSize::new(sw, sh);
-    let (area, scale) = monitor_at(&w, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
+    let (home, scale) = monitor_at(&w, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
+    // (the usable part of every monitor: the box is "there" when it lies wholly on them together, so it follows its window over the border of two monitors; placement::send_box)
+    let areas: Vec<placement::Area> = app.available_monitors().unwrap_or_default().iter().map(|m| { let a = m.work_area(); placement::Area { x: a.position.x, y: a.position.y, w: a.size.width as i32, h: a.size.height as i32 } }).collect();
     let box_w = size.width.max(200);
     let box_h = ((46.0 * scale).round() as u32).max(46);
-    let (bx, by) = placement::send_box(area, place, pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2);
+    let bar = (NATIVE_BAR * scale).round() as i32;
+    let (bx, by) = placement::send_box(&areas, home, place, pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2, bar);
     w.set_position(tauri::PhysicalPosition::new(bx, by)).map_err(e)?;
     w.set_size(tauri::PhysicalSize::new(box_w, box_h)).map_err(e)?;
     Ok(())
