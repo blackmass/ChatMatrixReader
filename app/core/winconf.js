@@ -153,6 +153,14 @@ export function opt(conf, cfg, key, dflt = null) {
   return m === undefined ? dflt : m;
 }
 
+// The kind of order a translation window has (window 1: the settings of the top level; an extra window: its entry): 0 neither on top nor above the game = a window of the system (its own frame, the task bar, the
+// snapping: center.js `native`), 1 always on top, 2 above the game only (the two kinds the controls centers draw). The same rule is used by the hub (winmanager.js: which windows the system has) and the centers.
+export function windowMode(cfg, id) {
+  const conf = id === 1 ? null : (cfg.child_windows || []).find(c => c.id === id) || {};
+  const get = (key, d) => (id === 1 ? (cfg[MAIN_KEY[key] || key] ?? d) : opt(conf, cfg, key, d));
+  return get('topmost_wow_only', false) ? 2 : get('topmost', true) ? 1 : 0;
+}
+
 export function headMode(conf, cfg = null) {
   const m = conf.head_mode;
   if (HEADS.includes(m)) return m;

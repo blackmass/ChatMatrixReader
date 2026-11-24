@@ -125,21 +125,23 @@ const tab = {
     { title: '위치', rows: [
       { win: true, key: 'lock_window', type: 'check', label: '창 고정', keywords: '이동 크기 조절 잠금 드래그 고정 lock',
         note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다. 탭을 누르다가 창이 밀리는 일을 막습니다.' },
+      { type: 'notice', label: '', show: (c, x) => isNative(c, x), text: '"항상 맨 위에"와 "와우 위에만"이 둘 다 꺼져 있어서, 이 창은 작업 표시줄(맥은 독)에 나오는 일반 창입니다. 제목 표시줄과 테두리는 운영체제의 것이고, 옮기기, 크기 바꾸기, 최대화, 가장자리에 붙이기(스냅)도 운영체제 기능을 그대로 씁니다. 이 창에서는 항상 위, 클릭 관통, 배경 흐림은 쓰이지 않습니다.' },
       { win: true, key: 'topmost', type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시',
+        note: '게임 위에 항상 떠 있습니다. 둘 다 끄면 일반 창이 됩니다 (작업 표시줄에 나오고, 윈도우의 창 배치 기능을 쓸 수 있습니다).',
         apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost' }, v); if (v) ctx.put({ win: true, key: 'topmost_wow_only' }, false); } },
       { win: true, key: 'topmost_wow_only', type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
         note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.',
         apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost_wow_only' }, v); if (v) ctx.put({ win: true, key: 'topmost' }, false); } },
     ] },
     { title: '배경과 조작', rows: [
-      { win: true, key: 'blur', type: 'select', label: '배경 흐림', options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴',
+      { win: true, key: 'blur', type: 'select', label: '배경 흐림', options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴', show: (c, x) => !isNative(c, x),
         note: '윈도우의 문제로, 흐림을 켠 창이 여러 개 있으면 컴퓨터 전체가 느려질 수 있습니다. 한두 개 창에서만 쓰는 것을 권합니다.' },
       { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, max: 0.99, label: '배경 진하기', keywords: '투명도 불투명',
         note: '99%까지 지정할 수 있습니다. 100%로 두면 웹뷰(엔진)가 글자를 그리는 방식이 수시로 바뀌어 글자 굵기와 밝기가 흔들리는 문제가 있어 제한했습니다. 눈으로는 100%와 구분되지 않습니다.' },
       { win: true, key: 'tab_opacity', type: 'percent', min: 0.05, label: '탭 배경 진하기', keywords: '투명도 불투명 탭 상단 바 아이콘 버튼',
         note: '창 위쪽의 이름 탭과 기능 버튼 상자의 배경과 테두리가 얼마나 진한지 정합니다. 100%면 또렷하게 보이고, 낮추면 흐려져 게임 화면 위에서 덜 거슬립니다. 글자는 그대로입니다.' },
       { win: true, key: 'text_opacity', type: 'percent', min: 0.2, label: '글 진하기', keywords: '투명도 불투명' },
-      { win: true, key: 'click_through', type: 'check', label: '클릭 관통', keywords: '마우스 관통 클릭 통과 click through',
+      { win: true, key: 'click_through', type: 'check', label: '클릭 관통', keywords: '마우스 관통 클릭 통과 click through', show: (c, x) => !isNative(c, x),
         note: ['창이 클릭을 받지 않고 뒤의 게임으로 보냅니다. 아래 조작 키를 누르고 있으면 이 창을 조작할 수 있습니다. 옵션은 Ctrl+Alt+O 또는 트레이 아이콘으로 엽니다. 와우가 없을 때는 관통되지 않고 그대로 보입니다.',
           '창의 모양(이름 탭, 기능 버튼, 프레임)은 위의 "평소에 … 숨기기" 설정을 따릅니다. 관통 중에는 보이기만 하고 누를 수는 없습니다 (조작 키를 누르면 누를 수 있습니다).'] },
       { key: 'auto_copy', type: 'check', label: '자동 복사', keywords: '복사 선택 글 마우스 나갈 때 copy',
@@ -162,7 +164,7 @@ const tab = {
         note: ['채팅에 나온 웹 주소(https://…, discord.gg/… 같은 알려진 곳)를 [discord.gg/abc]처럼 눌러 볼 수 있게 표시합니다.',
           '누르면 바로 열리지 않고 전체 주소를 보여 주며 "미니 브라우저에서 열기", "내 브라우저에서 열기", "주소 복사" 중에서 고르게 합니다. 끄면 주소가 그냥 글자로 보입니다. 새로 들어오는 줄부터 적용됩니다.'] },
       { win: true, key: 'hover_clear', type: 'check', label: '관통 창 숨기기', keywords: '마우스 올리면 투명 호버 지우기 가리기 hover',
-        show: (c, x) => !!x.get({ win: true, key: 'click_through' }, c), note: [
+        show: (c, x) => !!x.get({ win: true, key: 'click_through' }, c) && !isNative(c, x), note: [
           '클릭 관통일 때 마우스를 창 위로 가져가면 창이 완전히 투명해져 뒤의 게임이 보입니다. 아래 조작 키를 누르고 있으면 투명해지지 않습니다.',
           "이 옵션이 켜진 창에서는 '관통 중 휠 스크롤 허용'과 '관통 중 링크 보기 허용'이 적용되지 않습니다 (뒤의 게임 채팅창을 그대로 쓰는 용도).",
           '조작 키를 눌러 조작 가능한 상태가 되면 평소와 같습니다.'] },
@@ -217,6 +219,8 @@ const tab = {
 const anyWebThrough = c => (c.browser_windows || []).some(b => b.click_through) || (c.child_windows || []).some(w => w.kind === 'web' && w.click_through);
 
 // The windows of a plugin show only the basic settings (the order of the windows, the background, the mouse, the lock ...): what is inside the window is the plugin's
+// is the chosen window a window of the system? (neither on top nor above the game: winconf.windowMode 0)
+const isNative = (c, x) => !x.get({ win: true, key: 'topmost' }, c) && !x.get({ win: true, key: 'topmost_wow_only' }, c);
 const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
 const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
 const goneWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner && c.kind !== 'web' && goneOwner(c.owner)); };          // (the window of a plugin that is not there: only a note and the way to delete it)

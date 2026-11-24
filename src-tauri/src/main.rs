@@ -343,7 +343,7 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
         "center" => b.title("CMR Center").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).accept_first_mouse(true).inner_size(400.0, 300.0),
         // a window of the system with its own frame, title bar, task bar button (the test of 3.2.1: the window shows one translation window with the page of the center, see center.js `native`): the system does the
         // moving, the sizing, the snapping, the maximizing; it takes the keyboard like any window
-        "native" => b.title("ChatMatrix").inner_size(520.0, 420.0).min_inner_size(240.0, 160.0).center(),
+        "native" => b.title("ChatMatrix").visible(false).inner_size(520.0, 420.0).min_inner_size(240.0, 160.0),
         "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),
         // the control window is the program's brain, not something to look at: it is never shown. An empty file "show_control" next to app/
@@ -488,23 +488,80 @@ async fn open_options(app: AppHandle) -> Result<(), String> {
     make_window(&app, "options", "options.html", "options").map(|_| ()).map_err(|e| e.to_string())
 }
 
-/// Is the test of the windows of the system on? An empty file `native_test` next to the program (like `show_control`): the menu of a translation window has the item for it. Looked at each time the menu opens, so
-/// making or deleting the file needs no restart.
-#[tauri::command]
-fn native_test_on() -> bool { base_dir().join("native_test").exists() }
+// ---- the translation windows that are windows of the system (neither on top nor above the game: winconf.windowMode 0). Their page is the page of the center in a mode that shows that one window and fills
+// its window (center.js `native`); the frame, the task bar button, the snapping are the system's. The hub (winmanager.js) decides which exist; they tell it when they are moved (their place is the saved
+// geometry of the window: the TEXT AREA, the same as a pane of a center, so a window that changes its kind stays where it is: the bar is the first NATIVE_BAR of the window of the system, the text below it).
+const NATIVE_BAR: f64 = 22.0;                                  // (css pixels: the bar of a translation window, center.js BAR_H)
 
-/// A translation window as a window of the system (3.2.1 test): the page of the center in a mode that shows only window `id`, filling its window. The window is made once; a second call shows it.
-/// `title`: the name of the window (the title bar says it). Nothing about it is saved yet.
+fn native_label(id: i64) -> String { format!("native{id}") }
+/// The label of the window of the system of a translation window ("main", "win3"), if it has one.
+fn native_label_of(label: &str) -> String { if label == "main" { "native1".into() } else { label.strip_prefix("win").map(|n| format!("native{n}")).unwrap_or_default() } }
+fn native_id_of(label: &str) -> Option<i64> { label.strip_prefix("native")?.parse().ok() }
+
+/// "WxH+X+Y" (the geometry the program keeps: pixels of the screen) -> (x, y, w, h)
+fn parse_geometry(g: &str) -> Option<(i32, i32, u32, u32)> {
+    let (wh, rest) = g.trim().split_once('+')?;
+    let (w, h) = wh.split_once('x')?;
+    let (x, y) = rest.split_once('+')?;
+    Some((x.parse().ok()?, y.parse().ok()?, w.parse().ok()?, h.parse().ok()?))
+}
+/// Is most of this rectangle on a screen that exists now (a window of a monitor that is gone is not put there)?
+fn on_a_screen(app: &AppHandle, x: i32, y: i32, w: u32, h: u32) -> bool {
+    app.available_monitors().unwrap_or_default().iter().any(|m| {
+        let (p, s) = (m.position(), m.size());
+        let ow = (x + w as i32).min(p.x + s.width as i32) - x.max(p.x);
+        let oh = (y + h as i32).min(p.y + s.height as i32) - y.max(p.y);
+        ow >= 100 && oh >= 40
+    })
+}
+/// The inside of the window (what the page fills) goes to this rectangle of the screen.
+fn place_inner(w: &WebviewWindow, x: i32, y: i32, iw: u32, ih: u32) {
+    #[cfg(windows)]
+    if let Ok(h) = hwnd_of(w) { if win::set_client_rect(h, x, y, iw as i32, ih as i32) { return; } }
+    let _ = w.set_size(tauri::PhysicalSize::new(iw, ih));
+    if let (Ok(o), Ok(i)) = (w.outer_position(), w.inner_position()) { let _ = w.set_position(tauri::PhysicalPosition::new(x - (i.x - o.x), y - (i.y - o.y))); }
+}
+/// The text area of the translation window `label` that has a window of the system: (x, y, w, h) in pixels of the screen, the bar left out. None: it has none (or it is not shown).
+fn native_rect(app: &AppHandle, label: &str) -> Option<(i32, i32, u32, u32)> {
+    let w = app.get_webview_window(&native_label_of(label))?;
+    if !w.is_visible().unwrap_or(false) || w.is_minimized().unwrap_or(false) { return None; }
+    let (p, s) = (w.inner_position().ok()?, w.inner_size().ok()?);
+    let bar = (NATIVE_BAR * w.scale_factor().unwrap_or(1.0)).round() as i32;
+    Some((p.x, p.y + bar, s.width, (s.height as i32 - bar).max(1) as u32))
+}
+/// The geometry (text area) of a window of the system now, for the settings. None: not worth keeping (it is minimized, maximized, full screen, or too small).
+fn native_geometry(window: &tauri::Window) -> Option<String> {
+    if window.is_minimized().unwrap_or(false) || window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) { return None; }
+    let (p, s) = (window.inner_position().ok()?, window.inner_size().ok()?);
+    if p.x < -30000 || s.width < 100 || s.height < 60 { return None; }
+    let bar = (NATIVE_BAR * window.scale_factor().unwrap_or(1.0)).round() as i32;
+    Some(format!("{}x{}+{}+{}", s.width, (s.height as i32 - bar).max(1), p.x, p.y + bar))
+}
+
+/// The window of the system of translation window `id`: made once (a second call shows the one that is there). `geometry`: the text area it had ("WxH+X+Y"); no place, or one that is on no screen:
+/// the middle of the screen. `title`: what the title bar says.
 #[tauri::command]
-async fn native_open(app: AppHandle, id: i64, title: Option<String>) -> Result<(), String> {
-    let label = format!("native{id}");
+async fn native_open(app: AppHandle, id: i64, title: Option<String>, geometry: Option<String>) -> Result<(), String> {
+    let label = native_label(id);
     if let Some(w) = app.get_webview_window(&label) {
         let _ = w.show();
         let _ = w.unminimize();
         return w.set_focus().map_err(|e| e.to_string());
     }
     let w = make_window(&app, &label, &format!("center.html?native={id}"), "native").map_err(|e| e.to_string())?;
-    if let Some(t) = title.filter(|t| !t.trim().is_empty()) { let _ = w.set_title(&format!("ChatMatrix · {}", t.chars().take(60).collect::<String>())); }
+    if let Some(t) = title.filter(|t| !t.trim().is_empty()) { let _ = w.set_title(&t.chars().take(80).collect::<String>()); }
+    let bar = (NATIVE_BAR * w.scale_factor().unwrap_or(1.0)).round() as i32;
+    match geometry.as_deref().and_then(parse_geometry).filter(|&(x, y, gw, gh)| gw >= 100 && gh >= 40 && on_a_screen(&app, x, y - bar, gw, gh + bar as u32)) {
+        Some((x, y, gw, gh)) => place_inner(&w, x, y - bar, gw, gh + bar as u32),
+        None => { let _ = w.center(); }
+    }
+    w.show().map_err(|e| e.to_string())
+}
+
+/// The program closes the window of the system of translation window `id` (it is not open any more, or it has become a pane of a center). Not the X of the frame: that is asked of the hub (native-close).
+#[tauri::command]
+async fn native_close(app: AppHandle, id: i64) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(&native_label(id)) { w.destroy().map_err(|e| e.to_string())?; }
     Ok(())
 }
 
@@ -617,7 +674,7 @@ fn place_input(app: &AppHandle, label: &str, place: &str) -> Result<(), String> 
     let w = app.get_webview_window("input").ok_or("no input window")?;
     let e = |e: tauri::Error| e.to_string();
     // the place of the window: a pane of a control center (its text area), else the window of that name
-    let ((px, py), (sw, sh)) = match center::pane_rect(label) {
+    let ((px, py), (sw, sh)) = match native_rect(app, label).or_else(|| center::pane_rect(label)) {
         Some((x, y, w, h)) => ((x, y), (w, h)),
         None => { let a = app.get_webview_window(label).ok_or("no such window")?; let p = a.outer_position().map_err(e)?; let s = a.outer_size().map_err(e)?; ((p.x, p.y), (s.width, s.height)) }
     };
@@ -1161,7 +1218,7 @@ fn main() {
             capture,
             open_options,
             native_open,
-            native_test_on,
+            native_close,
             native_origin,
             open_url,
             open_chat_url,
@@ -1204,10 +1261,17 @@ fn main() {
             if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
                 let anchor = INPUT_ANCHOR.lock().ok().and_then(|a| a.clone());
                 if let Some((label, place)) = anchor {
-                    if window.label() == label {
+                    if window.label() == label || window.label() == native_label_of(&label) {
                         let app = window.app_handle();
                         if app.get_webview_window("input").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false) { let _ = place_input(app, &label, &place); }
                     }
+                }
+            }
+            // a window of the system (a translation window that is neither on top nor above the game): its place goes to the hub at every step (the hub writes it when it stands still)
+            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }) {
+                if let (Some(id), Some(g)) = (native_id_of(window.label()), native_geometry(window)) {
+                    use tauri::Emitter;
+                    let _ = window.app_handle().emit("native-geometry", json!({ "id": id, "geometry": g }));
                 }
             }
             if window.label() == "address" && matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }) { address_refit(window.app_handle()); }
@@ -1216,6 +1280,12 @@ fn main() {
                 match window.label() {
                     // closing the control window or the main translation window ends the program (the other translation windows only close themselves)
                     "control" | "main" => { api.prevent_close(); request_quit(window.app_handle()); }
+                    // the X of the frame of a window of the system: the hub decides (the main window ends the program, another one closes for now)
+                    l if native_id_of(l).is_some() => {
+                        use tauri::Emitter;
+                        api.prevent_close();
+                        let _ = window.app_handle().emit("native-close", json!({ "id": native_id_of(l) }));
+                    }
                     // the window of the earlier-version files: closing it is "cancel" = the program ends (nothing else is running yet)
                     "legacy" => window.app_handle().exit(0),
                     // the options window: its place and size are told to the program at the moment it closes (the page only tells them after the window

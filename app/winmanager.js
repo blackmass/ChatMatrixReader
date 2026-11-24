@@ -4,6 +4,7 @@
 import * as winconf from './core/winconf.js';
 import * as layout from './core/winlayout.js';
 import { log } from './core/log.js';
+import { windowTitle } from './winname.js';
 
 const { emit, listen } = window.__TAURI__.event;
 const invoke = window.__TAURI__.core.invoke;
@@ -18,6 +19,21 @@ export function startWindows({ settings }) {
   const children = () => settings.cfg().child_windows;
   const conf = id => children().find(c => c.id === id);
   const publishState = () => emit('win-state', { open: [...open] });      // (only the windows that have a window of their own)
+
+  // The windows that are neither on top nor above the game (winconf.windowMode 0) are windows of the SYSTEM (their own frame, task bar button, snapping: center.js `native`, main.rs native_open). The others are panes
+  // of a control center. Here: the system's windows follow the open ones and the settings (a window that changes its kind goes from one to the other, with its place: the saved geometry is the same text area).
+  const natives = new Set();                   // ids that have a window of the system now
+  const nativeConf = id => (id === 1 ? { name: settings.cfg().main_name } : conf(id));
+  const nativeGeo = id => (id === 1 ? settings.cfg().geometry : (conf(id) || {}).geometry);
+  function syncNative() {
+    const cfg = settings.cfg(), want = new Set();
+    for (const id of [1, ...open]) if (winconf.windowMode(cfg, id) === 0) want.add(id);
+    for (const id of want) if (!natives.has(id)) {
+      natives.add(id);
+      invoke('native_open', { id, title: windowTitle(id, nativeConf(id)), geometry: nativeGeo(id) || null }).catch(e => { natives.delete(id); log.warn(`독립 창을 열지 못했습니다 (창 ${id}): ${e}`); });
+    }
+    for (const id of [...natives]) if (!want.has(id)) { natives.delete(id); invoke('native_close', { id }).catch(() => {}); }
+  }
 
   const setChildren = list => settings.set({ child_windows: list });
   const patchConf = (id, patch) => setChildren(children().map(c => (c.id === id ? { ...c, ...patch } : c)));
@@ -39,7 +55,7 @@ export function startWindows({ settings }) {
         }
         for (const id of [...open]) if (!conf(id)) { open.delete(id); manual.delete(id); }   // (deleted)
       } while (again);
-    } finally { syncing = false; publishState(); }
+    } finally { syncing = false; publishState(); syncNative(); }
   }
   settings.onChange(() => { sync(); });
 
@@ -82,12 +98,21 @@ export function startWindows({ settings }) {
 
   // what the windows and the options window tell
   listen('win-closed', ev => api.closeWindow(ev.payload.id));          // the X of an extra window: closed for now, the settings stay as they are
-  listen('win-geometry', ev => {
-    const { id, geometry } = ev.payload;
+  const saveGeometry = (id, geometry) => {
     if (!layout.parseGeometry(geometry)) return;
     if (id === 1) { if (settings.cfg().geometry !== geometry) { log.info('창 위치 저장: 메인 ' + geometry); settings.set({ geometry }); } }
     else { const c = conf(id); if (c && c.geometry !== geometry) { log.info(`창 위치 저장: 창 ${id} ${geometry}`); patchConf(id, { geometry }); } }
+  };
+  listen('win-geometry', ev => saveGeometry(ev.payload.id, ev.payload.geometry));
+  // a window of the system was moved or sized: it tells at every step, the settings are written after it stood still for a moment
+  const geoTimers = new Map();
+  listen('native-geometry', ev => {
+    const { id, geometry } = ev.payload || {};
+    clearTimeout(geoTimers.get(id));
+    geoTimers.set(id, setTimeout(() => { geoTimers.delete(id); saveGeometry(id, geometry); }, 600));
   });
+  // the X of the frame of a window of the system (the exe holds the window: the program decides): the main window ends the program (like the X of its bar), an extra one closes for now (like the X of its bar)
+  listen('native-close', ev => { const id = Number((ev.payload || {}).id); if (id === 1) invoke('quit_request').catch(() => {}); else if (id > 1) api.closeWindow(id); });
   listen('win-command', ev => {
     const { cmd, id } = ev.payload;
     if (cmd === 'add') api.add(ev.payload.name || '');

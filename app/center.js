@@ -90,11 +90,11 @@ function nextWebZ() {
 // the kind of order a window has now (settings: "항상 위", "와우 위에서만")
 const optOf = (id, key, d) => (id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? d) : winconf.opt(cfg.child_windows.find(c => c.id === id) || null, cfg, key, d));
 const browserMode = id => { const b = (cfg.browser_windows || []).find(x => x.id === id) || {}; return b.topmost_wow_only ? 2 : b.topmost === false ? 0 : 1; };          // (the order of a window of the mini browser)
-const modeOf = id => (optOf(id, 'topmost_wow_only', false) ? 2 : optOf(id, 'topmost', true) ? 1 : 0);
+const modeOf = id => winconf.windowMode(cfg, id);
 
 function sync() {
   const want = nativeId ? new Set(nativeId === MAIN || cfg.child_windows.some(c => c.id === nativeId && c.kind !== 'web') ? [nativeId] : [])
-    : new Set([...open].filter(id => (id === MAIN || cfg.child_windows.some(c => c.id === id && c.kind !== 'web')) && !winconf.dockHost(cfg.child_windows, id) && modeOf(id) === mode));
+    : new Set(mode === 0 ? [] : [...open].filter(id => (id === MAIN || cfg.child_windows.some(c => c.id === id && c.kind !== 'web')) && !winconf.dockHost(cfg.child_windows, id) && modeOf(id) === mode));          // (the ordinary center has no translation window any more: they are windows of the system, see `native`. It still has web windows)
   for (const id of want) if (!panes.has(id)) { const p = new Pane(id, center); panes.set(id, p); if (lampState) p.lamp(lampState.st, lampState.title); p.hello(); }
   for (const [id, p] of [...panes]) if (!want.has(id)) { p.destroy(); panes.delete(id); }
   // the web windows of this order
@@ -112,11 +112,7 @@ const menuEl = document.createElement('div');
 menuEl.id = 'ctx'; menuEl.hidden = true; menuEl.dataset.notr = ''; document.body.append(menuEl);
 let menuPane = null;
 function hideMenu() { if (menuEl.hidden) return; menuPane = null; menuEl.hidden = true; lastKey = ''; report(); }
-// (`nativeTest`: the marker file `native_test` next to the program is there: the item of the test of the windows of the system. Asked each time, so the file needs no restart)
-async function showMenu(ev, pane) {
-  const nativeTest = await invoke('native_test_on').catch(() => false);
-  openMenu(menuList({ cfg, pane, ev, open, browsersOpen: new Set(webBy.browser.map(w => w.win)), nativeTest }), ev, pane);
-}
+function showMenu(ev, pane) { openMenu(menuList({ cfg, pane, ev, open, browsersOpen: new Set(webBy.browser.map(w => w.win)) }), ev, pane); }
 // An item can have `sub` (a list): a click shows that list in the place of this one, with a way back as its first line (two levels, no more); the menu stays open.
 function openMenu(list, ev, pane, parent = null) {
   menuEl.replaceChildren();

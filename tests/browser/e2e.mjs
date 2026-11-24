@@ -85,7 +85,8 @@ async function invoke(cmd, a = {}) {
     case 'web_cmd': webCalls.push(['cmd', a.label, a.cmd, a.url]); return null;
     case 'web_alpha': webCalls.push(['alpha', a.label, a.alpha]); return null;
     case 'native_origin': return { x: 300, y: 200, scale: 1 };
-    case 'native_open': webCalls.push(['native_open', a.id, a.title]); return null;
+    case 'native_open': webCalls.push(['native_open', a.id, a.title, a.geometry]); return null;
+    case 'native_close': webCalls.push(['native_close', a.id]); return null;
     case 'web_through': webCalls.push(['through', a.label, a.on, a.enabled]); return null;
     case 'web_wheel': webCalls.push(['wheel', a.label, a.x, a.y, a.delta]); return null;
     case 'web_ua': webCalls.push(['ua', a.label, a.ua, a.hints]); return null;
@@ -498,9 +499,13 @@ ok(cfgFile().topmost === true && cfgFile().topmost_wow_only === false && await i
 { // neither on top nor above the game: an ordinary window (the ordinary center draws it and raises itself when it is touched)
   await sw('항상 맨 위에').click();
   await until(async () => cfgFile().topmost === false && !(await inCenter(1)), 'both off: the ordinary center draws it');
-  ok(cfgFile().topmost === false && cfgFile().topmost_wow_only === false && !(await inCenter(1)), 'ordinary window (both off): it is in the ordinary center');
+  ok(cfgFile().topmost === false && cfgFile().topmost_wow_only === false && !(await inCenter(1)), 'ordinary window (both off): it is in no center');
+  await until(() => webCalls.some(c => c[0] === 'native_open' && c[1] === 1), 'native: both off: the hub asks the exe for a window of the system for window 1', 4000);
+  ok(webCalls.filter(c => c[0] === 'native_open' && c[1] === 1).length === 1 && /ChatMatrix/.test(webCalls.find(c => c[0] === 'native_open' && c[1] === 1)[2]), 'native: asked once, with the title of the window');
+  ok(!(await cm.locator('.pane[data-id="1"]').count()), 'native: the pane is not in the center any more');
   await sw('항상 맨 위에').click();
   await until(async () => cfgFile().topmost === true && await inCenter(1), '"always on top" again');
+  await until(() => webCalls.some(c => c[0] === 'native_close' && c[1] === 1), 'native: on top again: the window of the system is closed (the pane is back in the center)', 4000);
 }
 // the font list: the files of fonts/ and the way back to the default
 const fontBox = rowOf('글꼴').locator('input.wide'), pop = opt.locator('.sg-pop');

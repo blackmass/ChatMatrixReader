@@ -94,3 +94,11 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   const l = w.normalize([{ id: 2, name: 'x', owner: 'p-1', owner_win: 'web', kind: 'web', click_through: true }, { id: 3, name: 'y', owner: 'p-1', owner_win: 'web2', kind: 'web' }]);
   eq([l.find(c => c.id === 2).click_through, l.find(c => c.id === 3).click_through], [true, false], 'winconf: a web window keeps click_through, off by default');
 }
+
+// the kind of order a translation window has: 0 = a window of the system (neither on top nor above the game), 1 = on top, 2 = above the game only (center.js, winmanager.js)
+{
+  const cfg = { topmost: true, topmost_wow_only: false, child_windows: [{ id: 3, topmost: false, topmost_wow_only: false }, { id: 4, topmost: true, topmost_wow_only: true }, { id: 5, topmost: true, topmost_wow_only: false }, { id: 6, topmost: false, topmost_wow_only: true }] };
+  eq([w.windowMode(cfg, 1), w.windowMode(cfg, 3), w.windowMode(cfg, 4), w.windowMode(cfg, 5), w.windowMode(cfg, 6)], [1, 0, 2, 1, 2], 'windowMode: on top, a window of the system, above the game wins over on top');
+  eq([w.windowMode({ ...cfg, topmost: false }, 1), w.windowMode({ ...cfg, topmost: false, topmost_wow_only: true }, 1), w.windowMode({}, 1)], [0, 2, 1], 'windowMode: window 1 reads the top level (nothing set: on top)');
+  eq(w.windowMode({ topmost: true, child_windows: [] }, 9), 1, 'windowMode: a window that has no entry follows the top level');
+}

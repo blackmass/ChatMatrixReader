@@ -17,7 +17,7 @@ function tileMenu(cfg, pane, list) {
   list.push({ text: tr('전체 화면'), sub, cls: pane.opt('lock_window', false) ? 'off' : '' });
 }
 
-export function menuList({ cfg, pane, ev, open, browsersOpen = new Set(), nativeTest = false }) {
+export function menuList({ cfg, pane, ev, open, browsersOpen = new Set() }) {
   const list = [], add = (text, fn, cls = '') => list.push({ text, fn, cls });
   if (pane.kind === 'browser') return browserMenu(cfg, pane, add, list);
   if (pane.kind === 'web') return webMenu(cfg, pane, add, list);
@@ -41,7 +41,6 @@ export function menuList({ cfg, pane, ev, open, browsersOpen = new Set(), native
   });
   const picked = getSelection().toString();
   tileMenu(cfg, pane, list);
-  if (nativeTest && !pane.center.native) add(tr('독립 창으로 열기 (시험)'), () => invoke('native_open', { id: target.id, title: nameFor(cfg, target.id) }).catch(e => pane.note('✖ ' + e)));
   add(tr('선택한 글 복사'), () => { try { window.__TAURI__.clipboardManager.writeText(picked); } catch { document.execCommand('copy'); } }, picked ? '' : 'off');
   add(tr('창 비우기'), () => target.view.apply(target.feed.clear(), target.feed.model));
   // merging: a tab leaves its window; a window (that has no tabs of its own and is not the main one) becomes a tab of another
