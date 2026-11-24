@@ -5,9 +5,10 @@ import * as winconf from './core/winconf.js';
 import * as layout from './core/winlayout.js';
 import { takesMouse } from './core/winlayout.js';
 import * as B from './core/browsers.js';
-import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow, tileBox, untileBox } from './frame.js';
+import { dragFrame, sizeEdges, moveBy, barBelow, tileBox, untileBox } from './frame.js';
 import { tr } from './core/i18n.js';
 
+const TITLE_H = 28, ADDR_H = 22;                                     // (css pixels: the title bar (as high as the one of a window of the system: pane.js NATIVE_BAR_H) and the line of the address)
 const EDGE = 5, GRIP = 16;                                           // (css pixels: the width of the strips, the size of the corner)
 const SCROLL_SHOW_MS = 900;
 
@@ -19,7 +20,8 @@ export class WebPane {
     this.el = document.createElement('div'); this.el.className = 'pane webpane'; this.el.dataset.web = this.label;
     const head = '<span class="ptabs"><span class="ptab on"></span></span>';
     const row = this.kind === 'browser' ? '<div class="paddrbar"><button class="phome" tabindex="-1" title="처음 주소로">⌂</button><div class="paddr"><span class="phold">주소 또는 검색어</span><span class="ptxt"></span></div><button class="pmode" tabindex="-1"></button><span class="pzoom"></span></div>' : '';       // (the second line of a window of the mini browser: the address)
-    this.head = this.kind === 'browser' ? BAR_H * 2 : BAR_H;                   // (how much of the window is above the page, css pixels: below it when `flip`)
+    this.head = this.kind === 'browser' ? TITLE_H + ADDR_H : TITLE_H;                   // (how much of the window is above the page, css pixels: below it when `flip`)
+    this.tabList = [{ title: '', url: '' }]; this.activeTab = 0;                  // (the tab strip holds a list: there is one tab for now, the page of the window)
     this.flip = false; this.tiled = ''; this.restoreRect = null;
     this.interactive = true; this.passing = undefined; this.passAt = 0; this.zone = false; this.pressed = false; this.lmb = false; this.inside = false; this.cursor = [0, 0];          // (click-through: see tick)
     this.wheelId = (this.kind === 'browser' ? 50000 : 60000) + (Math.abs(Number(this.win) || 0) % 10000);          // (the number the exe knows the wheel zone of this window by: center.js)
@@ -68,9 +70,17 @@ export class WebPane {
       a.querySelector('.ptxt').textContent = this.url;
       a.classList.toggle('empty', !this.url);
     }
-    const t = this.el.querySelector('.ptab');
-    t.textContent = this.title || (this.url ? (() => { try { return new URL(this.url).host; } catch { return ''; } })() : '');
-    t.title = this.opt('click_through', false) ? this.url : this.url + '\n' + tr('Shift 또는 Ctrl+클릭: 내 브라우저에서 열기');
+    this.tabList[0] = { title: this.title || (this.url ? (() => { try { return new URL(this.url).host; } catch { return ''; } })() : ''), url: this.url };
+    this.renderTabs();
+  }
+  // the tab strip: a tab for each entry of `tabList` (one for now), the active one lit. A tab is a part of the bar with room around it (center.css), the same above the page and below it.
+  renderTabs() {
+    const strip = this.el.querySelector('.ptabs'), tip = this.opt('click_through', false) ? '' : '\n' + tr('Shift 또는 Ctrl+클릭: 내 브라우저에서 열기');
+    strip.textContent = '';
+    this.tabList.forEach((t, i) => {
+      const el = document.createElement('span'); el.className = 'ptab' + (i === this.activeTab ? ' on' : ''); el.textContent = t.title; el.title = t.url + (t.url ? tip : ''); el.dataset.tab = String(i);
+      strip.append(el);
+    });
   }
   // The address of a window of the mini browser is drawn here, but typed in a small window of the system (address.js): the center never takes the keyboard. A click on it asks the program to put that
   // window over this place; clicking anywhere else of this window (or closing it) puts it away.
@@ -223,8 +233,8 @@ export class WebPane {
     const r = this.rect, d = this.center.dpr(), id = 'w' + this.win, bot = this.flip ? r.y + r.h + this.head : r.y + r.h, b = (suffix, x, y, w, h, extra) => ({ id: id + suffix, x: x * d, y: y * d, w: w * d, h: h * d, bar: 0, hit: this.interactive, ...extra });          // (a window that the mouse goes through: its bars take nothing)
     return [
       { id, x: r.x * d, y: r.y * d, w: r.w * d, h: r.h * d, bar: 0, hit: false, web: this.label, z: Number(this.el.style.zIndex) || 0 },
-      b('b', r.x, this.flip ? r.y + r.h + this.head - BAR_H : r.y - this.head, r.w, BAR_H),                  // (the title bar: the first line above the page; the last line below it)
-      ...(this.kind === 'browser' ? [b('a', r.x, this.flip ? r.y + r.h : r.y - BAR_H, r.w, BAR_H)] : []),   // (the address: the line next to the page)
+      b('b', r.x, this.flip ? r.y + r.h + this.head - TITLE_H : r.y - this.head, r.w, TITLE_H),                  // (the title bar: the first line above the page; the last line below it)
+      ...(this.kind === 'browser' ? [b('a', r.x, this.flip ? r.y + r.h : r.y - ADDR_H, r.w, ADDR_H)] : []),   // (the address: the line next to the page)
       ...(this.lock || this.tiled ? [] : [b('l', r.x, r.y, EDGE, r.h), b('r', r.x + r.w - EDGE, r.y, EDGE, r.h), b('s', r.x, bot - EDGE, r.w, EDGE), b('g', r.x + r.w - GRIP, r.y + r.h - GRIP, GRIP, GRIP)]),
     ];
   }

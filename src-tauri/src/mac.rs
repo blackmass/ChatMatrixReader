@@ -411,40 +411,6 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setAlphaValue: alpha]; });
 }
 
-/// The three round buttons of a window whose title bar is laid over the page (main.rs "native"): in the middle of a bar `bar` points high, the first one `left` points from the left edge. They stay the
-/// buttons of the system (their clicks, the tiling preview of the green one) at their own size. The system puts them back at some events (a resize, leaving full screen): the program calls this again
-/// then; it touches nothing that is right already (a button that is set again at every step of a resize jumps).
-pub fn style_traffic_lights(hwnd: isize, bar: f64, left: f64) {
-    use objc2_foundation::{NSPoint, NSRect, NSSize};
-    on_main(|| unsafe {
-        let w = obj(hwnd);
-        let button = |kind: isize| -> *mut AnyObject { msg_send![w, standardWindowButton: kind] };
-        let buttons = [button(0), button(1), button(2)];                       // (close, minimize, zoom)
-        if buttons.iter().any(|b| b.is_null()) { return; }
-        let strip: *mut AnyObject = msg_send![&*buttons[0], superview];
-        if strip.is_null() { return; }
-        let container: *mut AnyObject = msg_send![&*strip, superview];
-        if container.is_null() { return; }
-        // the strip with the buttons is as high as the bar and stands at the top of the window
-        let window: NSRect = msg_send![w, frame];
-        let old: NSRect = msg_send![&*container, frame];
-        let (want_y, want_h) = (window.size.height - bar, bar);
-        if (old.size.height - want_h).abs() > 0.5 || (old.origin.y - want_y).abs() > 0.5 {
-            let _: () = msg_send![&*container, setFrame: NSRect::new(NSPoint::new(old.origin.x, want_y), NSSize::new(old.size.width, want_h))];
-            let _: () = msg_send![&*strip, setFrame: NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(old.size.width, want_h))];
-        }
-        let first: NSRect = msg_send![&*buttons[0], frame];
-        let second: NSRect = msg_send![&*buttons[1], frame];
-        let step = (second.origin.x - first.origin.x).max(20.0);               // (the distance the system gives them)
-        for (i, b) in buttons.iter().enumerate() {
-            let b = &**b;
-            let now: NSRect = msg_send![b, frame];
-            let (x, y) = (left + i as f64 * step, (bar - now.size.height) / 2.0);
-            if (now.origin.x - x).abs() > 0.5 || (now.origin.y - y).abs() > 0.5 { let _: () = msg_send![b, setFrameOrigin: NSPoint::new(x, y)]; }
-        }
-    });
-}
-
 /// A double click on a title bar that the page draws itself, answered as the system does it for its own title bars: what the user chose in the settings of the Mac ("Double-click a window's title bar to":
 /// zoom, which is also what puts back a window laid on a half of the screen / minimize / nothing). Nothing chosen = zoom.
 pub fn title_double_click(hwnd: isize) {

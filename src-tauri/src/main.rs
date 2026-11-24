@@ -555,14 +555,8 @@ async fn native_open(app: AppHandle, id: i64, title: Option<String>, geometry: O
         Some((x, y, gw, gh)) => place_inner(&w, x, y - bar, gw, gh + bar as u32),
         None => { let _ = w.center(); }
     }
-    #[cfg(target_os = "macos")]
-    if let Ok(h) = hwnd_of(&w) { style_round_buttons(h); }
     w.show().map_err(|e| e.to_string())
 }
-
-/// macOS: the three round buttons of a window of the system, in the middle of our bar (mac.rs style_traffic_lights; the numbers are in css pixels = points: the bar is NATIVE_TITLE high).
-#[cfg(target_os = "macos")]
-fn style_round_buttons(hwnd: isize) { win::style_traffic_lights(hwnd, NATIVE_TITLE, 12.0); }
 
 /// The program closes the window of the system of translation window `id` (it is not open any more, or it has become a pane of a center). Not the X of the frame: that is asked of the hub (native-close).
 #[tauri::command]
@@ -1364,11 +1358,6 @@ fn main() {
                         if app.get_webview_window("input").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false) { let _ = place_input(app, &label, &place); }
                     }
                 }
-            }
-            // macOS puts the round buttons of a window of the system back where they were at some events: again
-            #[cfg(target_os = "macos")]
-            if native_id_of(window.label()).is_some() && matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) | tauri::WindowEvent::ScaleFactorChanged { .. }) {
-                if let Ok(p) = window.ns_window() { style_round_buttons(p as isize); }
             }
             // a window of the system (a translation window that is neither on top nor above the game): its place goes to the hub at every step (the hub writes it when it stands still)
             if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }) {

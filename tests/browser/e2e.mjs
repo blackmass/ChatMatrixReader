@@ -887,6 +887,10 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     const rects = centerRects.at(-1).panes.filter(p => p.id.startsWith('w9'));
     ok(rects.some(p => p.id === 'w9b' && p.hit) && rects.filter(p => p.hit).length === 5 && rects.every(p => p.web === 'web_test' || p.id !== 'w9'), 'center/web: the bar and the strips take the mouse (5), the page does not: ' + JSON.stringify(rects.map(p => [p.id, p.hit])));
     await cp.locator('.webpane').screenshot({ path: path.join(OUT, 'webpane.png') });
+    await cp.locator('.webpane').evaluate(e => e.classList.add('flip'));                          // (the bar below the page: the same look, turned over: a picture to look at)
+    await cp.locator('.webpane').screenshot({ path: path.join(OUT, 'webpane_flip.png') });
+    ok(await cp.locator('.webpane .ptab').evaluate(e => getComputedStyle(e).borderTopWidth === '0px' && getComputedStyle(e).borderBottomWidth === '0px'), 'center/web: the tab has no border of a translation window when the bar is below the page');
+    await cp.locator('.webpane').evaluate(e => e.classList.remove('flip'));
     await ev('web-title', { label: 'web_test', title: '새 제목' });
     await until(async () => (await cp.locator('.webpane .ptab').textContent()) === '새 제목', 'the title follows the page');
     await ev('web-scroll', { label: 'web_test', p: 0.5, s: 0.3 });

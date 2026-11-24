@@ -95,12 +95,13 @@ body.native { background: #1b1c20; }          /* (a window of the system is not 
    The bar is one band across the whole width (a tab line like a browser's can be put into it later); the frame is one pixel, the strips that take the mouse are wider than it. */
 .webpane .pbody { pointer-events: none; }
 .webpane .pbody::after { display: block; border: 1px solid #8a6a30; border-top: 0; border-radius: 0; }
-.webpane .pbar { align-items: center; box-sizing: border-box; background: linear-gradient(#364847, #2a3836); border: 1px solid #8a6a30; }
-.webpane .ptabs { flex: 1; min-width: 0; max-width: none; align-items: center; gap: 0; }
+.webpane .pbar { align-items: stretch; box-sizing: border-box; height: 28px; background: linear-gradient(#364847, #2a3836); border: 1px solid #8a6a30; cursor: default; }
+.webpane .ptabs { flex: 1; min-width: 0; max-width: none; align-items: stretch; gap: 2px; padding: 2px; }          /* (a tab has 2 px of room around it: the bar is one band, the tabs lie in it) */
 .webpane .pspace { display: none; }
-.webpane .ptab, .webpane .ptab.on { flex: 1; min-width: 0; height: 20px; line-height: 20px; padding: 0 10px; background: none; border: 0; border-radius: 0; color: #e6c66e; text-shadow: 0 1px 1px #000; }
-.webpane .ptools { height: 20px; padding: 0; background: none; border: 0; border-radius: 0; gap: 0; }
-.webpane .ptools button { width: 24px; height: 20px; }
+.webpane .ptab, .webpane .ptab.on { flex: 1 1 0; min-width: 0; height: auto; line-height: 22px; padding: 0 10px; background: none; border: 0; border-radius: 3px; color: #e6c66e; text-shadow: 0 1px 1px #000; }
+.webpane .ptab.on { background: linear-gradient(#44605f, #34484a); box-shadow: inset 0 -2px 0 #d9a441; color: #ffe08a; }
+.webpane .ptools { height: auto; padding: 0; background: none; border: 0; border-radius: 0; gap: 0; align-items: stretch; }
+.webpane .ptools button { width: 22px; height: auto; }
 .webpane .pscroll { position: absolute; right: 3px; top: 4px; width: 4px; height: 40px; border-radius: 2px; background: rgba(230, 198, 110, .75); box-shadow: 0 0 2px #000; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 4; }
 .webpane.locked .pedge, .webpane.locked .pgrip { display: none !important; }
 .webpane .pedge, .webpane .pgrip { display: block; }
@@ -118,8 +119,8 @@ body.native { background: #1b1c20; }          /* (a window of the system is not 
 .webpane .phome:hover, .webpane .pmode:hover { color: #ffe08a; background: rgba(255, 255, 255, .08); }
 .webpane .paddrbar { position: relative; }
 .webpane .pbar { position: relative; }
-.webpane .pcopied { position: absolute; right: 74px; top: 2px; height: 16px; line-height: 16px; padding: 0 6px; border-radius: 3px; background: rgba(20, 24, 26, .92); border: 1px solid #8a6a30; color: #ffe08a; font-size: 11px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
-.webpane .pzoom { position: absolute; right: 30px; top: 2px; height: 16px; line-height: 16px; padding: 0 6px; border-radius: 3px; background: rgba(20, 24, 26, .92); border: 1px solid #8a6a30; color: #ffe08a; font-size: 11px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
+.webpane .pcopied { position: absolute; right: 74px; top: 5px; height: 16px; line-height: 16px; padding: 0 6px; border-radius: 3px; background: rgba(20, 24, 26, .92); border: 1px solid #8a6a30; color: #ffe08a; font-size: 11px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
+.webpane .pzoom { position: absolute; right: 30px; top: 5px; height: 16px; line-height: 16px; padding: 0 6px; border-radius: 3px; background: rgba(20, 24, 26, .92); border: 1px solid #8a6a30; color: #ffe08a; font-size: 11px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 3; }
 .webpane .paddr:hover { border-color: #8a6a30; }
 .webpane .paddr.editing { border-color: #e0b84a; background: #14181a; }
 body.mac .webpane .paddr.editing { background: rgba(20, 24, 26, .35); }          /* (macOS: the box is put over it a moment late the first time: what is behind may show through) */
@@ -135,7 +136,7 @@ body.mac .webpane .paddr.editing { background: rgba(20, 24, 26, .35); }         
 .pane.flip .ptab { border: 1px solid rgba(138, 106, 48, var(--tab-alpha, 1)); border-top: 0; border-radius: 0 0 4px 4px; }
 .pane.flip .ptab.on { border-color: rgba(217, 164, 65, var(--tab-alpha, 1)); }
 .pane:not(.webpane).flip .ptools { border: 1px solid rgba(138, 106, 48, var(--tab-alpha, 1)); border-top: 0; border-radius: 0 0 4px 4px; }          /* (the box of the buttons is open towards the text, like the tabs: here the top) */
-.webpane.flip .pbar { align-items: center; border-top: 0; border-bottom: 1px solid #8a6a30; }
+.webpane.flip .pbar { align-items: stretch; border-top: 0; border-bottom: 1px solid #8a6a30; }
 .webpane.flip .paddrbar { border-top: 0; border-bottom: 1px solid #5b4a22; }
 .webpane.flip .pbody::after { border-top: 1px solid #8a6a30; border-bottom: 0; }
 
@@ -154,3 +155,7 @@ body.native { margin: 0; }
 .pane.titled .pbody::after, .pane.titled .pgrip { display: none !important; }
 .pane.titled.mactitle .pbar { padding-left: 78px; }              /* (the round buttons of the mac lie here, in the middle of the bar: main.rs style_round_buttons) */
 .pane.titled.mactitle .pclose { display: none; }
+
+/* a web window with its bar below the page: the same bar and the same tabs as above it (the rule for the tabs of a translation window, .pane.flip .ptab, must not reach them) */
+.webpane.flip .ptab, .webpane.flip .ptab.on { border: 0; border-radius: 3px; }
+.webpane.flip .ptab.on { box-shadow: inset 0 2px 0 #d9a441; }
