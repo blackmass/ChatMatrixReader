@@ -307,9 +307,6 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     }
 }
 
-/// The window `owner` (0 = nobody) owns `hwnd` (a window of ours that goes with another of ours: the send box with its window): see `set_owner`. Let go before the owner is destroyed.
-pub fn own_window(hwnd: isize, owner: isize) { set_owner(hwnd, owner); }
-
 /// A window the mouse goes through (click-through): the clicks, the wheel and the pointer go to what is behind it. `WS_EX_TRANSPARENT` on a layered window: the system skips the window
 /// (and the web view in it) when it looks for what is under the pointer. Only the two style bits (tao is not asked: the window it thinks is hidden is hidden by a change of its flags).
 pub fn set_clickthrough(hwnd: isize, on: bool) {

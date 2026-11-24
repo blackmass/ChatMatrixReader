@@ -1212,6 +1212,22 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
       await np.waitForTimeout(500);
       ok(!centerRects.some(r => r.label === 'native1'), 'native: no center is told about it (no hit boxes, no blur, no wheel zone)');
       ok(await np.locator('.pane .plines').count() >= 1, 'native: the lines are there');
+      // the send box is the last row of the page of the main window of the system (sendrow.js): the hub says input-open, the row opens below the lines, Enter reports, input-close takes it away
+      await control.evaluate(() => { window.__subs = []; window.__TAURI__.event.listen('input-submit', e => window.__subs.push(e.payload)); window.__TAURI__.event.listen('input-cancel', () => window.__subs.push({ cancel: true })); });
+      await control.evaluate(() => window.__TAURI__.event.emit('input-open', { label: '→ English', target: '' }));
+      await until(async () => await np.locator('#sendrow').isVisible(), 'native/send: the row opens when the hub says input-open', 4000);
+      const h0 = (await np.locator('.pane').first().boundingBox()).height;
+      ok(Math.abs(h0 - (620 - 46)) < 2, 'native/send: the window keeps the row\'s height below its text area (the lines get shorter): ' + h0);
+      ok((await np.locator('#sr-lang').textContent()) === 'English', 'native/send: it says the language');
+      await np.locator('#sr-text').fill('hello there'); await np.locator('#sr-cmd').fill('/w Bob');
+      await np.locator('#sr-text').press('Enter');
+      await until(() => control.evaluate(() => window.__subs.length > 0), 'native/send: Enter reports the sentence', 4000);
+      ok(await control.evaluate(() => JSON.stringify(window.__subs.at(-1))) === JSON.stringify({ text: 'hello there', prefix: '/w Bob' }), 'native/send: the sentence and the command field: ' + await control.evaluate(() => JSON.stringify(window.__subs.at(-1))));
+      await np.locator('#sr-text').press('Escape');
+      await until(() => control.evaluate(() => window.__subs.at(-1) && window.__subs.at(-1).cancel === true), 'native/send: Esc reports a cancel', 4000);
+      await control.evaluate(() => window.__TAURI__.event.emit('input-close', {}));
+      await until(async () => await np.locator('#sendrow').isHidden(), 'native/send: the row is taken away when the hub says input-close', 4000);
+      await fill(900, 620, 'native/send: and the window has its whole height again');
       await np.close();
     }
     // the order of the web windows: the center draws their frames by `z` and tells the program, which puts their pages in the same order; every translation window is above them all

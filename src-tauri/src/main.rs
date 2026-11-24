@@ -333,6 +333,8 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             .always_on_top(true)
             .skip_taskbar(true)
             .resizable(false)
+            .maximizable(false)                // (a key of the system, Win + Up, made the box as big as the screen)
+            .minimizable(false)
             .visible(false)
             .inner_size(520.0, 46.0),
         // the address box of the mini browser (address.js): one small window for all the windows of it, put over the address of the one that is used
@@ -521,14 +523,6 @@ fn place_inner(w: &WebviewWindow, x: i32, y: i32, iw: u32, ih: u32) {
     let _ = w.set_size(tauri::PhysicalSize::new(iw, ih));
     if let (Ok(o), Ok(i)) = (w.outer_position(), w.inner_position()) { let _ = w.set_position(tauri::PhysicalPosition::new(x - (i.x - o.x), y - (i.y - o.y))); }
 }
-/// The text area of the translation window `label` that has a window of the system: (x, y, w, h) in pixels of the screen, the bar left out. None: it has none (or it is not shown).
-fn native_rect(app: &AppHandle, label: &str) -> Option<(i32, i32, u32, u32)> {
-    let w = app.get_webview_window(&native_label_of(label))?;
-    if !w.is_visible().unwrap_or(false) || w.is_minimized().unwrap_or(false) { return None; }
-    let (p, s) = (w.inner_position().ok()?, w.inner_size().ok()?);
-    let bar = (NATIVE_BAR * w.scale_factor().unwrap_or(1.0)).round() as i32;
-    Some((p.x, p.y + bar, s.width, (s.height as i32 - bar).max(1) as u32))
-}
 /// The geometry (text area) of a window of the system now, for the settings. None: not worth keeping (it is minimized, maximized, full screen, or too small).
 fn native_geometry(window: &tauri::Window) -> Option<String> {
     if window.is_minimized().unwrap_or(false) || window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) { return None; }
@@ -562,11 +556,6 @@ async fn native_open(app: AppHandle, id: i64, title: Option<String>, geometry: O
 #[tauri::command]
 async fn native_close(app: AppHandle, id: i64) -> Result<(), String> {
     let label = native_label(id);
-    // the send box that belongs to this window must not go with it (the system destroys the windows that a window owns when it is destroyed): it is let go first and is always on top again
-    if INPUT_OWNER.lock().ok().and_then(|o| o.clone()).as_deref() == Some(label.as_str()) {
-        if let Some(input) = app.get_webview_window("input") { if let Ok(ih) = hwnd_of(&input) { win::own_window(ih, 0); } let _ = input.set_always_on_top(true); }
-        if let Ok(mut o) = INPUT_OWNER.lock() { *o = None; }
-    }
     if let Some(w) = app.get_webview_window(&label) { w.destroy().map_err(|e| e.to_string())?; }
     Ok(())
 }
@@ -583,18 +572,42 @@ async fn native_origin(app: AppHandle, label: String) -> Result<serde_json::Valu
 /// the box would be cut off (it sits at the bottom of the screen, over the taskbar); "below" / "above" = always there (placement.rs send_box). In the monitor the window is on.
 #[tauri::command]
 fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<(), String> {
-    let w = app.get_webview_window("input").ok_or("no input window")?;
-    let e = |e: tauri::Error| e.to_string();
+    let r = show_input_inner(&app, label, place);
+    if let Err(e) = &r { debug_log("input", &format!("the send box could not be shown: {e}")); }
+    r
+}
+
+fn show_input_inner(app: &AppHandle, label: String, place: Option<String>) -> Result<(), String> {
     let place = place.unwrap_or_else(|| "auto".into());
-    own_input(&app, &label);
-    place_input(&app, &label, &place)?;
+    let e = |e: tauri::Error| e.to_string();
+    // A translation window that is a window of the system has the send box as the last row of its own page (sendrow.js): its window comes to the front and has the keyboard, the page does the rest
+    // ('input-open' was said to every page before this call). No window of the box then.
+    if let Some(nw) = app.get_webview_window(&native_label_of(&label)).filter(|w| w.is_visible().unwrap_or(false)) {
+        debug_log("input", &format!("{label}: a window of the system: the box is a row of its page"));
+        if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = None; }
+        if let Some(b) = app.get_webview_window("input") { if b.is_visible().unwrap_or(false) { let _ = b.hide(); } }
+        let hwnd = hwnd_of(&nw)?;
+        let _ = nw.unminimize();
+        win::grab_focus(hwnd);
+        nw.set_focus().map_err(e)?;
+        keyboard_check(app, nw.label().to_string(), hwnd);
+        return Ok(());
+    }
+    let w = app.get_webview_window("input").ok_or("no input window")?;
+    debug_log("input", &format!("{label}: a window of the box, place {place}"));
+    place_input(app, &label, &place)?;
     if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = Some((label, place)); }       // (from now on the box follows its window: see on_window_event)
     w.show().map_err(e)?;
     let hwnd = hwnd_of(&w)?;
     win::grab_focus(hwnd);          // this program to the front (on a Mac this takes a moment)
     w.set_focus().map_err(e)?;      // moves the keyboard into the page inside the window
-    // Whether the box gets the keyboard is NOT decided here: it may take a second or more (macOS). The box is "open" at once; a thread asks again every 0.2 s until
-    // it is the key window and tells how long it took ('input-focus', for the log). If it never gets it, the send box (sendbox.js) notices and gives the keyboard back.
+    keyboard_check(app, "input".to_string(), hwnd);
+    Ok(())
+}
+
+/// Whether the window `label` gets the keyboard is NOT decided at once: it may take a second or more (macOS). A thread asks again every 0.2 s until it is the key window and tells how long it took ('input-focus',
+/// for the log). If it never gets it, the send box (sendbox.js) notices and gives the keyboard back.
+fn keyboard_check(app: &AppHandle, label: String, hwnd: isize) {
     let app2 = app.clone();
     std::thread::spawn(move || {
         use tauri::Emitter;
@@ -603,15 +616,15 @@ fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<()
         for _ in 0..15 {
             if ok { break; }
             std::thread::sleep(Duration::from_millis(200));
-            let Some(w) = app2.get_webview_window("input") else { return };
+            let Some(w) = app2.get_webview_window(&label) else { return };
             if !w.is_visible().unwrap_or(false) { return; }        // (closed meanwhile)
             win::ask_keyboard(hwnd);
             let _ = w.set_focus();
             ok = win::has_keyboard(hwnd);
         }
+        debug_log("input", &format!("{label}: the keyboard {} after {} ms", if ok { "was had" } else { "was NOT had" }, t0.elapsed().as_millis()));
         let _ = app2.emit("input-focus", json!({ "ok": ok, "ms": t0.elapsed().as_millis() as u64, "front": win::self_front() }));
     });
-    Ok(())
 }
 
 /// Where the address box has to be (screen pixels) and since when: for a moment after it was shown, whatever the system does to the window (a move to a screen of another scale makes it change the size
@@ -674,40 +687,23 @@ fn address_hide(app: AppHandle) {
 
 /// The window the open send box follows (its label) and where it goes ("auto" | "below" | "above"); None while there is no box.
 static INPUT_ANCHOR: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
-/// The window of the system (its label) that owns the send box now: the box is above it and goes with it, and is not "always on top" (a window of the system that is behind other windows has its box behind them).
-/// None: the box belongs to nobody and is always on top (it goes with a pane of a control center, which is on top itself).
-static INPUT_OWNER: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-
-/// The send box belongs to the window of the system of translation window `label` when it has one, else to nobody (always on top). Told again each time the box is shown.
-fn own_input(app: &AppHandle, label: &str) {
-    let Some(input) = app.get_webview_window("input") else { return };
-    let Ok(ih) = hwnd_of(&input) else { return };
-    let owner = app.get_webview_window(&native_label_of(label)).filter(|w| w.is_visible().unwrap_or(false));
-    match owner.as_ref().and_then(|w| hwnd_of(w).ok()) {
-        Some(oh) => { let _ = input.set_always_on_top(false); win::own_window(ih, oh); if let Ok(mut o) = INPUT_OWNER.lock() { *o = owner.map(|w| w.label().to_string()); } }
-        None => { win::own_window(ih, 0); let _ = input.set_always_on_top(true); if let Ok(mut o) = INPUT_OWNER.lock() { *o = None; } }
-    }
-}
-
 /// Puts the send box next to the window `label`: its width, its height of 46 points (46 pixels times the scale of the monitor: a Retina screen has twice the pixels),
 /// its place by placement::send_box inside the monitor the window is on.
 fn place_input(app: &AppHandle, label: &str, place: &str) -> Result<(), String> {
     let w = app.get_webview_window("input").ok_or("no input window")?;
     let e = |e: tauri::Error| e.to_string();
     // the place of the window: a pane of a control center (its text area), else the window of that name
-    let ((px, py), (sw, sh)) = match native_rect(app, label).or_else(|| center::pane_rect(label)) {
+    let ((px, py), (sw, sh)) = match center::pane_rect(label) {
         Some((x, y, w, h)) => ((x, y), (w, h)),
         None => { let a = app.get_webview_window(label).ok_or("no such window")?; let p = a.outer_position().map_err(e)?; let s = a.outer_size().map_err(e)?; ((p.x, p.y), (s.width, s.height)) }
     };
     let pos = tauri::PhysicalPosition::new(px, py);
     let size = tauri::PhysicalSize::new(sw, sh);
     let (home, scale) = monitor_at(&w, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
-    // (the usable part of every monitor: the box is "there" when it lies wholly on them together, so it follows its window over the border of two monitors; placement::send_box)
-    let areas: Vec<placement::Area> = app.available_monitors().unwrap_or_default().iter().map(|m| { let a = m.work_area(); placement::Area { x: a.position.x, y: a.position.y, w: a.size.width as i32, h: a.size.height as i32 } }).collect();
     let box_w = size.width.max(200);
     let box_h = ((46.0 * scale).round() as u32).max(46);
     let bar = (NATIVE_BAR * scale).round() as i32;
-    let (bx, by) = placement::send_box(&areas, home, place, pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2, bar);
+    let (bx, by) = placement::send_box(home, place, pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2, bar);
     w.set_position(tauri::PhysicalPosition::new(bx, by)).map_err(e)?;
     w.set_size(tauri::PhysicalSize::new(box_w, box_h)).map_err(e)?;
     Ok(())
@@ -1285,7 +1281,7 @@ fn main() {
             if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
                 let anchor = INPUT_ANCHOR.lock().ok().and_then(|a| a.clone());
                 if let Some((label, place)) = anchor {
-                    if window.label() == label || window.label() == native_label_of(&label) {
+                    if window.label() == label {
                         let app = window.app_handle();
                         if app.get_webview_window("input").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false) { let _ = place_input(app, &label, &place); }
                     }

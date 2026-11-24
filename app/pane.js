@@ -109,7 +109,7 @@ export class Pane {
   place() {
     if (this.center.native) {                                                // (a window of the system: the text area is the window below the bar, whatever its size is now)
       this.tiled = ''; this.restoreRect = null;
-      this.rect = { x: 0, y: BAR_H, w: Math.max(40, innerWidth), h: Math.max(40, innerHeight - BAR_H) };
+      this.rect = { x: 0, y: BAR_H, w: Math.max(40, innerWidth), h: Math.max(40, innerHeight - BAR_H - (this.center.nativeInset ? this.center.nativeInset() : 0)) };          // (below it: the send box, when it is open: sendrow.js)
       this.geo = this.seenGeo = this.savedGeometry() || '';
       this.layout();
       return;

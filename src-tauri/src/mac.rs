@@ -411,16 +411,6 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setAlphaValue: alpha]; });
 }
 
-/// The window `parent` (0 = nobody) is the parent of `child`: the child is above it, moves with it and is hidden with it (a child window of the system). Let go before the parent is closed.
-pub fn own_window(child: isize, parent: isize) {
-    on_main(|| unsafe {
-        let c = obj(child);
-        let old: *mut AnyObject = msg_send![c, parentWindow];
-        if !old.is_null() { let _: () = msg_send![&*old, removeChildWindow: c]; }
-        if parent != 0 { let _: () = msg_send![obj(parent), addChildWindow: c, ordered: 1isize]; }          // NSWindowAbove
-    });
-}
-
 /// A window the mouse goes through (click-through): the clicks and the wheel go to what is behind it.
 pub fn set_clickthrough(hwnd: isize, on: bool) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setIgnoresMouseEvents: Bool::new(on)]; });

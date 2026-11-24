@@ -14,6 +14,7 @@ import { menuList } from './ctxmenu.js';
 import { T } from './core/timings.js';
 import { add as perfAdd, report as perfReport } from './core/perf.js';
 import { isMac } from './platform.js';
+import { mountSendRow } from './sendrow.js';
 if (isMac) document.body.classList.add('mac');
 import { defaultRegistry } from './widgets/defaults.js';
 import { syncPluginDefs } from './widgets/registry.js';
@@ -36,6 +37,7 @@ gameTitle();
 document.documentElement.style.setProperty('--cv-tip-max', T.TIP_MAX_W + 'px');                 // (the width of the tip of a link)
 
 linkHandler.fn = id => emit('chat-link', { id });                 // (a link in a line, put there by a plugin: the hub opens it)
+let sendInset = 0;                             // (css pixels, see `nativeInset`)
 const panes = new Map();                       // window id -> Pane
 const webs = new Map();                        // label of a web window -> WebPane (the page is a window of the system: webwin.rs)
 const webBy = { plugin: [], browser: [] };     // the web windows that are open, as the two hosts of the hub tell: { kind: 'web' (a plugin's) | 'browser', win: the number of its entry, label, title, lock }
@@ -48,6 +50,7 @@ let screens = [];                              // (all the screens, see below: d
 const center = {
   label,
   native: !!nativeId,
+  nativeInset: () => sendInset,                                       // (a window of the system: how high the send box row is now, below the text area)
   cfg: () => cfg,
   dpr,
   origin: () => [ox, oy],
@@ -343,6 +346,9 @@ emit('voice-lamp-hello', {});
 emit('win-state-hello', {});
 sync();
 await applyScale();
+if (nativeId === MAIN) {                                          // (the send box is the box of the main window: in a window of the system it is the last row of the page, not a window of its own: sendrow.js)
+  mountSendRow(px => { sendInset = px; for (const p of panes.values()) p.place(); });
+}
 if (nativeId) {                                                    // (where the page starts on the screen: asked for now and then; the pane fills the window, also when the window is made larger)
   const where = async () => { try { const o = await invoke('native_origin', { label }); if (o && (o.x !== ox || o.y !== oy)) { ox = o.x; oy = o.y; } } catch { /* the window is gone */ } };
   await where(); setInterval(where, 250);
