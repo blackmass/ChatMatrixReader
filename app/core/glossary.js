@@ -225,11 +225,12 @@ export class Glossary {
 
   // {{File.txt}} in a prompt -> the file's lines (comments removed; ## headings and notes kept). mode list/mixed: {{Glossary.txt}}
   // gets a one-line hint instead (the matching entries travel with the chat line).
-  async expandPlaceholders(prompt, mode = 'full') {
+  async expandPlaceholders(prompt, mode = 'full', active = '') {
     const names = [...new Set([...(prompt || '').matchAll(PLACEHOLDER)].map(m => m[1].trim()))];
     const rep = new Map();
     for (const name of names) {
-      if (mode !== 'full' && name.toLowerCase() === DEFAULT_NAME.toLowerCase()) { rep.set(name, mode === 'mixed' ? MIXED_PLACEHOLDER : LIST_PLACEHOLDER); continue; }
+      // (list / mixed: the glossary that is in use travels with the line; its placeholder is the hint. That is the file of the settings, whatever its name, and Glossary.txt as before)
+      if (mode !== 'full' && (name.toLowerCase() === DEFAULT_NAME.toLowerCase() || (active && name.toLowerCase() === String(active).trim().toLowerCase()))) { rep.set(name, mode === 'mixed' ? MIXED_PLACEHOLDER : LIST_PLACEHOLDER); continue; }
       if (!safeName(name)) { log.warn(`프롬프트의 {{${name}}}: 앱 폴더 안의 파일 이름만 쓸 수 있습니다`); rep.set(name, ''); continue; }
       const text = await this.readText(name);
       if (text == null) {

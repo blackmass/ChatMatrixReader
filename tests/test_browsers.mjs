@@ -44,3 +44,9 @@ check(b.isWebUrl('https://m.dcinside.com') && b.isWebUrl('http://a.b/c?d=1') && 
 // the address bar
 check(b.addressFrom('https://a.b/c') === 'https://a.b/c' && b.addressFrom('namu.wiki/w/x') === 'https://namu.wiki/w/x' && b.addressFrom(' m.dcinside.com ') === 'https://m.dcinside.com' && b.addressFrom('localhost:3000/x') === 'https://localhost:3000/x', 'addressFrom: an address as it is, a site gets https://');
 check(b.addressFrom('wow 레이드 공략') === 'https://www.google.com/search?q=' + encodeURIComponent('wow 레이드 공략') && b.addressFrom('hello') === 'https://www.google.com/search?q=hello' && b.addressFrom('') === '' && b.addressFrom('javascript:alert(1)').startsWith('https://www.google.com/search'), 'addressFrom: anything else is a search (also what looks like a script)');
+
+// click-through (3.2.1): off by default, a yes is kept, anything else is no
+{
+  const l = b.normalizeBrowsers([{ id: 1 }, { id: 2, click_through: true }, { id: 3, click_through: 'yes' }, { id: 4, click_through: false }]);
+  check(l.find(x => x.id === 1).click_through === false && l.find(x => x.id === 2).click_through === true && l.find(x => x.id === 4).click_through === false, 'browsers: click_through is off by default and a yes is kept');
+}

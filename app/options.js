@@ -99,6 +99,13 @@ const ctxNow = () => ctxFor(selected);
 const cardTitle = (t, c, wid) => `${t.title} › ${c.title || ''}${wid ? ' · ' + winName(wid) : ''}`;
 
 // ---------------------------------------------------------------- the views
+// who the test box translates with: the method of the translation tab, or (the glossary tab) the page that is open
+let testTab = null;
+const methodName = (cfg, m) => (m === 'google' ? (cfg.google_free || !(cfg.google_api_key || '').trim() ? tr('구글 (무료)') : tr('구글 (API 키)')) : m === 'openai' ? tr('AI 서버') : m === 'custom' ? tr('직접 설정한 서버') : tr('번역 안 함'));
+function updateWho() {
+  const cfg = settings.cfg(), m = testTab && testTab.testMethod ? testTab.testMethod() : null;
+  $('testWho').textContent = m === 'shared' ? tr('기본 방식 · {name}', { name: methodName(cfg, cfg.translator) }) : methodName(cfg, m || cfg.translator);
+}
 function show() {
   const body = $('body'), head = $('head');
   body.textContent = ''; built = [];
@@ -132,13 +139,16 @@ function show() {
     built.push(...buildCards(tab.visibleCards ? tab.visibleCards() : tab.cards, ctxNow(), body, { fold: true }));
   }
   $('sub').textContent = view.mode === 'tab' ? tab.subtitle || '' : '';
+  testTab = view.mode === 'tab' ? tab : null;
   $('tester').hidden = !(view.mode === 'tab' && tab.test);
+  updateWho();
   $('testOut').hidden = $('tester').hidden || !$('testOut').textContent;
   refresh();
 }
 
 function refresh() {
   for (const b of built) b.refresh();
+  updateWho();
   const list = changedList();
   $('changed').hidden = list.length === 0;
   $('changedCount').textContent = list.length;
@@ -244,7 +254,7 @@ $('restartBtn').onclick = () => window.__TAURI__.event.emit('restart-request', {
     if (!text) return;
     try { localStorage.setItem(KEY, text); } catch { /* not kept */ }
     testId++; out.hidden = false; out.className = 'wait'; out.textContent = tr('번역 중…'); out.title = '';
-    emit('rpc-test', { id: testId, text });
+    emit('rpc-test', { id: testId, text, method: testTab && testTab.testMethod ? testTab.testMethod() : null });
   };
   $('testBtn').onclick = run;
   input.onkeydown = e => { if (e.key === 'Enter') run(); };

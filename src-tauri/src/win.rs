@@ -307,6 +307,18 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     }
 }
 
+/// A window the mouse goes through (click-through): the clicks, the wheel and the pointer go to what is behind it. `WS_EX_TRANSPARENT` on a layered window: the system skips the window
+/// (and the web view in it) when it looks for what is under the pointer. Only the two style bits (tao is not asked: the window it thinks is hidden is hidden by a change of its flags).
+pub fn set_clickthrough(hwnd: isize, on: bool) {
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let new = if on { style | 0x20 | 0x8_0000 } else { style & !0x20 };          // WS_EX_TRANSPARENT | WS_EX_LAYERED (the layered style stays when it is off: the fade of the page uses it)
+        if new == style { return; }
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new);
+        if on && style & 0x8_0000 == 0 { SetLayeredWindowAttributes(hwnd, 0, 255, 0x2); }          // (a layered window that has no attributes is not drawn)
+    }
+}
+
 /// (macOS: see mac.rs; here nothing: a layered window fades by itself)
 pub fn fade_begin(_hwnd: isize) {}
 pub fn fade_end(_hwnd: isize) {}

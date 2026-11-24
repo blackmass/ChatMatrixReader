@@ -409,6 +409,11 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setAlphaValue: alpha]; });
 }
 
+/// A window the mouse goes through (click-through): the clicks and the wheel go to what is behind it.
+pub fn set_clickthrough(hwnd: isize, on: bool) {
+    on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setIgnoresMouseEvents: Bool::new(on)]; });
+}
+
 static ACTIVITY: Mutex<usize> = Mutex::new(0);
 
 /// Tells the system that this program is doing work the user waits for (reading the game's screen): "App Nap" (the system slows down programs that are

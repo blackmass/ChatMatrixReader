@@ -144,10 +144,11 @@ const tab = {
           '창의 모양(이름 탭, 기능 버튼, 프레임)은 위의 "평소에 … 숨기기" 설정을 따릅니다. 관통 중에는 보이기만 하고 누를 수는 없습니다 (조작 키를 누르면 누를 수 있습니다).'] },
       { key: 'auto_copy', type: 'check', label: '자동 복사', keywords: '복사 선택 글 마우스 나갈 때 copy',
         note: '창에서 글을 선택한 뒤 마우스가 창을 벗어나면 선택한 글이 자동으로 복사됩니다. 글이 선택되어 있을 때만 복사합니다.' },
-      { key: 'wheel_through', type: 'check', label: '관통 중 휠 스크롤 허용', keywords: '휠 스크롤 이전 대화 관통 wheel',
-        show: (c, x) => !!x.get({ win: true, key: 'click_through' }, c), note: [
+      { key: 'wheel_through', type: 'check', label: '관통 중 휠 스크롤 허용', keywords: '휠 스크롤 이전 대화 관통 wheel 웹창 미니 브라우저',
+        show: (c, x) => !!x.get({ win: true, key: 'click_through' }, c) || anyWebThrough(c), note: [
           '꺼져 있으면 클릭 관통 중에는 (링크 설명 보기를 빼면) 아무 조작도 되지 않습니다.',
           '켜면 마우스를 창 위에 두고 휠을 위로 올려 이전 대화를 볼 수 있습니다 (맨 아래까지 내리면 다시 관통).',
+          '클릭 관통을 켠 미니 브라우저(웹창)도 휠로 페이지를 스크롤할 수 있게 됩니다. 이때 그 창 위의 휠은 게임이 아닌 웹 페이지가 받습니다.',
           '글자가 자동으로 사라지는 중이거나 사라진 상태에서는 휠을 아래로 내려도 다시 나타납니다 (이때만 아래 휠도 게임이 아닌 이 창이 받습니다).',
           "'관통 창 숨기기'가 켜진 창에서는 이 설정이 적용되지 않습니다 (뒤의 게임 채팅을 쓰는 중이라 휠은 게임 것입니다)."] },
       { key: 'through_tips', type: 'check', label: '관통 중 링크 보기 허용', keywords: '툴팁 링크 아이템 퀘스트 마우스 올리기 관통 tooltip item quest hover',
@@ -209,6 +210,9 @@ const tab = {
     return { el, refresh };
   },
 };
+
+// is there a web window (the mini browser, or one of a plugin) that the mouse goes through? (the option of the wheel is for it too)
+const anyWebThrough = c => (c.browser_windows || []).some(b => b.click_through) || (c.child_windows || []).some(w => w.kind === 'web' && w.click_through);
 
 // The windows of a plugin show only the basic settings (the order of the windows, the background, the mouse, the lock ...): what is inside the window is the plugin's
 const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);

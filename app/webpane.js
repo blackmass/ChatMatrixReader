@@ -3,6 +3,7 @@
 // program puts the window there (center_rects: a box with `web`), under the center, so that the bar and the strips take the mouse and the page gets the rest of it.
 import * as winconf from './core/winconf.js';
 import * as layout from './core/winlayout.js';
+import { takesMouse } from './core/winlayout.js';
 import * as B from './core/browsers.js';
 import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow } from './frame.js';
 import { tr } from './core/i18n.js';
@@ -20,6 +21,8 @@ export class WebPane {
     const row = this.kind === 'browser' ? '<div class="paddrbar"><button class="phome" tabindex="-1" title="처음 주소로">⌂</button><div class="paddr"><span class="phold">주소 또는 검색어</span><span class="ptxt"></span></div><button class="pmode" tabindex="-1"></button><span class="pzoom"></span></div>' : '';       // (the second line of a window of the mini browser: the address)
     this.head = this.kind === 'browser' ? BAR_H * 2 : BAR_H;                   // (how much of the window is above the page, css pixels: below it when `flip`)
     this.flip = false;
+    this.interactive = true; this.passing = undefined; this.passAt = 0; this.zone = false; this.pressed = false; this.lmb = false; this.inside = false; this.cursor = [0, 0];          // (click-through: see tick)
+    this.wheelId = (this.kind === 'browser' ? 50000 : 60000) + (Math.abs(Number(this.win) || 0) % 10000);          // (the number the exe knows the wheel zone of this window by: center.js)
     this.el.innerHTML = '<div class="pbar">' + head + '<span class="pspace"></span><span class="pcopied">복사됨</span><span class="ptools"><button class="pback" tabindex="-1" title="뒤로">‹</button><button class="preload" tabindex="-1" title="새로고침">↻</button><button class="pclose" tabindex="-1" title="닫기">✕</button></span></div>' + row + '<div class="pbody"><div class="pscroll"></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div>';
     document.body.append(this.el);
     this.el.style.zIndex = String(this.center.nextWebZ());                       // (a new web window is in front of the web windows; all of them are below every translation window)
@@ -81,13 +84,32 @@ export class WebPane {
   }
   // every round of the center (the mouse is where the system says): the window is solid while the mouse is over it (or it is used: an address typed, its own menu open), and after a moment away it goes
   // to the solidity of its setting: slowly; back to solid quickly. The page is a window of the system: its own transparency (web_alpha); the bars and the frame are the center's, they go with it.
-  tick(s) {
+  tick(s, ctx = {}) {
     const [cx, cy] = s.cursor, b = this.screenBox(), now = performance.now();
     const inside = cx >= b.x && cx < b.x + b.w && cy >= b.y && cy < b.y + b.h;
-    const used = inside || !!this.el.querySelector('.paddr.editing') || (this.center.menuOwner && this.center.menuOwner()) === this;
+    this.cursor = [cx, cy];
+    // click-through (the option of the window): the page and the bars let the mouse go through to the game; with the interact keys held and the pointer over the window it takes the mouse (the keys are the ones
+    // of the translation windows: the main window's). The page is a window of the system: `web_through` makes it let the mouse go (webwin.rs); the bars and the strips are the center's (`hit`, boxes()).
+    const through = !!this.opt('click_through', false);
+    const keys = (this.kind === 'browser' ? this.center.cfg().interact_keys : this.opt('interact_keys', ['Shift'])) || ['Shift'];
+    const held = keys.length > 0 && keys.every(k => s[String(k).toLowerCase()] === true);
+    const lmb = !!(s.keys && s.keys[0]), game = ctx.game !== false;
+    const take = takesMouse({ through, held, inside, game, drag: this.interactive && lmb && this.pressed });
+    if (inside && lmb && !this.lmb && this.interactive) this.pressed = true; else if (!lmb) this.pressed = false;
+    this.lmb = lmb; this.inside = inside;
+    let changed = false;
+    if (take !== this.interactive) { this.interactive = take; changed = true; }
+    const pass = through && !take;
+    if (pass !== !!this.passing || (pass && now - this.passAt > 2000)) { this.passing = pass; this.passAt = now; invoke('web_through', { label: this.label, on: pass }).catch(() => {}); }   // (and again every 2 s while it goes through: nothing else may undo it)
+    this.el.classList.toggle('through', through); this.el.classList.toggle('interactive', take);
+    // the turns of the wheel over a page that the mouse goes through are taken from the game when the user allowed it (the option "관통 중 휠 스크롤 허용"); the page scrolls (wheelScrolled)
+    const zone = pass && !!(ctx.cfg && ctx.cfg.wheel_through);
+    if (zone !== this.zone) { this.zone = zone; changed = true; }
+    // (a window that the mouse goes through counts the mouse as away until the interact keys are held: the pointer passing over it shows nothing and does not make it solid)
+    const used = (through ? take && inside : inside) || !!this.el.querySelector('.paddr.editing') || (this.center.menuOwner && this.center.menuOwner()) === this;
     // "평소에 인터페이스 숨기기": the bars, the address and the frame are hidden (slowly) while the mouse is away, and shown at once when it comes (the style sheet: .hide-ui.away)
     this.el.classList.toggle('away', !used); this.el.classList.toggle('hide-ui', !!this.opt('hide_ui', false));
-    if (this.kind !== 'browser') return;
+    if (this.kind !== 'browser') return changed;
     const idle = Math.min(1, Math.max(0.2, Number(this.opt('idle_alpha', 1)) || 1));
     let want = 1;
     if (!used && idle < 1) { if (!this.awayAt) this.awayAt = now; if (now - this.awayAt > 600) want = idle; } else this.awayAt = 0;
@@ -98,7 +120,16 @@ export class WebPane {
       this.alpha = want; this.el.style.transition = `opacity ${ms}ms linear`; this.el.style.opacity = String(want);
       invoke('web_alpha', { label: this.label, alpha: want, ms }).catch(() => {});
     }
+    return changed;
   }
+  // a turn of the wheel the exe took for this window (positive = up): the page scrolls where the pointer is
+  wheelScrolled(delta) {
+    const r = this.rect, d = this.center.dpr(), [ox, oy] = this.center.origin();
+    const left = ox + r.x * d, top = oy + r.y * d;                                       // (where the page itself starts on the screen)
+    invoke('web_wheel', { label: this.label, x: this.cursor[0] - left, y: this.cursor[1] - top, delta }).catch(() => {});
+  }
+  // the page as the wheel zone: [left, top, width, height] in pixels of the screen of the center (only the page: the bars are not scrolled)
+  wheelBox() { const r = this.rect, d = this.center.dpr(); return { id: String(this.wheelId), x: r.x * d, y: r.y * d, w: r.w * d, h: r.h * d, bar: 0 }; }
   // the way the page is seen now: the button shows it (the other one is what a click gives)
   setMode(m) {
     const b = this.el.querySelector('.pmode'); if (!b) return;
@@ -177,7 +208,7 @@ export class WebPane {
   }
   // the boxes for the center, in pixels of the page: the bar and the strips take the mouse (`hit`); the page itself is `web`: the window of the system is put there, and the mouse goes through
   boxes() {
-    const r = this.rect, d = this.center.dpr(), id = 'w' + this.win, bot = this.flip ? r.y + r.h + this.head : r.y + r.h, b = (suffix, x, y, w, h, extra) => ({ id: id + suffix, x: x * d, y: y * d, w: w * d, h: h * d, bar: 0, hit: true, ...extra });
+    const r = this.rect, d = this.center.dpr(), id = 'w' + this.win, bot = this.flip ? r.y + r.h + this.head : r.y + r.h, b = (suffix, x, y, w, h, extra) => ({ id: id + suffix, x: x * d, y: y * d, w: w * d, h: h * d, bar: 0, hit: this.interactive, ...extra });          // (a window that the mouse goes through: its bars take nothing)
     return [
       { id, x: r.x * d, y: r.y * d, w: r.w * d, h: r.h * d, bar: 0, hit: false, web: this.label, z: Number(this.el.style.zIndex) || 0 },
       b('b', r.x, this.flip ? r.y + r.h + this.head - BAR_H : r.y - this.head, r.w, BAR_H),                  // (the title bar: the first line above the page; the last line below it)

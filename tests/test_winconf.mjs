@@ -88,3 +88,9 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   eq(l.map(c => c.bg_opacity), [0.99, 0.99, 0.5, 0.99], 'bg_opacity: at most 99 % (a window of 100 % or more is brought down), a lower value stays, the default is 99 %');
   eq(w.MAX_BG_OPACITY, 0.99, 'bg_opacity: the limit is 99 %');
 }
+
+// a web window of a plugin may be click-through (3.2.1: it was always off before)
+{
+  const l = w.normalize([{ id: 2, name: 'x', owner: 'p-1', owner_win: 'web', kind: 'web', click_through: true }, { id: 3, name: 'y', owner: 'p-1', owner_win: 'web2', kind: 'web' }]);
+  eq([l.find(c => c.id === 2).click_through, l.find(c => c.id === 3).click_through], [true, false], 'winconf: a web window keeps click_through, off by default');
+}

@@ -39,6 +39,11 @@ export function firstPlace(size, area, taken = [], top = 0) {
   return [x0, y0];                                    // (no room for one more step: the middle again)
 }
 
+// Does a window that may be click-through take the mouse now? (a window of the web: webpane.js; a translation window has the same rule with its own details: pane.js tick)
+// through: the user chose it; held: the interact keys are held; inside: the pointer is over the window; game: a game is there (no game: nothing to click through to);
+// drag: a button went down on the window while it took the mouse, and is still down (a drag that leaves the window is not cut off)
+export const takesMouse = ({ through, held, inside, game = true, drag = false }) => !through || (held && inside) || !game || !!drag;
+
 export const MAIN_LABEL = 'main';
 export const labelOf = wid => (wid === 1 ? MAIN_LABEL : `win${wid}`);
 export const widOf = label => (label === MAIN_LABEL ? 1 : (/^win(\d+)$/.exec(label) ? parseInt(RegExp.$1, 10) : 0));

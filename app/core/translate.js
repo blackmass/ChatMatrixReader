@@ -50,11 +50,11 @@ const EXTRA_MARK = '\x00EXTRA\x00';
 
 // The system prompt. `extra` = the user's own additional instructions: they go where the prompt has {{extra_prompt}} (the default
 // prompt: at its very end), else they are appended at the end. Empty = nothing is added.
-export async function renderPrompt(glossary, prompt, targetLang, mode = 'full', extra = '') {
+export async function renderPrompt(glossary, prompt, targetLang, mode = 'full', extra = '', glossaryName = '') {
   extra = (extra || '').trim();
   let text = (prompt || DEFAULT_PROMPT).split(EXTRA_PLACEHOLDER).join(EXTRA_MARK);
   text = text.split('{target_lang}').join(targetLang);                  // plain replace: braces in the user's text can never break it
-  text = await glossary.expandPlaceholders(text, mode);                 // {{Glossary.txt}} -> file content
+  text = await glossary.expandPlaceholders(text, mode, glossaryName);   // {{Glossary.txt}} -> file content
   const block = extra ? EXTRA_HEADER + extra : '';                      // inserted last: the user's text is never expanded
   if (text.includes(EXTRA_MARK)) return block ? text.split(EXTRA_MARK).join(block) : text.split(EXTRA_MARK).join('').trimEnd() + '\n';
   return block ? text.trimEnd() + '\n\n' + block + '\n' : text;
@@ -327,7 +327,7 @@ export class Translator {
     const base = openaiBase(cfg.api_url);
     const payload = {
       messages: [
-        { role: 'system', content: await renderPrompt(this.glossary, cfg.prompt, cfg.target_lang ?? '한국어', glossaryMode(cfg), cfg.extra_prompt) },
+        { role: 'system', content: await renderPrompt(this.glossary, cfg.prompt, cfg.target_lang ?? '한국어', glossaryMode(cfg), cfg.extra_prompt, cfg.glossary_file) },
         { role: 'user', content: await this.userText(cfg, text) },
       ],
       temperature: Number(cfg.temperature ?? 0.2),
@@ -492,7 +492,7 @@ export class Translator {
     if (llm) sent = await this.userText(cfg, text);
     const vals = {
       text: sent, key, key1, key2, target: code, TARGET: code.toUpperCase(),
-      system: llm ? await renderPrompt(this.glossary, cfg.prompt, cfg.target_lang ?? '한국어', glossaryMode(cfg), cfg.extra_prompt) : '',
+      system: llm ? await renderPrompt(this.glossary, cfg.prompt, cfg.target_lang ?? '한국어', glossaryMode(cfg), cfg.extra_prompt, cfg.glossary_file) : '',
     };
     const url = fill(cfg.custom_url.trim(), vals, true);
     const headers = Object.fromEntries(Object.entries(JSON.parse(cfg.custom_headers || '{}')).map(([k, v]) => [String(k), fill(String(v), vals)]));
@@ -555,5 +555,5 @@ export class Translator {
   }
 
   // what the player types -> the language of the people they talk to (cfg.send_lang, the source is detected)
-  translateOutgoing(cfg, text) { return this.translate(applyRoute(sendCfg(cfg), sendRoute(cfg)), text); }
+  translateOutgoing(cfg, text) { return this.translate(applyRoute(sendCfg(cfg), sendRoute(cfg), true), text); }
 }

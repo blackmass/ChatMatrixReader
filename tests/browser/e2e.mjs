@@ -37,6 +37,7 @@ let lastInputOpen = null;                            // the arguments of the las
 let aiMode = 'ok';                                   // what the fake AI server answers to the model list: ok | down | 401 | bad
 let osVersion = '14.5';                                    // what the command os_version answers (macOS only)
 let osKind = 'windows';                                   // what the command os_kind answers (a test can switch it to 'macos' before it opens a page)
+let wheelTo = '1';                                        // (the window the turns of the wheel that the exe took are for: a pane, or the number of a web window)
 const kb = { shift: false, enter: false, fg: 77 };       // the keyboard and the window in front (77 = the game, 99 = this program)
 // the fake screen: flat, until `matrixOn`, then a v1 matrix at 200,100 (the game window is the left top 1280x720 of it)
 const SW = 1920, SH = 1080;
@@ -72,7 +73,7 @@ async function invoke(cmd, a = {}) {
     case 'open_chat_url': chatOpened.push(a.url); return null;
     case 'set_debug_areas': debugAreas.push(a.areas); return null;
     case 'center_rects': centerRects.push(a); return null;
-    case 'center_wheel': return { seq: wheel.length, turns: wheel.slice(a.seq).map(d => ({ id: '1', delta: d })) };
+    case 'center_wheel': return { seq: wheel.length, turns: wheel.slice(a.seq).map(d => ({ id: wheelTo, delta: d })) };
     case 'center_zoom': return a.scale || 1;
     case 'center_layout': return { origin: [0, 0], monitors: [[0, 0, 3840, 2160]] };
     case 'center_ready': centerReady.push(a.label); return null;
@@ -83,6 +84,8 @@ async function invoke(cmd, a = {}) {
     case 'web_info': return { exists: true, visible: true, position: [100, 50], size: [360, 640] };
     case 'web_cmd': webCalls.push(['cmd', a.label, a.cmd, a.url]); return null;
     case 'web_alpha': webCalls.push(['alpha', a.label, a.alpha]); return null;
+    case 'web_through': webCalls.push(['through', a.label, a.on]); return null;
+    case 'web_wheel': webCalls.push(['wheel', a.label, a.x, a.y, a.delta]); return null;
     case 'web_ua': webCalls.push(['ua', a.label, a.ua, a.hints]); return null;
     case 'address_show': webCalls.push(['addr', a]); return null;
     case 'address_hide': webCalls.push(['addrhide']); return null;
@@ -241,6 +244,8 @@ const paneOf = (page, id) => {
 const cm = await open('center.html?label=center1&mode=1&ox=0&oy=0', { width: 1200, height: 800 });
 await until(() => centerReady.includes('center1'), 'a center says that it is ready (after it has read its settings, zoomed and drawn)');
 const main = paneOf(cm, 1);
+await control.evaluate(() => import('./settings.js').then(m => m.set({ geometry: '560x420+80+80' })));       // (a window with no saved place is in the middle of the screen: the places of this test are the ones of the saved place)
+await cm.waitForTimeout(300);
 const newId = await control.evaluate(() => 0);
 await control.waitForFunction(() => window.cmrHub && window.cmrHub.windows);
 ok(JSON.stringify(trayTexts.at(-1)) === '["옵션","종료"]', 'tray: the menu texts are given to the exe: ' + JSON.stringify(trayTexts));
@@ -1117,6 +1122,38 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     await until(() => webCalls.filter(c => c[0] === 'alpha').at(-1)[2] === 1, 'with the mouse over it, it is solid at once', 4000);
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, idle_alpha: 1 } : b)) })));
     kb.cx = 0; kb.cy = 0;
+    // click-through (3.2.1): the page lets the mouse go to the game and the bars take nothing; the interact keys with the pointer over the window take it back
+    {
+      const th = () => webCalls.filter(c => c[0] === 'through' && c[1] === 'web_b1').at(-1);
+      const boxOf = id => centerRects.at(-1).panes.find(p => p.id === id);
+      await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, click_through: true } : b)) })));
+      const b1 = boxOf('w1'); kb.cx = b1.x + b1.w / 2; kb.cy = b1.y + b1.h / 2; kb.shift = false;
+      await until(() => th() && th()[2] === true, 'browser/through: the page lets the mouse go (the exe is told)', 4000);
+      await until(() => boxOf('w1b') && boxOf('w1b').hit === false && boxOf('w1').hit === false, 'browser/through: the bar and the strips take nothing', 4000);
+      kb.shift = true;
+      await until(() => th()[2] === false, 'browser/through: the interact key with the pointer over it: it takes the mouse', 4000);
+      await until(() => boxOf('w1b') && boxOf('w1b').hit === true, 'browser/through: and its bar takes the mouse again', 4000);
+      kb.cx = 5000; kb.cy = 5000;
+      await until(() => th()[2] === true, 'browser/through: the pointer leaves: it lets the mouse go again', 4000);
+      kb.shift = false;
+      // the wheel: only when the user allowed it (the option of the translation windows)
+      const wt0 = await control.evaluate(() => import('./settings.js').then(m => !!m.cfg().wheel_through));
+      await control.evaluate(() => import('./settings.js').then(m => m.set({ wheel_through: false })));
+      await cp.waitForTimeout(400);
+      ok(!(centerRects.at(-1).wheel || []).some(w => w.id === '50001'), 'browser/wheel: no wheel zone while the option is off');
+      await control.evaluate(() => import('./settings.js').then(m => m.set({ wheel_through: true })));
+      await until(() => (centerRects.at(-1).wheel || []).some(w => w.id === '50001'), 'browser/wheel: with the option on the page is a wheel zone (the number of the window)', 4000);
+      kb.cx = b1.x + 40; kb.cy = b1.y + 60; await cp.waitForTimeout(300);
+      wheelTo = '50001'; wheel.push(120);
+      await until(() => webCalls.some(c => c[0] === 'wheel' && c[1] === 'web_b1'), 'browser/wheel: a turn that the exe took scrolls the page', 4000);
+      const wc = webCalls.filter(c => c[0] === 'wheel' && c[1] === 'web_b1').at(-1);
+      ok(wc[4] === 120 && wc[2] > 0 && wc[3] > 0 && wc[2] < b1.w && wc[3] < b1.h, 'browser/wheel: from the place of the pointer in the page: ' + JSON.stringify(wc));
+      wheelTo = '1';
+      await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: m.cfg().browser_windows.map(b => (b.id === 1 ? { ...b, click_through: false } : b)) })));
+      await control.evaluate(w => import('./settings.js').then(m => m.set({ wheel_through: w })), wt0);
+      kb.cx = 0; kb.cy = 0;
+      await until(() => th()[2] === false, 'browser/through: off: the page takes the mouse', 4000);
+    }
     // the order of the web windows: the center draws their frames by `z` and tells the program, which puts their pages in the same order; every translation window is above them all
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: [...m.cfg().browser_windows, { id: 2, name: '', mode: 'mobile', start_kind: 'url', start_url: 'https://www.google.com/', last_url: '', persist: false, topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1, idle_alpha: 1 }] })));
     await cmd('open', 2);
@@ -1406,9 +1443,11 @@ ok(await opt.locator('.row b.label:text-is("계산 장치")').isVisible() && awa
 await opt.locator('.vtoggle').click();
 await within(500, async () => await opt.locator('.vstatus').getAttribute('data-state') === 'error' && (await opt.locator('.vstatus .vtext').textContent()).includes('설치되어 있지 않습니다'));
 ok(await opt.locator('.vstatus').getAttribute('data-state') === 'error' && (await opt.locator('.vstatus .vtext').textContent()).includes('설치되어 있지 않습니다'), 'options/voice: turned on with nothing installed: the reason is shown');
-await opt.locator('.vbtns button', { hasText: '설치 (CPU)' }).click();
-await opt.waitForFunction(() => /올라와/.test(document.querySelector('.vmsg')?.textContent || ''));
-ok(true, 'options/voice: installing an engine that is not published says so (no crash, the buttons come back)');
+if (!(await control.evaluate(() => import('./core/voice_catalog.js').then(m => m.BUILTIN.engines.cpu.files.length)))) {        // (the engines are published: the catalog has their addresses, and this click would download one)
+  await opt.locator('.vbtns button', { hasText: '설치 (CPU)' }).click();
+  await opt.waitForFunction(() => /올라와/.test(document.querySelector('.vmsg')?.textContent || ''));
+  ok(true, 'options/voice: installing an engine that is not published says so (no crash, the buttons come back)');
+}
 ok(await control.evaluate(() => window.cmrHub.voice.control.state.code) === 'not_installed', 'options/voice: the hub has the same state');
 // a long line about the sound (a warning) stays on a line of its own under the button; it does not push the label away
 await control.evaluate(() => window.cmrHub.voice.control.set({ state: 'on', engine: 'cpu', model: 'small', device: 'cpu',
@@ -1560,6 +1599,47 @@ ok((files.get('Neu.txt') || '').includes('LFM = 구인'), 'options/glossary: a n
 ok((await opt.inputValue('textarea.filetext')).includes('LFM = 구인'), 'options/glossary: and the editor shows it');
 await rowOf('단어장 파일 이름').locator('button.def').click();
 await control.waitForTimeout(800);
+// ---- what a translation method has of its own (3.2.1): the buttons above the cards, "follow the default method", its own file name and prompt
+ok(await opt.locator('.subtabs button', { hasText: 'AI 서버' }).count() === 1 && await opt.locator('.subtabs button', { hasText: '기본 방식' }).count() === 1, 'options/by_method: the buttons of the methods are above the cards');
+await opt.locator('.subtabs button', { hasText: 'AI 서버' }).click();
+await opt.waitForSelector('.row:has(b.label:text-is("기본 방식의 설정을 따름"))');
+ok(await rowOf('기본 방식의 설정을 따름').locator('input[type=checkbox]').isChecked() && await opt.locator('.row:has(b.label:text-is("단어장 파일 이름"))').count() === 0 || await rowOf('단어장 파일 이름').isHidden(), 'options/by_method: a method follows the default method at first (its own rows are not shown)');
+await rowOf('기본 방식의 설정을 따름').locator('input[type=checkbox]').click();
+await within(1500, async () => !!(cfgFile().by_method || {}).openai);
+ok((cfgFile().by_method || {}).openai && cfgFile().by_method.openai.glossary_file === 'Glossary.txt' && cfgFile().by_method.openai.prompt === cfgFile().prompt, 'options/by_method: turning "follow" off copies the settings of the default method');
+ok(await opt.locator('.subtabs button', { hasText: 'AI 서버 ●' }).count() === 1, 'options/by_method: the button of a method with settings of its own has a mark');
+await rowOf('단어장 파일 이름').locator('input').fill('AI2.txt'); await rowOf('단어장 파일 이름').locator('input').dispatchEvent('change');
+await within(1500, async () => (cfgFile().by_method.openai || {}).glossary_file === 'AI2.txt');
+ok(cfgFile().by_method.openai.glossary_file === 'AI2.txt' && cfgFile().glossary_file === 'Glossary.txt', 'options/by_method: the glossary file of the method is its own (the shared one is not changed)');
+for (let i = 0; i < 80 && !files.has('AI2.txt'); i++) await control.waitForTimeout(100);
+ok((files.get('AI2.txt') || '').includes('LFM = 구인'), 'options/by_method: a new file name of a method gets the sample');
+await within(1500, async () => await opt.locator('.row.warn:visible', { hasText: "'AI2.txt'" }).count() === 2);
+ok(await opt.locator('.row.warn:visible', { hasText: "'AI2.txt'" }).count() === 2 && await rowOf('단어장 파일 이름').evaluate(e => e.classList.contains('mismatch')) && await rowOf('기본 프롬프트').evaluate(e => e.classList.contains('mismatch')), 'options/by_method: a glossary that is not the one of the prompt is marked (the row and a notice), at the glossary and at the prompt');
+await rowOf('단어장 파일 이름').locator('input').fill('Glossary.txt'); await rowOf('단어장 파일 이름').locator('input').dispatchEvent('change');
+await within(1500, async () => (cfgFile().by_method.openai || {}).glossary_file === 'Glossary.txt' && await opt.locator('.row.warn:visible', { hasText: '프롬프트에 들어 있지 않습니다' }).count() === 0);
+ok(await opt.locator('.row.warn:visible', { hasText: '프롬프트에 들어 있지 않습니다' }).count() === 0 && !(await rowOf('단어장 파일 이름').evaluate(e => e.classList.contains('mismatch'))), 'options/by_method: the same name in both: nothing is marked');
+await opt.locator('.ex', { hasText: '해적' }).click();
+await within(1500, async () => (cfgFile().by_method.openai || {}).extra_prompt === 'Always write the translated dialogue in the style of a pirate.');
+ok(cfgFile().by_method.openai.extra_prompt.includes('pirate') && cfgFile().extra_prompt !== cfgFile().by_method.openai.extra_prompt, 'options/by_method: an example goes into the extra instructions of the method only');
+// the test box says what it translates with, and translates with that: the page of the method that is open
+ok((await opt.locator('#testWho').textContent()) === 'AI 서버', 'test box: the page of the AI server: it says "AI 서버": ' + await opt.locator('#testWho').textContent());
+await opt.locator('.subtabs button', { hasText: '구글' }).click();
+await within(1000, async () => (await opt.locator('#testWho').textContent()).startsWith('구글'));
+ok((await opt.locator('#testWho').textContent()).startsWith('구글'), 'test box: the page of Google: it says so');
+await opt.fill('#testText', 'LFM tank'); await opt.click('#testBtn');
+await opt.waitForFunction(() => /\(\d+ms/.test(document.getElementById('testOut').textContent), null, { timeout: 8000 });
+ok((await opt.locator('#testOut').textContent()).includes('Google') && await opt.locator('#testOut.ok').count() === 1, 'test box: the page of Google translates with Google: ' + await opt.locator('#testOut').textContent());
+await opt.locator('.subtabs button', { hasText: '기본 방식' }).click();
+await opt.waitForSelector('.row:has(b.label:text-is("단어장 파일 이름"))');
+ok(await rowOf('단어장 파일 이름').locator('input').inputValue() === 'Glossary.txt', 'options/by_method: the default method page shows the shared settings');
+ok((await opt.locator('#testWho').textContent()).startsWith('기본 방식'), 'test box: the first page says "기본 방식": ' + await opt.locator('#testWho').textContent());
+await opt.locator('.subtabs button', { hasText: 'AI 서버' }).click();
+await opt.waitForSelector('.row:has(b.label:text-is("기본 방식의 설정을 따름"))');
+await rowOf('기본 방식의 설정을 따름').locator('input[type=checkbox]').click();
+await within(1500, async () => !(cfgFile().by_method || {}).openai);
+ok(!(cfgFile().by_method || {}).openai, 'options/by_method: following again drops the settings of the method');
+await opt.locator('.subtabs button', { hasText: '기본 방식' }).click();
+await control.waitForTimeout(500);
 await opt.locator('#tabs li', { hasText: '번역' }).first().click();
 ok(await opt.locator('.row.warn', { hasText: '한국어가 아니면' }).count() === 0 || await opt.locator('.row.warn', { hasText: '한국어가 아니면' }).isHidden(), 'options: no language warning for Korean');
 await opt.selectOption('.row:has(b.label:text-is("목표 언어")) select', 'English');

@@ -157,9 +157,10 @@ if (mode === 1) await listen('center-tip', e => drawTip(e.payload));
 
 // macOS: the turns of the wheel the exe took arrive one by one as they happen
 await listen('wheel-turn', e => {
-  const u = Number(e.payload.units), p = panes.get(Number(e.payload.id));
+  const u = Number(e.payload.units), p = panes.get(Number(e.payload.id)) || webByWheel(e.payload.id);
   if (p && Number.isFinite(u) && u) p.wheelScrolled(u);
 });
+const webByWheel = id => [...webs.values()].find(w => w.wheelId === Number(id));          // (the window of the web a turn of the wheel was taken for: its number is in the zone, webpane.js wheelBox)
 let lastOs = null;                             // the last state of the system (for the diagnosis)
 let gameFound = true;                          // no game = the windows stay in view: nothing to click through to
 await listen('game-state', e => { gameFound = !!e.payload.found; });
@@ -173,7 +174,7 @@ let lastKey = '', copyPrev = false, webLmb = false;
     let s; try { s = await invoke('os_state', { keys: [0x01, 0x11, 0x43] }); } catch { continue; }
     let changed = false;
     for (const p of panes.values()) changed = p.tick(s, { game: gameFound, cfg }) || changed;
-    for (const w of webs.values()) w.tick(s);
+    for (const w of webs.values()) changed = w.tick(s, { game: gameFound, cfg }) || changed;
     // the left button goes down on the page of a web window: the page is a window of the system, this page never sees the click, so it is told here (the front-most window under the mouse is the one)
     const lmbNow = !!(s.keys && s.keys[0]);
     if (lmbNow && !webLmb) {
@@ -188,7 +189,7 @@ let lastKey = '', copyPrev = false, webLmb = false;
       try {
         const w = await invoke('center_wheel', { label, seq: Math.max(0, wheelSeq) });
         const first = wheelSeq < 0; wheelSeq = w.seq;
-        if (!first) for (const t of w.turns) { const p = panes.get(Number(t.id)); if (p && p.inside) p.wheelScrolled(t.delta); }
+        if (!first) for (const t of w.turns) { const p = panes.get(Number(t.id)) || webByWheel(t.id); if (p && p.inside) p.wheelScrolled(t.delta); }
       } catch { /* the next round */ }
     }
     lastOs = s;
@@ -210,7 +211,7 @@ function clipWebs() {
 function report() {
   clipWebs();
   const list = [...panes.values()].map(p => ({ ...p.box(), hit: p.interactive, blur: p.blurLevel() })).concat([...webs.values()].flatMap(p => p.boxes()));          // (a window that is click-through takes no mouse: it goes through; the place is kept for the send box)
-  const wheel = [...panes.values()].filter(p => p.zone).map(p => p.box());                    // (the wheel over these goes to the window, not to the game)
+  const wheel = [...panes.values()].filter(p => p.zone).map(p => p.box()).concat([...webs.values()].filter(p => p.zone).map(p => p.wheelBox()));                    // (the wheel over these goes to the window, not to the game)
   if (!menuEl.hidden) list.push({ id: 'menu', x: 0, y: 0, w: innerWidth * center.dpr(), h: innerHeight * center.dpr(), bar: 0 });          // (while the menu is open, the center takes the whole mouse: a click anywhere else closes it)
   const key = JSON.stringify([list, wheel]);
   if (key === lastKey) return;

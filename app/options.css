@@ -47,6 +47,8 @@ h1 { margin: 0; font-size: 19px; }
 .row.changed .rev { color: var(--accent); cursor: pointer; }
 .row.changed { box-shadow: -10px 0 0 -7px var(--accent); }
 .row.bad input { border-color: var(--bad); }
+.row.mismatch input, .row.mismatch textarea { border-color: var(--warn); }
+.row.mismatch b.label::after { content: ' ⚠'; color: var(--warn); }
 
 /* the default button: dim while the value is the default, clear while it can be reset */
 .def { height: 24px; padding: 0 9px; font-size: 12px; }
@@ -143,6 +145,7 @@ textarea.logtext { height: 340px; font-size: 11px; }
 #tester { display: flex; align-items: center; gap: 6px; }
 #testText { width: 230px; height: 24px; padding: 0 8px; font-size: 12px; }
 #testBtn { height: 24px; padding: 0 10px; font-size: 12px; }
+#testWho { color: var(--dim); font-size: 12px; white-space: nowrap; margin-right: 6px; }
 #testOut { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; user-select: text; }
 #testOut.ok { color: #7fd6b0; } #testOut.err { color: var(--bad); } #testOut.wait { color: var(--dim); }
 

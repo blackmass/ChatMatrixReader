@@ -357,13 +357,15 @@ export function buildRow(row, ctx) {
     const list = el('div', 'examples');
     for (const [name, text] of row.items) {
       const b = el('button', 'ex'); b.append(el('b', '', name), el('span', '', text));
-      b.onclick = () => ctx.set({ [row.target]: text });
+      b.onclick = () => (row.pick ? row.pick(ctx, text) : ctx.set({ [row.target]: text }));          // (`pick`: the target is a row that keeps its value somewhere else)
       list.append(b);
     }
     input = list;
   } else if (row.type === 'notice') {
     root.classList.add('warn');
-    ctl.append(el('span', 'info', row.text));
+    const span = el('span', 'info', row.text || '');
+    ctl.append(span);
+    if (row.textOf) write = () => { const t = row.textOf(ctx.cfg()); if (t) span.textContent = typeof t === 'string' ? tr(t) : tr(t.text, t.vars); };          // (a text that depends on the settings)
   } else if (row.type === 'perf') {
     root.classList.add('block');
     ctl.append(perfTable(row));
@@ -393,6 +395,7 @@ export function buildRow(row, ctx) {
   function refresh() {
     const cfg = ctx.cfg();
     root.hidden = !!(row.show && !row.show(cfg, ctx));
+    if (row.flag) root.classList.toggle('mismatch', !!row.flag(cfg));                  // (a row that is set against another: marked, the notice says what)
     const dh = row.win && HOST_KEYS.has(row.key) && ctx.dockHost ? ctx.dockHost() : 0;
     root.classList.toggle('docked', !!dh); dockTag.hidden = !dh;
     if (dh) dockTag.textContent = tr('{name} 창을 따름', { name: ctx.nameOf(dh) });
