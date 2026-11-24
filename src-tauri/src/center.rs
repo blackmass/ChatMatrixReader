@@ -293,6 +293,16 @@ pub async fn center_wheel(label: String, seq: u64) -> Result<Value, String> {
     Ok(json!({ "seq": newest, "turns": turns }))
 }
 
+/// The height of the bar (screen pixels) of the translation window `label`: the floating tabs and the band of the other look are not as high.
+pub fn pane_bar(label: &str) -> Option<i32> {
+    let id = if label == "main" { "1".to_string() } else { label.strip_prefix("win")?.to_string() };
+    let rects = RECTS.lock().ok()?;
+    for (_, panes) in rects.iter() {
+        if let Some(p) = panes.iter().find(|p| p.id == id) { return Some(p.bar.round() as i32); }
+    }
+    None
+}
+
 /// The text area (the bar left out) of the translation window `label` ("main", "win3") in screen pixels: (x, y, w, h). None: the window is not a pane of a center.
 pub fn pane_rect(label: &str) -> Option<(i32, i32, u32, u32)> {
     let id = if label == "main" { "1".to_string() } else { label.strip_prefix("win")?.to_string() };

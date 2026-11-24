@@ -140,20 +140,33 @@ body.mac .webpane .paddr.editing { background: rgba(20, 24, 26, .35); }         
 .webpane.flip .paddrbar { border-top: 0; border-bottom: 1px solid #5b4a22; }
 .webpane.flip .pbody::after { border-top: 1px solid #8a6a30; border-bottom: 0; }
 
-/* A window of the system without its own frame (3.2.1 test, pane.js titleBar): the bar is the title bar: one solid strip over the whole width, the tabs and the buttons fill it from top to bottom.
-   The system has the frame and the sizing: ours is never drawn (not even while the mouse is in), nor the corner to resize by. */
+/* The bar as one band across the whole width, the tabs and the buttons filling it from top to bottom (pane.js barStyle): the bar of a window of the system (it is its title bar, `body.native`: pane.js titleBar)
+   and, when the option "바 모양" is "꽉 찬 바", the bar of a translation window of a center. The window of the system has the frame and the sizing: ours is never drawn there (not even while the mouse
+   is in), nor the corner to resize by, and the bar is always whole. */
 body.native { margin: 0; }
-.pane.titled .pbar { height: 28px; box-sizing: border-box; align-items: stretch; cursor: default; background: linear-gradient(#364847, #2a3836); border-bottom: 1px solid #8a6a30; opacity: 1 !important; transition: none; }
-.pane.titled .ptabs { gap: 0; align-items: stretch; max-width: 65%; }
-.pane.titled .ptab { height: auto; line-height: 27px; padding: 0 14px; border: 0; border-right: 1px solid rgba(138, 106, 48, .45); border-radius: 0; background: none; opacity: 1 !important; }
-.pane.titled .ptab.on { background: linear-gradient(rgba(68, 96, 95, 1), rgba(52, 72, 74, 1)); box-shadow: inset 0 -2px 0 #d9a441; }
-.pane.titled .ptools { height: auto; padding: 0; gap: 0; background: none; border: 0; border-radius: 0; opacity: 1 !important; align-items: stretch; }
+body.native .pane { --tab-alpha: 1 !important; }
+.pane.titled .pbar { height: 28px; box-sizing: border-box; align-items: stretch; background: linear-gradient(rgba(54, 72, 71, var(--tab-alpha, 1)), rgba(42, 56, 54, var(--tab-alpha, 1))); border-bottom: 1px solid rgba(138, 106, 48, var(--tab-alpha, 1)); }
+.pane.titled .ptabs { gap: 2px; padding: 2px 2px 0; align-items: stretch; max-width: 65%; }
+.pane.titled .ptab { height: auto; line-height: 25px; padding: 0 14px; border: 0; border-radius: 3px 3px 0 0; background: none; }
+.pane.titled .ptab.on { background: linear-gradient(rgba(68, 96, 95, var(--tab-alpha, 1)), rgba(52, 72, 74, var(--tab-alpha, 1))); box-shadow: inset 0 -2px 0 #d9a441; }
+.pane.titled .ptools { height: auto; padding: 0; gap: 0; background: none; border: 0; border-radius: 0; align-items: stretch; }
 .pane.titled .ptools button { width: 22px; height: auto; font-size: 13px; }                     /* (the buttons of the program: as wide as in the other windows) */
 .pane.titled .ptools .pmin, .pane.titled .ptools .pmax, .pane.titled .ptools .pclose { width: 30px; font-size: 14px; }
 .pane.titled .ptools .pmin { margin-left: 4px; border-left: 1px solid rgba(138, 106, 48, .45); }     /* (a thin line between the two groups) */
 .pane.titled .ptools .pclose:hover { background: #e81123; color: #fff; }
-.pane.titled .pbody::after, .pane.titled .pgrip { display: none !important; }
-.pane.titled.mactitle .pbar { padding-left: 78px; }              /* (the round buttons of the mac lie here, in the middle of the bar: main.rs style_round_buttons) */
+/* the bar below the text (a box that touches the top of its monitor): the same bar turned over; the rules of the floating tabs (.pane.flip) must not reach it */
+.pane.titled.flip .pbar { align-items: stretch; border-bottom: 0; border-top: 1px solid rgba(138, 106, 48, var(--tab-alpha, 1)); }
+.pane.titled.flip .ptabs { padding: 0 2px 2px; }
+.pane.titled.flip .ptab, .pane.titled.flip .ptab.on { border: 0; border-radius: 0 0 3px 3px; }
+.pane.titled.flip .ptab.on { box-shadow: inset 0 2px 0 #d9a441; }
+.pane.titled.flip .ptools { border: 0; border-radius: 0; }
+/* a window of the system */
+body.native .pane.titled .pbar { cursor: default; opacity: 1 !important; transition: none; }
+body.native .pane.titled .ptab, body.native .pane.titled .ptools { opacity: 1 !important; }
+body.native .pane.titled .ptab { line-height: 27px; border-right: 1px solid rgba(138, 106, 48, .45); border-radius: 0; }
+body.native .pane.titled .ptabs { gap: 0; padding: 0; }
+body.native .pane.titled .pbody::after, body.native .pane.titled .pgrip { display: none !important; }
+.pane.titled.mactitle .pbar { padding-left: 78px; }              /* (the round buttons of the mac lie here) */
 .pane.titled.mactitle .pclose { display: none; }
 
 /* a web window with its bar below the page: the same bar and the same tabs as above it (the rule for the tabs of a translation window, .pane.flip .ptab, must not reach them) */

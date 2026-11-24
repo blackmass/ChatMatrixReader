@@ -766,7 +766,7 @@ fn place_input(app: &AppHandle, label: &str, place: &str) -> Result<(), String> 
     let (home, scale) = monitor_at(&w, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
     let box_w = size.width.max(200);
     let box_h = ((46.0 * scale).round() as u32).max(46);
-    let bar = (NATIVE_BAR * scale).round() as i32;
+    let bar = center::pane_bar(label).unwrap_or_else(|| (NATIVE_BAR * scale).round() as i32);          // (the bar of the window the box is next to: it depends on the look of the bar)
     let (bx, by) = placement::send_box(home, place, pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2, bar);
     w.set_position(tauri::PhysicalPosition::new(bx, by)).map_err(e)?;
     w.set_size(tauri::PhysicalSize::new(box_w, box_h)).map_err(e)?;

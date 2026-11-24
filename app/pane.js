@@ -21,7 +21,7 @@ export class Pane {
   // center: { cfg(), dpr(), origin() -> [ox, oy] in pixels, changed(pane) }
   constructor(id, center) {
     this.id = id; this.center = center; this.label = `c${id}`;
-    this.head = center.native ? NATIVE_BAR_H : BAR_H; this.flip = false; this.tiled = ''; this.restoreRect = null;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
+    this.head = this.fullBar() ? NATIVE_BAR_H : BAR_H; this.flip = false; this.tiled = ''; this.restoreRect = null;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
     this.lags = []; this.lmbAt = 0; this.lastDown = -1e9; this.wheelCount = 0;                  // (how long a click takes to reach the page: for the diagnosis in the options)
     this.review = false; this.reviewIdle = 0; this.reviewShown = false; this.zone = false; this.lastInput = -1e9;      // (reading the old chat: see userScrolled)
     this.interactive = true; this.outside = true; this.hover = false; this.wasThrough = null;      // (the state of the mouse: see tick)
@@ -29,6 +29,7 @@ export class Pane {
     this.el = document.createElement('div'); this.el.className = 'pane'; this.el.dataset.id = String(id);
     this.el.innerHTML = '<div class="pbar"><span class="ptabs"></span><span class="pspace"></span><span class="ptools"><button class="presearch" tabindex="-1" title="매트릭스 다시 찾기">⟳</button><button class="pvoice" tabindex="-1" title="음성인식 켜기" data-state="off"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor"/><path class="waves" d="M11.2 5.4a3.6 3.6 0 0 1 0 5.2M13 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button><button class="poptions" tabindex="-1" title="옵션">⚙</button><button class="pclose" tabindex="-1">✕</button></span></div><div class="pbody"><div class="pbg"></div><div class="pwidgets" data-notr></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div><button class="ptobottom" tabindex="-1" title="이전 대화를 보는 중입니다. 누르면 맨 아래(최신 글)로 돌아갑니다">↓ 맨 아래로</button>';
     this.tabs = this.el.querySelector('.ptabs');
+    this.el.classList.toggle('titled', this.fullBar());
     document.body.append(this.el);
     this.widgets = new WidgetLayer({ root: this.el.querySelector('.pwidgets'), registry: center.registry });     // (the widgets of the window: its host's, like in 3.1.1)
     this.widgetIds = '';
@@ -58,6 +59,13 @@ export class Pane {
     if (center.native) this.titleBar();
     sizeEdges(this, () => !this.opt('lock_window', false) && !this.tiled);         // (the corner at the bottom right and the edges left, right, bottom and the corner bottom left; the top is the bar)
     this.update();
+  }
+  // the bar as one band across the window (css .titled): always in a window of the system (it is its title bar), else when the option "바 모양" says so. The band is higher than the floating tabs.
+  fullBar() { return this.center.native || this.center.cfg().bar_style === 'full'; }
+  barStyle() {
+    const full = this.fullBar(), head = full ? NATIVE_BAR_H : BAR_H;
+    this.el.classList.toggle('titled', full);
+    if (head !== this.head) { this.head = head; this.layout(); this.center.changed(this); }              // (the text area stays where it is: the bar is above it, or below it)
   }
   confOf(id) { const cfg = this.center.cfg(); return id === MAIN ? null : cfg.child_windows.find(c => c.id === id) || winconf.newConf(id, [...winconf.KNOWN, winconf.ETC]); }
   optOf(id, key, dflt) { const cfg = this.center.cfg(); return id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? dflt) : winconf.opt(this.confOf(id), cfg, key, dflt); }
@@ -179,6 +187,7 @@ export class Pane {
   update() {
     const cfg = this.center.cfg();
     this.syncChats();
+    this.barStyle();
     const sg = this.savedGeometry() || '';
     if (sg !== this.seenGeo) {                                        // (the saved place changed: when it is not this window's own echo, someone else moved it: the options, the program)
       this.seenGeo = sg;

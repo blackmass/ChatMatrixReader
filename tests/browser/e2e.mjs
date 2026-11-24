@@ -868,6 +868,18 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
     const b2 = await pn.boundingBox();
     ok(Math.abs(b2.x + b2.width - (b1.x + b1.width)) < 3, 'center/edges: the left edge keeps the right side where it is: ' + JSON.stringify([b1, b2]));
   }
+  // the look of the bar ("바 모양"): the band across the window; the text stays where it is (the bar is above it: it grows upwards), the tabs have no border of the floating tabs, and it can be turned back
+  {
+    const pn = cp.locator('.pane').last(), t0 = await pn.locator('.pbody').boundingBox(), h0 = (await pn.locator('.pbar').boundingBox()).height;
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ bar_style: 'full' })));
+    await until(async () => (await pn.evaluate(e => e.classList.contains('titled'))), 'bar style: the band look is on', 4000);
+    const t1 = await pn.locator('.pbody').boundingBox(), h1 = (await pn.locator('.pbar').boundingBox()).height;
+    ok(Math.abs(t1.y - t0.y) < 1.5 && Math.abs(t1.height - t0.height) < 1.5 && h0 === 22 && h1 === 28, 'bar style: the text area stays where it is, the bar is 28 high instead of 22: ' + JSON.stringify([t0, t1, h0, h1]));
+    ok(await pn.locator('.ptab').first().evaluate(e => getComputedStyle(e).borderTopWidth === '0px'), 'bar style: a tab of the band has no border of its own');
+    await pn.screenshot({ path: path.join(OUT, 'bar_full.png') });
+    await control.evaluate(() => import('./settings.js').then(m => m.set({ bar_style: 'tabs' })));
+    await until(async () => !(await pn.evaluate(e => e.classList.contains('titled'))) && (await pn.locator('.pbar').boundingBox()).height === 22, 'bar style: and back to the floating tabs', 4000);
+  }
   // the size of the window moves the lines by itself (a smaller window and a bigger one): that is not the user reading the old chat
   {
     const pn = cp.locator('.pane').last(), eb = await pn.locator('.e-b').boundingBox();
