@@ -573,7 +573,16 @@ fn native_action(window: tauri::WebviewWindow, action: String) -> Result<(), Str
     match action.as_str() {
         "drag" => window.start_dragging().map_err(e),
         "min" => window.minimize().map_err(e),
-        "max" => if window.is_maximized().unwrap_or(false) { window.unmaximize().map_err(e) } else { window.maximize().map_err(e) },
+        // the double click on a title bar: on the mac the system does it as it does for every window (the setting of the user: zoom or minimize; zoom also gives back a window that was laid on a half of the screen)
+        "max" => {
+            #[cfg(target_os = "macos")]
+            {
+                win::title_double_click(hwnd_of(&window)?);
+                Ok(())
+            }
+            #[cfg(not(target_os = "macos"))]
+            if window.is_maximized().unwrap_or(false) { window.unmaximize().map_err(e) } else { window.maximize().map_err(e) }
+        }
         _ => Err(format!("unknown action {action}")),
     }
 }

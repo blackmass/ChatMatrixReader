@@ -411,6 +411,21 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setAlphaValue: alpha]; });
 }
 
+/// A double click on a title bar that the page draws itself, answered as the system does it for its own title bars: what the user chose in the settings of the Mac ("Double-click a window's title bar to":
+/// zoom, which is also what puts back a window laid on a half of the screen / minimize / nothing). Nothing chosen = zoom.
+pub fn title_double_click(hwnd: isize) {
+    on_main(|| unsafe {
+        let defaults: *mut AnyObject = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let value: *mut AnyObject = msg_send![&*defaults, stringForKey: ns_string("AppleActionOnDoubleClick")];
+        let w = obj(hwnd);
+        match string_of(value).as_str() {
+            "None" => {}
+            "Minimize" => { let _: () = msg_send![w, performMiniaturize: std::ptr::null_mut::<AnyObject>()]; }
+            _ => { let _: () = msg_send![w, performZoom: std::ptr::null_mut::<AnyObject>()]; }
+        }
+    });
+}
+
 /// A window the mouse goes through (click-through): the clicks and the wheel go to what is behind it.
 pub fn set_clickthrough(hwnd: isize, on: bool) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setIgnoresMouseEvents: Bool::new(on)]; });

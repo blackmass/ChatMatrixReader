@@ -139,14 +139,18 @@ body.mac .webpane .paddr.editing { background: rgba(20, 24, 26, .35); }         
 .webpane.flip .paddrbar { border-top: 0; border-bottom: 1px solid #5b4a22; }
 .webpane.flip .pbody::after { border-top: 1px solid #8a6a30; border-bottom: 0; }
 
-/* A window of the system without its own frame (3.2.1 test, pane.js titleBar): the bar is the title bar: one solid strip over the whole width, the tabs and the buttons fill it from top to bottom */
+/* A window of the system without its own frame (3.2.1 test, pane.js titleBar): the bar is the title bar: one solid strip over the whole width, the tabs and the buttons fill it from top to bottom.
+   The system has the frame and the sizing: ours is never drawn (not even while the mouse is in), nor the corner to resize by. */
 body.native { margin: 0; }
 .pane.titled .pbar { height: 28px; box-sizing: border-box; align-items: stretch; cursor: default; background: linear-gradient(#364847, #2a3836); border-bottom: 1px solid #8a6a30; opacity: 1 !important; transition: none; }
 .pane.titled .ptabs { gap: 0; align-items: stretch; max-width: 65%; }
 .pane.titled .ptab { height: auto; line-height: 27px; padding: 0 14px; border: 0; border-right: 1px solid rgba(138, 106, 48, .45); border-radius: 0; background: none; opacity: 1 !important; }
 .pane.titled .ptab.on { background: linear-gradient(rgba(68, 96, 95, 1), rgba(52, 72, 74, 1)); box-shadow: inset 0 -2px 0 #d9a441; }
 .pane.titled .ptools { height: auto; padding: 0; gap: 0; background: none; border: 0; border-radius: 0; opacity: 1 !important; align-items: stretch; }
-.pane.titled .ptools button { width: 40px; height: auto; font-size: 14px; }
+.pane.titled .ptools button { width: 22px; height: auto; font-size: 13px; }                     /* (the buttons of the program: as wide as in the other windows) */
+.pane.titled .ptools .pmin, .pane.titled .ptools .pmax, .pane.titled .ptools .pclose { width: 30px; font-size: 14px; }
+.pane.titled .ptools .pmin { margin-left: 4px; border-left: 1px solid rgba(138, 106, 48, .45); }     /* (a thin line between the two groups) */
 .pane.titled .ptools .pclose:hover { background: #e81123; color: #fff; }
+.pane.titled .pbody::after, .pane.titled .pgrip { display: none !important; }
 .pane.titled.mactitle .pbar { padding-left: 78px; }              /* (the round buttons of the mac lie here) */
 .pane.titled.mactitle .pclose { display: none; }

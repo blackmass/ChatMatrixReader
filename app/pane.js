@@ -63,7 +63,7 @@ export class Pane {
   optOf(id, key, dflt) { const cfg = this.center.cfg(); return id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? dflt) : winconf.opt(this.confOf(id), cfg, key, dflt); }
   conf() { return this.confOf(this.id); }
   // (a window of the system, center.js `native`: the system moves it, sizes it and has it in front: locked for our own frame, and nothing to go through)
-  opt(key, dflt) { if (this.center.native && (key === 'lock_window' || key === 'click_through' || key === 'hover_clear')) return key === 'lock_window'; return this.optOf(this.id, key, dflt); }
+  opt(key, dflt) { if (this.center.native && (key === 'lock_window' || key === 'click_through' || key === 'hover_clear' || key === 'hide_tools' || key === 'hide_tabs')) return key === 'lock_window'; return this.optOf(this.id, key, dflt); }          // (the bar is the title bar: its tabs and buttons are always there)
   // an option of a chat: what belongs to the window (place, order, blur, ...) follows the host of the tabs, the rest (the look of the text, the filter) is its own
   copt(id, key, dflt) { return id === this.id || winconf.HOST_KEYS.has(key) ? this.opt(key, dflt) : this.optOf(id, key, dflt); }
 
@@ -105,14 +105,17 @@ export class Pane {
     q('.pbar').addEventListener('mousedown', e => { if (e.target.tagName === 'BUTTON') e.preventDefault(); });
   }
   // A window of the system without the frame of the system (the 3.2.1 test): our bar is its title bar. The system moves it (mouse down on the bar), a double click maximizes it; on Windows the three buttons
-  // are ours (the close one is the old ✕); on the mac the round buttons of the system lie over the left end of the bar.
+  // are ours (the close one is the old ✕); on the mac the round buttons of the system lie over the left end of the bar (the mac has them in its own place; the bar only leaves it empty).
   titleBar() {
     const bar = this.el.querySelector('.pbar'), tools = this.el.querySelector('.ptools'), act = a => invoke('native_action', { action: a }).catch(() => {});
     this.el.classList.add('titled');
-    if (isMac) { this.el.classList.add('mactitle'); return; }
-    const mk = (cls, txt, title, a) => { const b = document.createElement('button'); b.className = cls; b.tabIndex = -1; b.title = title; b.textContent = txt; b.onclick = () => act(a); return b; };
-    tools.insertBefore(mk('pmin', '\u2013', '최소화', 'min'), this.el.querySelector('.pclose'));
-    tools.insertBefore(mk('pmax', '\u25A1', '최대화 / 이전 크기', 'max'), this.el.querySelector('.pclose'));
+    if (isMac) { this.el.classList.add('mactitle'); }
+    else {
+      const mk = (cls, txt, title, a) => { const b = document.createElement('button'); b.className = cls; b.tabIndex = -1; b.title = title; b.textContent = txt; b.onclick = () => act(a); return b; };
+      tools.insertBefore(mk('pmin', '\u2013', '최소화', 'min'), this.el.querySelector('.pclose'));
+      tools.insertBefore(mk('pmax', '\u25A1', '최대화 / 이전 크기', 'max'), this.el.querySelector('.pclose'));
+    }
+    // (both systems: the page has the bar, so it asks the system to move the window, and the double click is the system's own: the mac does what the user chose in its settings)
     bar.addEventListener('mousedown', e => {
       if (e.button !== 0 || e.target.closest('button') || (this.chats.size > 1 && e.target.closest('.ptab'))) return;
       e.preventDefault(); act(e.detail >= 2 ? 'max' : 'drag');
