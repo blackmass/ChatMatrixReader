@@ -800,7 +800,12 @@ extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _inf
         if target.is_none() {
             if let Ok(zones) = ZONES.try_lock() {
                 for &(h, _down, r) in zones.iter() {
-                    if at.x >= r[0] && at.x < r[2] && at.y >= r[1] && at.y < r[3] { target = Some(h); break; }
+                    if at.x >= r[0] && at.x < r[2] && at.y >= r[1] && at.y < r[3] {
+                        // a window of another program (the Finder, a browser) stands over the center here: the turn is for it, not for the window under it. Not locked either: the next turn of the gesture asks again.
+                        let center = (-h) / 100000 - 1;
+                        if covered_by_other(center, at.x, at.y) { continue; }
+                        target = Some(h); break;
+                    }
                 }
             }
         }
@@ -850,8 +855,29 @@ pub fn start_wheel_hook() {}
 
 /// The panes of a control center that want the wheel (in place of the earlier ones of that center): (key, rectangle in pixels). The tap works in points (top left origin).
 /// false = the tap cannot be had yet (no permission).
-/// (Windows: the window of a control center, for the check of what stands over it: not done on a Mac yet)
-pub fn set_center_hwnd(_center: isize, _hwnd: isize) {}
+static CENTER_NUMS: Mutex<Vec<(isize, isize, isize)>> = Mutex::new(Vec::new());        // the window of each control center: (center, handle, the number the system has for it)
+/// The window of a control center (told by the page of the center): the wheel is not taken where a window of another program stands over it. The number is asked for once for a window (the main thread
+/// is asked: not from the tap).
+pub fn set_center_hwnd(center: isize, hwnd: isize) {
+    if CENTER_NUMS.lock().map(|l| l.iter().any(|e| e.0 == center && e.1 == hwnd)).unwrap_or(false) { return; }
+    let number: isize = on_main(|| unsafe { let n: isize = msg_send![obj(hwnd), windowNumber]; n });
+    if let Ok(mut l) = CENTER_NUMS.lock() { l.retain(|e| e.0 != center); l.push((center, hwnd, number)); }
+}
+
+/// Does a window of another program stand over the window of this center at this point (points, top left origin)? The windows on the screen from the front to the back (windows(): the system's own order) are
+/// looked at until the center is reached: the first one of another program, in the layers of the windows and the bars of the menu and the dock (not the layers of the screen saver and the pointer), that has the
+/// point inside is it. The windows of this program are not counted (the centers go through the mouse; the other windows of ours stand under the mouse of the wheel as they did).
+fn covered_by_other(center: isize, x: f64, y: f64) -> bool {
+    let number = CENTER_NUMS.try_lock().ok().and_then(|l| l.iter().find(|e| e.0 == center).map(|e| e.2)).unwrap_or(0);
+    if number <= 0 { return false; }
+    let me = std::process::id() as i32;
+    for w in windows() {
+        if w.number as isize == number { return false; }                             // (the center itself: nothing above it covers)
+        if w.pid == me || w.layer >= 100 || w.w < 1.0 || w.h < 1.0 { continue; }
+        if x >= w.x && x < w.x + w.w && y >= w.y && y < w.y + w.h { return true; }
+    }
+    false
+}
 
 pub fn set_pane_zones(center: isize, zones: Vec<(isize, [f64; 4])>) -> bool {
     let owner = |k: isize| (-k) / 100000 - 1 == center;
