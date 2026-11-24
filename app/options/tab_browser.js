@@ -4,12 +4,15 @@ import { tr } from '../core/i18n.js';
 import * as B from '../core/browsers.js';
 import { nameFor } from '../winname.js';
 import * as settings from '../settings.js';
-import { without } from '../core/winconf.js';
+import { without, windowKind, kindPatch } from '../core/winconf.js';
 import { goneOwner, onGoneChange, goneNote } from './orphans.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const btn = (text, cls = '') => el('button', cls, text);
 const textBox = () => { const i = el('input'); i.type = 'text'; i.spellcheck = false; i.autocomplete = 'off'; return i; };          // (the style sheet of the options styles `input[type=text]`: a box without the type is not styled)
+
+// what each kind of a web window means (it is never an ordinary window: the program keeps its pages above the game, see winconf.windowMode)
+const KIND_HINTS = { top: '게임 위에 항상 떠 있습니다.', wow: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다.' };
 
 // the window the rows show: 'b<number>' = a browser window, 'w<number>' = a web window of a plugin (its entry in the list of windows); `page`: 'settings' or 'bookmarks'
 let current = 'b' + B.DEFAULT_ID, page = 'settings';
@@ -58,11 +61,10 @@ const browserCard =
       { type: 'button', label: '로그인 정보', button: '로그인 정보 지우기', keywords: '쿠키 로그인 지우기 삭제 세션 초기화',
         note: '이 창이 보관한 로그인 정보(쿠키)를 지웁니다. 창이 열려 있으면 그 창의 것을 지우고, 닫혀 있으면 보관 폴더를 지웁니다.',
         action: () => emit('browser-command', { cmd: 'clear', id: curNum() }) },
-      { key: 'browser_topmost', type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시', show: hasWindow, def: true,
-        get: cfg => cur(cfg).topmost, patch: (cfg, v) => ({ browser_windows: list(cfg).map(b => (b.id === cur(cfg).id ? { ...b, topmost: v, topmost_wow_only: !v } : b)) }) },          // (one of the two is always on)
-      { key: 'browser_topmost_wow_only', type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤', show: hasWindow, def: false,
-        note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. "항상 맨 위에"와 둘 중 하나가 늘 켜져 있습니다.',
-        get: cfg => cur(cfg).topmost_wow_only, patch: (cfg, v) => ({ browser_windows: list(cfg).map(b => (b.id === cur(cfg).id ? { ...b, topmost_wow_only: v, topmost: !v } : b)) }) },
+      { key: 'browser_kind', type: 'select', label: '창 종류', def: 'top', keywords: '항상 위 맨 위에 와우 위에만 최상위 topmost', show: hasWindow,
+        options: [['top', '항상 위'], ['wow', '와우 위에만']],
+        hints: KIND_HINTS,
+        get: cfg => windowKind(cur(cfg)), patch: (cfg, v) => ({ browser_windows: list(cfg).map(b => (b.id === cur(cfg).id ? { ...b, ...kindPatch(v) } : b)) }) },
       mine('idle_alpha', 1, { type: 'percent', min: 0.2, label: '마우스가 벗어나면 진하기', keywords: '투명도 불투명 흐리게 반투명 마우스 벗어나면 fade', show: hasWindow,
         note: '마우스가 창 위에 있을 때는 늘 선명하고, 벗어나면 잠시 뒤 이 진하기로 흐려집니다. 100%는 흐려지지 않습니다.' }),
       mine('hide_ui', false, { type: 'check', label: '평소에 인터페이스 숨기기', keywords: '바 주소 테두리 프레임 숨김 가리기 인터페이스 hide', show: hasWindow,
@@ -89,9 +91,10 @@ const webCard =
       webRow('open_mode', 'never', { type: 'select', label: '열리는 때', keywords: '열기 닫기 항상 플러그인 웹창',
         options: [['always', '프로그램을 켤 때 항상'], ['voice', '음성 인식을 켤 때만'], ['never', '닫아 둠 (직접 열 때만)']],
         hints: { always: '프로그램을 켤 때 열립니다.', voice: '음성인식을 켜면 열리고 끄면 닫힙니다.', never: '플러그인이 열 때만 열립니다.' } }),
-      webRow('topmost', true, { type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시' }, v => ({ topmost: v, topmost_wow_only: !v })),
-      webRow('topmost_wow_only', false, { type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
-        note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. "항상 맨 위에"와 둘 중 하나가 늘 켜져 있습니다.' }, v => ({ topmost_wow_only: v, topmost: !v })),
+      { key: 'webwin_kind', type: 'select', label: '창 종류', def: 'top', keywords: '항상 위 맨 위에 와우 위에만 최상위 topmost',
+        options: [['top', '항상 위'], ['wow', '와우 위에만']],
+        hints: KIND_HINTS,
+        get: cfg => windowKind(webConf(cfg)), patch: (cfg, v) => ({ child_windows: (cfg.child_windows || []).map(c => (c.id === curNum() ? { ...c, ...kindPatch(v) } : c)) }) },
       webRow('hide_ui', false, { type: 'check', label: '평소에 인터페이스 숨기기', keywords: '바 주소 테두리 프레임 숨김 가리기 인터페이스 hide',
         note: '마우스가 창 위에 없을 때는 제목 바와 테두리를 숨기고 웹 페이지만 보입니다. 마우스를 올리면 바로 나타나고, 벗어나면 잠시 뒤 천천히 사라집니다.' }),
       webRow('click_through', false, { type: 'check', label: '클릭 관통', keywords: '마우스 관통 클릭 통과 click through 투명',

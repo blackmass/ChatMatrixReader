@@ -3,7 +3,7 @@
 // The key of a row is the name an extra window uses; the main window's differs for a few (options.js: MAIN_KEY).
 import { nameFor } from '../winname.js';
 import { ALL } from '../winmanager.js';
-import { VOICE_ID, dockHost, dockedOf, without } from '../core/winconf.js';
+import { VOICE_ID, dockHost, dockedOf, without, windowKind, kindPatch } from '../core/winconf.js';
 import { goneOwner, onGoneChange, goneNote } from './orphans.js';
 import { entries as fontItems } from '../fonts.js';
 import { registry as widgetRegistry } from '../widgets/defaults.js';
@@ -23,6 +23,13 @@ const tab = {
   id: 'windows', title: '창', subtitle: '번역창 목록과 모양',
   cards: [
     { title: '이 창', rows: [
+      { win: true, key: 'window_kind', virtual: ['topmost', 'topmost_wow_only'], type: 'select', label: '창 종류', def: 'top', keywords: '일반 창 항상 위 맨 위에 와우 위에만 최상위 작업 표시줄 topmost',
+        options: x => (webKind(x) ? [['top', '항상 위'], ['wow', '와우 위에만']] : [['normal', '일반 창'], ['top', '항상 위'], ['wow', '와우 위에만']]),
+        vget: o => windowKind(o), vpatch: k => kindPatch(k),
+        hints: {
+          normal: '작업 표시줄(맥은 독)에 나오는 보통 창입니다. 제목 표시줄, 크기 조절, 최대화, 창 배치는 운영체제가 합니다. 게임 뒤로 숨을 수 있으니 다른 모니터에서 쓰세요.',
+          top: '게임 위에 항상 떠 있습니다.',
+          wow: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다.' } },
       { win: true, key: 'dock_to', type: 'select', label: '탭으로 합칠 창', keywords: '붙이기 합치기 탭 종속 다른 창 도킹 dock merge tab', show: (c, x) => child(x),
         options: x => {
           const l = x.cfg().child_windows;
@@ -37,11 +44,11 @@ const tab = {
         show: (c, x) => dockHost(x.cfg().child_windows, x.sel) > 0 || dockedOf(x.cfg().child_windows, x.sel).length > 0,
         note: ['다른 탭을 보는 동안 이 탭에 새 글이 오면 탭 이름 앞에 주황색 점을 띄웁니다. 그 탭을 누르면 사라집니다.',
           '귓속말처럼 놓치기 싫은 글을 따로 탭에 모아 둘 때 쓰세요. 알림이 붙은 탭은 "평소에 이름 탭 숨기기"와 클릭 관통에 상관없이 보입니다.'] },
-      { win: true, key: 'hide_tools', type: 'check', label: '평소에 기능 버튼 숨기기', keywords: '아이콘 버튼 숨김 가리기 인터페이스 설정 닫기',
+      { win: true, key: 'hide_tools', type: 'check', label: '평소에 기능 버튼 숨기기', unsupported: (c, x) => (isNative(c, x) ? '일반 창에서는 항상 보입니다' : ''), keywords: '아이콘 버튼 숨김 가리기 인터페이스 설정 닫기',
         note: '창 위쪽 오른쪽의 기능 버튼들(번역·음성·설정·닫기)을 마우스가 창 밖에 있을 때 숨깁니다. 마우스를 창 안으로 가져가면 나타납니다.' },
-      { win: true, key: 'hide_tabs', type: 'check', label: '평소에 이름 탭 숨기기', keywords: '탭 이름 숨김 가리기 인터페이스',
+      { win: true, key: 'hide_tabs', type: 'check', label: '평소에 이름 탭 숨기기', unsupported: (c, x) => (isNative(c, x) ? '일반 창에서는 항상 보입니다' : ''), keywords: '탭 이름 숨김 가리기 인터페이스',
         note: '창 위쪽 왼쪽의 이름 탭을 마우스가 창 밖에 있을 때 숨깁니다. 마우스를 창 안으로 가져가면 나타납니다.' },
-      { win: true, key: 'hide_frame', type: 'check', label: '평소에 프레임 숨기기', keywords: '테두리 스크롤 크기 조절 숨김 가리기 인터페이스',
+      { win: true, key: 'hide_frame', type: 'check', label: '평소에 프레임 숨기기', unsupported: (c, x) => (isNative(c, x) ? '일반 창에는 프레임이 없습니다' : ''), keywords: '테두리 스크롤 크기 조절 숨김 가리기 인터페이스',
         note: ['바깥 사각 프레임, 스크롤 막대, 오른쪽 아래의 크기 조절 손잡이를 마우스가 창 밖에 있을 때 숨깁니다.',
           '마우스를 창 안으로 가져가면 나타납니다.'] },
       { win: true, key: 'name', type: 'text', label: '이름', placeholder: '창 이름', keywords: '창 이름 탭 제목 메인',
@@ -122,57 +129,52 @@ const tab = {
     ] },
     { title: '위젯', note: '창에 붙이는 작은 부품입니다. 창마다 따로 켜고 배치합니다 (창 1을 따르지 않습니다). 켜 두면 부품 위에 마우스를 올렸을 때 자세한 상태가 보입니다.',
       rows: [widgetsRow(widgetRegistry)] },
-    { title: '위치', rows: [
-      { win: true, key: 'lock_window', type: 'check', label: '창 고정', keywords: '이동 크기 조절 잠금 드래그 고정 lock',
+    { title: '위치와 모양', rows: [
+      { win: true, key: 'lock_window', type: 'check', label: '창 고정', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 운영체제가 이동과 크기를 정합니다' : ''), keywords: '이동 크기 조절 잠금 드래그 고정 lock',
         note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다. 탭을 누르다가 창이 밀리는 일을 막습니다.' },
-      { type: 'notice', label: '', show: (c, x) => isNative(c, x), text: '"항상 맨 위에"와 "와우 위에만"이 둘 다 꺼져 있어서, 이 창은 작업 표시줄(맥은 독)에 나오는 일반 창입니다. 제목 표시줄과 테두리는 운영체제의 것이고, 옮기기, 크기 바꾸기, 최대화, 가장자리에 붙이기(스냅)도 운영체제 기능을 그대로 씁니다. 이 창에서는 항상 위, 클릭 관통, 배경 흐림은 쓰이지 않습니다.' },
-      { win: true, key: 'topmost', type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시',
-        note: '게임 위에 항상 떠 있습니다. 번역창은 둘 다 끄면 일반 창이 됩니다 (작업 표시줄에 나오고, 윈도우의 창 배치 기능을 쓸 수 있습니다). 웹창은 둘 중 하나가 늘 켜져 있습니다.',
-        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost' }, v); if (v) ctx.put({ win: true, key: 'topmost_wow_only' }, false); else if (webKind(ctx)) ctx.put({ win: true, key: 'topmost_wow_only' }, true); } },
-      { win: true, key: 'topmost_wow_only', type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
-        note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.',
-        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost_wow_only' }, v); if (v) ctx.put({ win: true, key: 'topmost' }, false); else if (webKind(ctx)) ctx.put({ win: true, key: 'topmost' }, true); } },
+      { key: 'bar_style', type: 'select', label: '바 모양', keywords: '위쪽 바 탭 이름 꽉 찬 밴드 테마 제목 표시줄 모양 스타일 bar style theme',
+        options: [['tabs', '떠 있는 탭'], ['full', '꽉 찬 바']],
+        hints: { tabs: '이름 탭과 버튼이 따로 떠 있고 사이가 비어 게임이 비쳐 보입니다 (3.1.1과 같은 모양).', full: '바가 창 폭 전체를 채우는 한 줄입니다 (일반 창과 같은 모양, 조금 더 높습니다).' },
+        note: '항상 맨 위에 / 와우 위에만 번역창의 위쪽 바 모양입니다. 일반 창(작업 표시줄에 나오는 창)은 늘 "꽉 찬 바"입니다. 웹창도 늘 "꽉 찬 바"입니다.' },
     ] },
-    { title: '배경과 조작', rows: [
-      { win: true, key: 'blur', type: 'select', label: '배경 흐림', options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴', show: (c, x) => !isNative(c, x),
+    { title: '배경', rows: [
+      { win: true, key: 'blur', type: 'select', label: '배경 흐림', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 아직 지원하지 않습니다' : ''), options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴',
         note: '윈도우의 문제로, 흐림을 켠 창이 여러 개 있으면 컴퓨터 전체가 느려질 수 있습니다. 한두 개 창에서만 쓰는 것을 권합니다.' },
-      { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, max: 0.99, label: '배경 진하기', keywords: '투명도 불투명',
+      { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, max: 0.99, label: '배경 진하기', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 아직 지원하지 않습니다' : ''), keywords: '투명도 불투명',
         note: '99%까지 지정할 수 있습니다. 100%로 두면 웹뷰(엔진)가 글자를 그리는 방식이 수시로 바뀌어 글자 굵기와 밝기가 흔들리는 문제가 있어 제한했습니다. 눈으로는 100%와 구분되지 않습니다.' },
-      { win: true, key: 'tab_opacity', type: 'percent', min: 0.05, label: '탭 배경 진하기', keywords: '투명도 불투명 탭 상단 바 아이콘 버튼',
+      { win: true, key: 'tab_opacity', type: 'percent', min: 0.05, label: '탭 배경 진하기', unsupported: (c, x) => (isNative(c, x) ? '일반 창의 바는 늘 진하게 보입니다' : ''), keywords: '투명도 불투명 탭 상단 바 아이콘 버튼',
         note: '창 위쪽의 이름 탭과 기능 버튼 상자의 배경과 테두리가 얼마나 진한지 정합니다. 100%면 또렷하게 보이고, 낮추면 흐려져 게임 화면 위에서 덜 거슬립니다. 글자는 그대로입니다.' },
       { win: true, key: 'text_opacity', type: 'percent', min: 0.2, label: '글 진하기', keywords: '투명도 불투명' },
-      { win: true, key: 'click_through', type: 'check', label: '클릭 관통', keywords: '마우스 관통 클릭 통과 click through', show: (c, x) => !isNative(c, x),
+    ] },
+    { title: '마우스와 클릭 관통', rows: [
+      { win: true, key: 'click_through', type: 'check', label: '클릭 관통', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 클릭 관통을 쓸 수 없습니다' : ''), keywords: '마우스 관통 클릭 통과 click through',
         note: ['창이 클릭을 받지 않고 뒤의 게임으로 보냅니다. 아래 조작 키를 누르고 있으면 이 창을 조작할 수 있습니다. 옵션은 Ctrl+Alt+O 또는 트레이 아이콘으로 엽니다. 와우가 없을 때는 관통되지 않고 그대로 보입니다.',
           '창의 모양(이름 탭, 기능 버튼, 프레임)은 위의 "평소에 … 숨기기" 설정을 따릅니다. 관통 중에는 보이기만 하고 누를 수는 없습니다 (조작 키를 누르면 누를 수 있습니다).'] },
-      { key: 'auto_copy', type: 'check', label: '자동 복사', keywords: '복사 선택 글 마우스 나갈 때 copy',
-        note: '창에서 글을 선택한 뒤 마우스가 창을 벗어나면 선택한 글이 자동으로 복사됩니다. 글이 선택되어 있을 때만 복사합니다.' },
-      { key: 'wheel_through', type: 'check', label: '관통 중 휠 스크롤 허용', keywords: '휠 스크롤 이전 대화 관통 wheel 웹창 미니 브라우저',
-        show: (c, x) => !!x.get({ win: true, key: 'click_through' }, c) || anyWebThrough(c), note: [
+      { win: true, key: 'hover_clear', type: 'check', label: '관통 창 숨기기', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 클릭 관통을 쓸 수 없습니다' : x.get({ win: true, key: 'click_through' }, c) ? '' : '클릭 관통을 켜면 사용합니다'), keywords: '마우스 올리면 투명 호버 지우기 가리기 hover',
+        note: [
+          '클릭 관통일 때 마우스를 창 위로 가져가면 창이 완전히 투명해져 뒤의 게임이 보입니다. 아래 조작 키를 누르고 있으면 투명해지지 않습니다.',
+          "이 옵션이 켜진 창에서는 '관통 중 휠 스크롤 허용'과 '관통 중 링크 보기 허용'이 적용되지 않습니다 (뒤의 게임 채팅창을 그대로 쓰는 용도).",
+          '조작 키를 눌러 조작 가능한 상태가 되면 평소와 같습니다.'] },
+      { key: 'wheel_through', type: 'check', label: '관통 중 휠 스크롤 허용', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 클릭 관통을 쓸 수 없습니다' : x.get({ win: true, key: 'click_through' }, c) || anyWebThrough(c) ? '' : '클릭 관통을 켜면 사용합니다'), keywords: '휠 스크롤 이전 대화 관통 wheel 웹창 미니 브라우저',
+        note: [
           '꺼져 있으면 클릭 관통 중에는 (링크 설명 보기를 빼면) 아무 조작도 되지 않습니다.',
           '켜면 마우스를 창 위에 두고 휠을 위로 올려 이전 대화를 볼 수 있습니다 (맨 아래까지 내리면 다시 관통).',
           '클릭 관통을 켠 미니 브라우저(웹창)도 휠로 페이지를 스크롤할 수 있게 됩니다. 이때 그 창 위의 휠은 게임이 아닌 웹 페이지가 받습니다.',
           '글자가 자동으로 사라지는 중이거나 사라진 상태에서는 휠을 아래로 내려도 다시 나타납니다 (이때만 아래 휠도 게임이 아닌 이 창이 받습니다).',
           "'관통 창 숨기기'가 켜진 창에서는 이 설정이 적용되지 않습니다 (뒤의 게임 채팅을 쓰는 중이라 휠은 게임 것입니다)."] },
-      { key: 'through_tips', type: 'check', label: '관통 중 링크 보기 허용', keywords: '툴팁 링크 아이템 퀘스트 마우스 올리기 관통 tooltip item quest hover',
-        show: (c, x) => !!x.get({ win: true, key: 'click_through' }, c), note: [
+      { key: 'through_tips', type: 'check', label: '관통 중 링크 보기 허용', unsupported: (c, x) => (x.get({ win: true, key: 'click_through' }, c) ? '' : isNative(c, x) ? '일반 창은 클릭 관통을 쓸 수 없습니다' : '클릭 관통을 켜면 사용합니다'), keywords: '툴팁 링크 아이템 퀘스트 마우스 올리기 관통 tooltip item quest hover',
+        note: [
           '클릭 관통 중에도 채팅의 링크(아이템, 퀘스트 등)에 마우스를 올리면 설명이 뜹니다. 마우스는 게임으로 그대로 전달되고, 설명만 창에 그려집니다.',
           '끄면 클릭 관통 중에는 설명이 뜨지 않습니다 (조작 가능한 상태에서는 늘 뜹니다).',
           "'관통 창 숨기기'가 켜진 창에서는 마우스를 올리면 창이 투명해지므로 설명도 뜨지 않습니다."] },
-      { key: 'bar_style', type: 'select', label: '바 모양', keywords: '위쪽 바 탭 이름 꽉 찬 밴드 테마 제목 표시줄 모양 스타일 bar style theme',
-        options: [['tabs', '떠 있는 탭'], ['full', '꽉 찬 바']],
-        hints: { tabs: '이름 탭과 버튼이 따로 떠 있고 사이가 비어 게임이 비쳐 보입니다 (3.1.1과 같은 모양).', full: '바가 창 폭 전체를 채우는 한 줄입니다 (일반 창과 같은 모양, 조금 더 높습니다).' },
-        note: '항상 맨 위에 / 와우 위에만 번역창의 위쪽 바 모양입니다. 일반 창(작업 표시줄에 나오는 창)은 늘 "꽉 찬 바"입니다. 웹창도 늘 "꽉 찬 바"입니다.' },
-      { key: 'bar_fullscreen', type: 'check', label: '위쪽 바 더블클릭으로 전체 화면', keywords: '전체 화면 최대화 더블클릭 모니터 꽉 채우기 절반 배치 스냅',
-        note: ['켜면 번역창과 웹창(미니 브라우저, 플러그인 웹창)의 위쪽 바(이름 탭 옆의 빈 곳)를 더블클릭해서 창이 있는 모니터를 꽉 채우고, 다시 더블클릭해서 원래 크기와 위치로 돌아갑니다. 작업 표시줄, 메뉴 막대, 독은 가리지 않습니다.', '바 우클릭 메뉴에 "전체 화면"이 생기고, 그 안에서 위쪽·아래쪽·왼쪽·오른쪽 절반과 네 모서리 4분의 1을 고를 수 있습니다. 꽉 찬 동안에는 마우스로 옮기거나 크기를 바꿀 수 없고, 이 상태는 저장되지 않아서 프로그램을 다시 켜면 원래 크기로 시작합니다. "창 고정"이 켜진 창에는 적용되지 않습니다.'] },
+      { win: true, key: 'interact_keys', type: 'keys', label: '조작 키', unsupported: (c, x) => (isNative(c, x) ? '일반 창에서는 쓰이지 않습니다. 클릭 관통으로 쓰는 다른 창에서 쓰입니다' : ''), unsupportedEditable: true, show: (c, x) => isMain(x), keywords: '시프트 컨트롤', note: '체크한 키를 모두 누르고 있을 때 창을 조작할 수 있습니다.' },
+    ] },
+    { title: '그 밖에', rows: [
+      { key: 'auto_copy', type: 'check', label: '자동 복사', keywords: '복사 선택 글 마우스 나갈 때 copy',
+        note: '창에서 글을 선택한 뒤 마우스가 창을 벗어나면 선택한 글이 자동으로 복사됩니다. 글이 선택되어 있을 때만 복사합니다.' },
       { key: 'chat_links', type: 'check', label: '채팅 주소를 링크로 표시', keywords: '링크 주소 url 디스코드 유튜브 클릭 열기 브라우저 미니 채팅 link',
         note: ['채팅에 나온 웹 주소(https://…, discord.gg/… 같은 알려진 곳)를 [discord.gg/abc]처럼 눌러 볼 수 있게 표시합니다.',
           '누르면 바로 열리지 않고 전체 주소를 보여 주며 "미니 브라우저에서 열기", "내 브라우저에서 열기", "주소 복사" 중에서 고르게 합니다. 끄면 주소가 그냥 글자로 보입니다. 새로 들어오는 줄부터 적용됩니다.'] },
-      { win: true, key: 'hover_clear', type: 'check', label: '관통 창 숨기기', keywords: '마우스 올리면 투명 호버 지우기 가리기 hover',
-        show: (c, x) => !!x.get({ win: true, key: 'click_through' }, c) && !isNative(c, x), note: [
-          '클릭 관통일 때 마우스를 창 위로 가져가면 창이 완전히 투명해져 뒤의 게임이 보입니다. 아래 조작 키를 누르고 있으면 투명해지지 않습니다.',
-          "이 옵션이 켜진 창에서는 '관통 중 휠 스크롤 허용'과 '관통 중 링크 보기 허용'이 적용되지 않습니다 (뒤의 게임 채팅창을 그대로 쓰는 용도).",
-          '조작 키를 눌러 조작 가능한 상태가 되면 평소와 같습니다.'] },
-      { win: true, key: 'interact_keys', type: 'keys', label: '조작 키', show: (c, x) => isMain(x), keywords: '시프트 컨트롤', note: '체크한 키를 모두 누르고 있을 때 창을 조작할 수 있습니다.' },
     ] },
   ],
 
@@ -226,7 +228,7 @@ const anyWebThrough = c => (c.browser_windows || []).some(b => b.click_through) 
 // is the chosen window a window of the system? (neither on top nor above the game: winconf.windowMode 0)
 const webKind = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.kind === 'web'); };          // (a web window of a plugin: never a window of the system)
 const isNative = (c, x) => !webKind(x) && !x.get({ win: true, key: 'topmost' }, c) && !x.get({ win: true, key: 'topmost_wow_only' }, c);
-const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
+const PLUGIN_ROWS = new Set(['name', 'open_mode', 'window_kind', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
 const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
 const goneWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner && c.kind !== 'web' && goneOwner(c.owner)); };          // (the window of a plugin that is not there: only a note and the way to delete it)
 for (const card of tab.cards) for (const row of card.rows) {

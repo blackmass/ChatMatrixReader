@@ -46,8 +46,10 @@ export function buildRow(row, ctx) {
   }
   text.append(labelLine);
   if (row.note) for (const n of [].concat(row.note)) text.append(el('small', 'note', n));       // (a note may be a list: one line each)
+  const why = el('small', 'why'); why.hidden = true;                 // row.unsupported(cfg, ctx) -> a text when the setting means nothing for what is chosen (the row stays, dim, with this text under it; row.unsupportedEditable: it can still be changed)
   const hint = row.hints ? el('small', 'note hint') : null;       // row.hints { value: text }: what the chosen value means, under the label
   if (hint) text.append(hint);
+  text.append(why);
   const ctl = el('div', 'ctl');
   const err = el('div', 'err');
   const defBtn = el('button', 'def', '기본값');
@@ -377,7 +379,13 @@ export function buildRow(row, ctx) {
     ctl.append(row.build(ctx));
   } else if (row.type === 'button') {
     const b = el('button', 'btn', row.button || row.label);
-    b.onclick = () => row.action(ctx);
+    const result = el('small', 'note result'); result.hidden = true; text.append(result);       // (an action may answer with a text: shown under the row)
+    b.onclick = async () => {
+      b.disabled = true;
+      try { const r = await row.action(ctx); if (typeof r === 'string') { result.hidden = false; result.textContent = r; } }
+      catch (e) { result.hidden = false; result.textContent = String(e); }
+      finally { b.disabled = false; }
+    };
     ctl.append(b);
   }
 
@@ -395,8 +403,11 @@ export function buildRow(row, ctx) {
   function refresh() {
     const cfg = ctx.cfg();
     root.hidden = !!(row.show && !row.show(cfg, ctx));
+    const reason = row.unsupported ? row.unsupported(cfg, ctx) : '';
+    root.classList.toggle('unsupported', !!reason); root.classList.toggle('frozen', !!reason && !row.unsupportedEditable);
+    why.hidden = !reason; why.textContent = reason ? tr(reason) : '';
     if (row.flag) root.classList.toggle('mismatch', !!row.flag(cfg));                  // (a row that is set against another: marked, the notice says what)
-    const dh = row.win && HOST_KEYS.has(row.key) && ctx.dockHost ? ctx.dockHost() : 0;
+    const dh = row.win && (row.virtual ? row.virtual.some(k => HOST_KEYS.has(k)) : HOST_KEYS.has(row.key)) && ctx.dockHost ? ctx.dockHost() : 0;
     root.classList.toggle('docked', !!dh); dockTag.hidden = !dh;
     if (dh) dockTag.textContent = tr('{name} 창을 따름', { name: ctx.nameOf(dh) });
     const value = isData(row) ? ctx.get(row, cfg) : undefined;

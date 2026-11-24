@@ -55,7 +55,7 @@ const pluginFetches = [], pluginOpened = [], webCalls = [], centerRects = [];
 const centerReady = [];                                      // (the centers that said they are ready: the program shows them then)
 let dataFolders = [];                                        // (the login folders of the web windows: what the program would list)
 const opened = [], watched = [], trayTexts = [];
-let gameGone = false;
+let gameGone = false, captureGameFails = false;
 const wheel = [];                                    // wheel turns the fake exe tells (up = positive)
 async function invoke(cmd, a = {}) {
   calls.push(cmd);
@@ -136,6 +136,9 @@ async function invoke(cmd, a = {}) {
     case 'set_tray_text': trayTexts.push([a.options, a.quit]); return null;
     case 'find_game': if (gameGone) return null; return { hwnd: 77, rect: [0, 0, 1280, 720], exe: 'wow.exe', title: 'World of Warcraft', front: true };
     case 'capture': return { base64: grabBytes(a.x, a.y, a.w, a.h) };
+    case 'capture_game': webCalls.push(['capture_game', a.hwnd, a.x, a.y, a.w, a.h]); if (captureGameFails) throw new Error('mock: the window sent no picture'); return { base64: grabBytes(a.x, a.y, a.w, a.h) };
+    case 'capture_game_stop': webCalls.push(['capture_game_stop']); return null;
+    case 'capture_game_info': return { switch: false, border: '' };
     default: return null;
   }
 }
@@ -491,20 +494,30 @@ ok(await opt.locator('.row b.label', { hasText: '그림자 가로' }).isVisible(
 const sw = label => rowOf(label).locator('.switch');
 const inCenter = async id => (await cm.locator(`.pane[data-id="${id}"]`).count()) === 1;      // (this page is the center of the windows that are on top)
 ok(await inCenter(1), 'topmost: on by default: the window is in the center of the windows on top');
-await sw('와우 위에만').click();
+await rowOf('창 종류').locator('select').selectOption('wow');
 await until(async () => cfgFile().topmost_wow_only === true && !(await inCenter(1)), '"just above the game" takes the window to its own center');
 ok(cfgFile().topmost_wow_only === true && cfgFile().topmost === false && !(await inCenter(1)), 'topmost: "just above the game" is on, "always on top" off: the window is in another center');
-await sw('항상 맨 위에').click();
+await rowOf('창 종류').locator('select').selectOption('top');
 await until(async () => cfgFile().topmost === true && await inCenter(1), '"always on top" brings it back');
 ok(cfgFile().topmost === true && cfgFile().topmost_wow_only === false && await inCenter(1), 'topmost: "always on top" takes the other one off: back in the center of the windows on top');
 { // neither on top nor above the game: an ordinary window (the ordinary center draws it and raises itself when it is touched)
-  await sw('항상 맨 위에').click();
+  await rowOf('창 종류').locator('select').selectOption('normal');
   await until(async () => cfgFile().topmost === false && !(await inCenter(1)), 'both off: the ordinary center draws it');
   ok(cfgFile().topmost === false && cfgFile().topmost_wow_only === false && !(await inCenter(1)), 'ordinary window (both off): it is in no center');
   await until(() => webCalls.some(c => c[0] === 'native_open' && c[1] === 1), 'native: both off: the hub asks the exe for a window of the system for window 1', 4000);
   ok(webCalls.filter(c => c[0] === 'native_open' && c[1] === 1).length === 1 && /ChatMatrix/.test(webCalls.find(c => c[0] === 'native_open' && c[1] === 1)[2]), 'native: asked once, with the title of the window');
   ok(!(await cm.locator('.pane[data-id="1"]').count()), 'native: the pane is not in the center any more');
-  await sw('항상 맨 위에').click();
+  // the settings that mean nothing for an ordinary window stay on the page, dim, with the reason (the value is kept); the keys of interacting can still be changed (other windows use them)
+  {
+    const state = async t => rowOf(t).evaluate(e => ({ off: e.classList.contains('unsupported'), frozen: e.classList.contains('frozen'), why: (e.querySelector('.why') || {}).textContent || '', hidden: e.hidden }));
+    const [tabs, ct, lock, keys, hov, wheel] = [await state('평소에 이름 탭 숨기기'), await state('클릭 관통'), await state('창 고정'), await state('조작 키'), await state('관통 창 숨기기'), await state('관통 중 휠 스크롤 허용')];
+    ok(tabs.off && tabs.frozen && !tabs.hidden && /일반 창/.test(tabs.why) && ct.off && ct.frozen && lock.off && hov.off && hov.frozen, 'options: an ordinary window: the rows that mean nothing for it are dim with a reason, not hidden: ' + JSON.stringify([tabs, ct, lock, hov]));
+    ok(wheel.off && wheel.frozen && !wheel.hidden && /일반 창/.test(wheel.why), 'options: the wheel of click-through is dim for an ordinary window too (even when another window is click-through): ' + JSON.stringify(wheel));
+    ok(keys.off && !keys.frozen && !keys.hidden, 'options: the keys of interacting are dim but can be changed: ' + JSON.stringify(keys));
+    await rowOf('클릭 관통').scrollIntoViewIfNeeded(); await opt.screenshot({ path: path.join(OUT, 'options_native_dim.png') });
+    ok(await rowOf('창 종류').evaluate(e => !e.classList.contains('unsupported')) && (await rowOf('창 종류').locator('select option').allTextContents()).length === 3, 'options: the kind of window has three kinds for a translation window');
+  }
+  await rowOf('창 종류').locator('select').selectOption('top');
   await until(async () => cfgFile().topmost === true && await inCenter(1), '"always on top" again');
   await until(() => webCalls.some(c => c[0] === 'native_close' && c[1] === 1), 'native: on top again: the window of the system is closed (the pane is back in the center)', 4000);
 }
@@ -1173,41 +1186,20 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
       await until(() => th()[2] === false, 'browser/through: off: the page takes the mouse', 4000);
       await until(() => webCalls.filter(c => c[0] === 'through' && c[1] === 'web_b1').at(-1)[3] === false, 'browser/through: off: the page is told it is not click-through any more', 4000);
     }
-    // laying a window on its monitor (3.2.1): off by default; with the option, a double click on the bar fills the monitor, another puts it back; the menu has the halves and the quarters; nothing is saved
+    // "화면 읽기 방식" (a test, never kept): the game window is read by the exe's capture_game; when that fails the screen is read as before; off, the exe is told to stop
     {
-      const boxOf = id => centerRects.at(-1).panes.find(p => p.id === id);
-      const bar = cp.locator('.pane:not(.webpane) .pbar').first();
-      const dbl = () => bar.locator('.pspace').dispatchEvent('dblclick', { bubbles: true });
-      await cp.waitForTimeout(300);
-      const b0 = { ...boxOf('1') }, geo0 = cfgFile().geometry;
-      await dbl(); await cp.waitForTimeout(300);
-      ok(boxOf('1').w === b0.w && boxOf('1').h === b0.h, 'tile: a double click on the bar does nothing while the option is off');
-      await control.evaluate(() => import('./settings.js').then(m => m.set({ bar_fullscreen: true })));
-      await cp.waitForTimeout(300);
-      await dbl();
-      await until(() => boxOf('1').w === 3840 && boxOf('1').h === 2160 && boxOf('1').x === 0 && boxOf('1').y === 0, 'tile: a double click on the bar fills the monitor (the bar and the text: the whole monitor)', 4000);
-      ok(await cp.locator('.pane:not(.webpane)').first().evaluate(e => e.classList.contains('tiled')), 'tile: the window says it is laid on the monitor (the grips are hidden)');
-      ok(cfgFile().geometry === geo0, 'tile: the place of the settings is not changed by it');
-      await dbl();
-      await until(() => boxOf('1').w === b0.w && boxOf('1').h === b0.h && boxOf('1').x === b0.x && boxOf('1').y === b0.y, 'tile: another double click puts it back to the size and the place it had', 4000);
-      // the menu: "전체 화면" has a second level
-      await bar.dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 10 });
-      await until(async () => (await cp.locator('#ctx').isVisible()) && (await cp.locator('#ctx div', { hasText: '전체 화면' }).count()) > 0, 'tile: the menu of the bar has "전체 화면"', 4000);
-      await cp.locator('#ctx div', { hasText: '전체 화면' }).first().click();
-      await until(async () => (await cp.locator('#ctx div', { hasText: '왼쪽 절반' }).count()) > 0 && (await cp.locator('#ctx div', { hasText: '뒤로' }).count()) > 0, 'tile: its second level has the halves, the quarters and a way back', 4000);
-      ok((await cp.locator('#ctx div').allTextContents()).join('|').includes('오른쪽 아래'), 'tile: the second level has the corners too');
-      await cp.locator('#ctx div', { hasText: '왼쪽 절반' }).first().click();
-      await until(() => boxOf('1').w === 1920 && boxOf('1').h === 2160 && boxOf('1').x === 0, 'tile: the left half of the monitor', 4000);
-      await bar.dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 10 });
-      await cp.locator('#ctx div', { hasText: '전체 화면' }).first().click();
-      await cp.locator('#ctx div', { hasText: '오른쪽 아래' }).first().click();
-      await until(() => boxOf('1').w === 1920 && boxOf('1').h === 1080 && boxOf('1').x === 1920 && boxOf('1').y === 1080, 'tile: from one tile to another: the bottom right quarter', 4000);
-      await bar.dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 10 });
-      await cp.locator('#ctx div', { hasText: '전체 화면' }).first().click();
-      await cp.locator('#ctx div', { hasText: '원래 크기로' }).first().click();
-      await until(() => boxOf('1').w === b0.w && boxOf('1').h === b0.h && boxOf('1').x === b0.x && boxOf('1').y === b0.y, 'tile: "원래 크기로" puts it back to what it was before the first tile', 4000);
-      await control.evaluate(() => import('./settings.js').then(m => m.set({ bar_fullscreen: false })));
-      await cp.waitForTimeout(200);
+      const set = v => control.evaluate(m => import('./settings.js').then(s => s.set({ capture_mode: m })), v);
+      const count = n => calls.filter(c => c === n).length;
+      await set('window');
+      await until(() => webCalls.some(c => c[0] === 'capture_game' && c[1] === 77), 'capture: "game window": the page asks the exe for the picture of the game window (hwnd 77)', 6000);
+      ok(webCalls.filter(c => c[0] === 'capture_game').every(c => c[1] === 77 && c[4] > 0 && c[5] > 0), 'capture: the rectangle is asked in screen pixels, like the screen read');
+      const screens0 = count('capture');
+      captureGameFails = true;
+      await until(() => count('capture') > screens0 + 2, 'capture: the exe cannot do it: the screen is read as before', 8000);
+      ok(true, 'capture: falls back to the screen when the window cannot be read');
+      captureGameFails = false;
+      await set('screen');
+      await until(() => webCalls.some(c => c[0] === 'capture_game_stop'), 'capture: back to "screen": the exe is told to end the capture of the window', 6000);
     }
     // a translation window as a window of the system (3.2.1 test: center.html?native=<id>): the pane fills the page below the frame the system gives, nothing of a center is done
     {
@@ -1394,7 +1386,7 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   await until(async () => cfgFile().browser_windows[1].start_url === 'https://www.youtube.com/', 'a good start address is saved');
   await sw('로그인 유지').click();
   await until(async () => cfgFile().browser_windows[1].persist === true, 'the login is kept');
-  await sw('와우 위에만').click();
+  await rowOf('창 종류').locator('select').selectOption('wow');
   await until(async () => cfgFile().browser_windows[1].topmost_wow_only === true, 'above the game only');
   ok(cfgFile().browser_windows[1].topmost === false, 'browser: "above the game only" takes "always on top" off');
   const del = opt.locator('.wintool button', { hasText: '삭제' });
@@ -2044,7 +2036,7 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   await opt.locator('#tabs li', { hasText: '창' }).first().click(); await opt.waitForSelector('.wintool');
   await opt.selectOption('.wintool select', String(pw.id)); await control.waitForTimeout(500);
   const hasRow = t => opt.locator('.row:not([hidden]) b.label', { hasText: new RegExp('^' + t + '$') }).count();
-  ok(await hasRow('항상 맨 위에') === 1 && await hasRow('클릭 관통') === 1 && await hasRow('글꼴') === 0 && await hasRow('글 정렬') === 0 && await hasRow('온전한 묶음만') === 0, 'plugins/windows: its settings are the basic ones only (order, mouse, background), no text settings');
+  ok(await hasRow('창 종류') === 1 && await hasRow('클릭 관통') === 1 && await hasRow('글꼴') === 0 && await hasRow('글 정렬') === 0 && await hasRow('온전한 묶음만') === 0, 'plugins/windows: its settings are the basic ones only (order, mouse, background), no text settings');
   ok(await opt.locator('.wintool select option[disabled]').count() === 1 && await opt.locator('.wintool button', { hasText: '삭제' }).isHidden(), 'plugins/windows: in the list of windows below ours after a line, and no delete button');
   await opt.selectOption('.wintool select', '1'); await opt.locator('#tabs li', { hasText: '일반' }).click();
   // the watchdog: a page that does not answer is started again

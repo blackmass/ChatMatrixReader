@@ -30,6 +30,10 @@ h1 { margin: 0; font-size: 19px; }
 .row { position: relative; display: grid; grid-template-columns: 18px 1fr auto; align-items: center; column-gap: 8px; padding: 9px 0; border-top: 1px solid #2f3137; }
 .card h3 + .row, .card .cardnote + .row { border-top: 0; }
 .row[hidden] { display: none; }
+/* a setting that means nothing for the chosen window (row.unsupported): dim, with the reason under it; `frozen`: it cannot be changed here (its value is kept) */
+.row .why { color: #c9a84a; font-size: 12px; line-height: 1.45; }
+.row.unsupported .label, .row.unsupported .note, .row.unsupported .ctl { opacity: .45; }
+.row.frozen .ctl, .row.frozen .rev, .row.frozen .def { pointer-events: none; }
 .row .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .row .label { font-weight: normal; }
 .row .note { color: var(--dim); font-size: 12px; line-height: 1.45; user-select: text; word-break: keep-all; overflow-wrap: break-word; }      /* (a Korean word is not cut in the middle) */

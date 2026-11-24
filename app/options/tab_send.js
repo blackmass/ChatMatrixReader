@@ -1,6 +1,7 @@
 // 보내기: what you type in the send box (Shift+Enter) is translated and put on the clipboard.
 import { LANGS } from '../core/translate_rules.js';
 import { DEFAULT_SEND_PROMPT, DEFAULT_SEND_EXTRA_PROMPT } from '../core/prompts.js';
+import { windowMode } from '../core/winconf.js';
 
 const different = cfg => cfg.prompt_update_notice && (cfg.send_prompt || '').trim() !== DEFAULT_SEND_PROMPT.trim();
 
@@ -15,7 +16,7 @@ export default {
       { key: 'send_route', type: 'select', label: '번역 방식', keywords: '구글 ai 서버 라우트',
         options: [['default', '번역 탭의 방식 따름'], ['google_free', '구글 (무료)'], ['google', '구글 (API 키)'], ['openai', 'AI 서버'], ['custom', '직접 설정한 서버']] },
       { key: 'send_show_log', type: 'check', label: '보낸 말 표시', keywords: '로그 ↗', note: '끄면 게임에서 돌아온 내 채팅 줄로만 보입니다.' },
-      { key: 'send_place', type: 'select', label: '입력칸이 열리는 곳', keywords: '위치 아래 위 입력줄 가려짐 화면 밖',
+      { key: 'send_place', type: 'select', label: '입력칸이 열리는 곳', unsupported: cfg => (windowMode(cfg, 1) === 0 ? '메인 창이 일반 창이면 입력칸은 창 안 맨 아래에 있습니다' : ''), keywords: '위치 아래 위 입력줄 가려짐 화면 밖',
         options: [['auto', '자동 (번역창 아래, 화면에서 잘리면 위)'], ['below', '항상 번역창 아래'], ['above', '항상 번역창 위']],
         note: '"항상" 방식에서도 화면 밖으로 나가지는 않습니다. 번역창이 화면 가장자리에 붙어 있으면 번역창과 조금 겹칠 수 있습니다.' },
       { key: 'send_autopaste', type: 'check', label: '자동 붙여넣기', keywords: '붙여넣기 paste',

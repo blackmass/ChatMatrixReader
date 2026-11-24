@@ -101,6 +101,10 @@ check(w.followsMain({ id: 3 }, 'max_groups') && !w.followsMain({ id: 3, max_grou
   eq([w.windowMode(cfg, 1), w.windowMode(cfg, 3), w.windowMode(cfg, 4), w.windowMode(cfg, 5), w.windowMode(cfg, 6)], [1, 0, 2, 1, 2], 'windowMode: on top, a window of the system, above the game wins over on top');
   eq([w.windowMode({ ...cfg, topmost: false }, 1), w.windowMode({ ...cfg, topmost: false, topmost_wow_only: true }, 1), w.windowMode({}, 1)], [0, 2, 1], 'windowMode: window 1 reads the top level (nothing set: on top)');
   eq(w.windowMode({ topmost: true, child_windows: [] }, 9), 1, 'windowMode: a window that has no entry follows the top level');
+  // the kind of window as one word for the options
+  eq([{}, { topmost: true }, { topmost: false }, { topmost: true, topmost_wow_only: true }, { topmost: false, topmost_wow_only: true }].map(w.windowKind), ['top', 'top', 'normal', 'wow', 'wow'], 'windowKind: nothing set = on top; above the game wins; neither = a window of the system');
+  eq(['normal', 'top', 'wow'].map(k => w.kindPatch(k)), [{ topmost: false, topmost_wow_only: false }, { topmost: true, topmost_wow_only: false }, { topmost: false, topmost_wow_only: true }], 'kindPatch: the two settings of a kind');
+  check(['normal', 'top', 'wow'].every(k => w.windowKind(w.kindPatch(k)) === k), 'windowKind and kindPatch are each other\'s way back');
   // a web window of a plugin is never a window of the system: neither flag = on top (also when it follows a window 1 that is a window of the system)
   const web = w.normalize([{ id: 7, owner: 'p', owner_win: 'web', kind: 'web', topmost: false, topmost_wow_only: false }, { id: 8, owner: 'p', owner_win: 'web', kind: 'web', topmost: false, topmost_wow_only: true }, { id: 9, topmost: false }]);
   eq([7, 8, 9].map(id => { const c = web.find(x => x.id === id); return [c.topmost, c.topmost_wow_only]; }), [[true, false], [false, true], [false, false]], 'a web window with neither flag is on top when the settings are read; a translation window is left as it is (a window of the system)');

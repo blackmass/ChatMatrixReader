@@ -14,6 +14,8 @@ mod capture;
 #[path = "capture_mac.rs"]
 mod capture;
 mod capturelib;
+#[cfg(windows)]
+mod wgc;
 mod ext;
 mod extlib;
 mod files;
@@ -446,6 +448,86 @@ fn screen_rect() -> [i32; 4] {
 #[tauri::command(async)]
 fn capture(x: i32, y: i32, w: i32, h: i32) -> Result<tauri::ipc::Response, String> {
     win::capture(x, y, w, h).map(|bytes| tauri::ipc::Response::new(bytes))
+}
+
+/// The same as `capture`, but of the window of the game only (Windows Graphics Capture, wgc.rs): what stands over the window on the screen is not in the picture. Rectangle in SCREEN pixels, as `capture`.
+/// An error says why it cannot (the page then reads the screen as before).
+#[tauri::command(async)]
+fn capture_game(hwnd: i64, x: i32, y: i32, w: i32, h: i32) -> Result<tauri::ipc::Response, String> {
+    #[cfg(windows)]
+    { wgc::capture(hwnd as isize, x, y, w, h).map(tauri::ipc::Response::new) }
+    #[cfg(not(windows))]
+    { let _ = (hwnd, x, y, w, h); Err("the capture of the game window is not made for this system yet".into()) }
+}
+
+/// Does this Windows have the switch for the yellow frame of the capture (Windows 11), and what happened to the frame at the last start: { switch, border }.
+#[tauri::command(async)]
+fn capture_game_info() -> Value {
+    #[cfg(windows)]
+    { json!({ "switch": wgc::can_hide_border(), "border": wgc::border_status() }) }
+    #[cfg(not(windows))]
+    { json!({ "switch": false, "border": "" }) }
+}
+
+/// Ends the capture of the game window (the option is off).
+#[tauri::command(async)]
+fn capture_game_stop() {
+    #[cfg(windows)]
+    wgc::stop();
+}
+
+/// A bitmap file (32 bits, top row first) of a picture as `capture` gives it (8 bytes header + BGRA), to look at.
+fn write_bmp(path: &std::path::Path, picture: &[u8], crop: (i32, i32, i32, i32)) -> std::io::Result<()> {
+    let (pw, ph) = (u32::from_le_bytes(picture[0..4].try_into().unwrap()) as i32, u32::from_le_bytes(picture[4..8].try_into().unwrap()) as i32);
+    let (cx, cy, cw, ch) = (crop.0.clamp(0, pw), crop.1.clamp(0, ph), crop.2.min(pw - crop.0.clamp(0, pw)).max(0), crop.3.min(ph - crop.1.clamp(0, ph)).max(0));
+    let mut data = Vec::with_capacity(54 + (cw * ch * 4) as usize);
+    data.extend_from_slice(b"BM");
+    data.extend_from_slice(&((54 + cw * ch * 4) as u32).to_le_bytes());
+    data.extend_from_slice(&[0, 0, 0, 0]);
+    data.extend_from_slice(&54u32.to_le_bytes());
+    data.extend_from_slice(&40u32.to_le_bytes());
+    data.extend_from_slice(&cw.to_le_bytes());
+    data.extend_from_slice(&(-ch).to_le_bytes());
+    data.extend_from_slice(&1u16.to_le_bytes());
+    data.extend_from_slice(&32u16.to_le_bytes());
+    data.extend_from_slice(&[0u8; 24]);
+    for row in 0..ch {
+        let at = 8 + (((cy + row) * pw + cx) * 4) as usize;
+        for px in picture[at..at + (cw * 4) as usize].chunks_exact(4) { data.extend_from_slice(&[px[0], px[1], px[2], 255]); }
+    }
+    std::fs::write(path, data)
+}
+
+/// The test of the capture of the game window: the rectangle is taken both ways (the game window, the screen) and compared: the time each took, how many pixels differ and by how much, whether the picture of the window is
+/// black. The pictures (the lower left corner of the rectangle, up to 640x360) are written to logs/capture_window.bmp and logs/capture_screen.bmp. A translation window that stands over the rectangle differs, of course.
+#[tauri::command(async)]
+fn capture_compare(hwnd: i64, x: i32, y: i32, w: i32, h: i32) -> Result<Value, String> {
+    #[cfg(not(windows))]
+    { let _ = (hwnd, x, y, w, h); return Err("the capture of the game window is not made for this system yet".into()); }
+    #[cfg(windows)]
+    {
+        let t0 = std::time::Instant::now();
+        let window = wgc::capture(hwnd as isize, x, y, w, h);
+        let window_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let t1 = std::time::Instant::now();
+        let screen = win::capture(x, y, w, h)?;
+        let screen_ms = t1.elapsed().as_secs_f64() * 1000.0;
+        let border = wgc::border_status();
+        let window = match window { Ok(p) => p, Err(e) => return Ok(json!({ "ok": false, "error": e, "screen_ms": screen_ms.round(), "border": border })) };
+        let (mut different, mut max, mut sum, mut lit) = (0u64, 0u32, 0u64, 0u64);
+        for (a, b) in window[8..].chunks_exact(4).zip(screen[8..].chunks_exact(4)) {
+            let d = (0..3).map(|i| (a[i] as i32 - b[i] as i32).unsigned_abs()).max().unwrap_or(0);
+            if d > 0 { different += 1; sum += d as u64; max = max.max(d); }
+            if a[0] | a[1] | a[2] != 0 { lit += 1; }
+        }
+        let total = (w as u64) * (h as u64);
+        let dir = base_dir().join("logs");
+        let _ = std::fs::create_dir_all(&dir);
+        let crop = (0, (h - 360).max(0), 640, 360);
+        let wrote = write_bmp(&dir.join("capture_window.bmp"), &window, crop).is_ok() & write_bmp(&dir.join("capture_screen.bmp"), &screen, crop).is_ok();
+        Ok(json!({ "ok": true, "size": [w, h], "window_ms": window_ms.round(), "screen_ms": screen_ms.round(), "different": different, "total": total, "max": max,
+            "mean": if different > 0 { sum as f64 / different as f64 } else { 0.0 }, "black": lit == 0, "files": wrote, "border": border }))
+    }
 }
 
 /// The usable area (without the taskbar) and the scale of the monitor that has the point; nothing known = a huge area (nothing is moved).
@@ -1299,6 +1381,10 @@ fn main() {
             screen_rect,
             find_game,
             capture,
+            capture_game,
+            capture_game_stop,
+            capture_game_info,
+            capture_compare,
             open_options,
             native_open,
             native_close,

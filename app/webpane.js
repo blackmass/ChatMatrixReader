@@ -5,7 +5,7 @@ import * as winconf from './core/winconf.js';
 import * as layout from './core/winlayout.js';
 import { takesMouse } from './core/winlayout.js';
 import * as B from './core/browsers.js';
-import { dragFrame, sizeEdges, moveBy, barBelow, tileBox, untileBox } from './frame.js';
+import { dragFrame, sizeEdges, moveBy, barBelow } from './frame.js';
 import { tr } from './core/i18n.js';
 
 const TITLE_H = 28, ADDR_H = 22;                                     // (css pixels: the title bar (as high as the one of a window of the system: pane.js NATIVE_BAR_H) and the line of the address)
@@ -22,7 +22,7 @@ export class WebPane {
     const row = this.kind === 'browser' ? '<div class="paddrbar"><button class="phome" tabindex="-1" title="처음 주소로">⌂</button><div class="paddr"><span class="phold">주소 또는 검색어</span><span class="ptxt"></span></div><button class="pmode" tabindex="-1"></button><span class="pzoom"></span></div>' : '';       // (the second line of a window of the mini browser: the address)
     this.head = this.kind === 'browser' ? TITLE_H + ADDR_H : TITLE_H;                   // (how much of the window is above the page, css pixels: below it when `flip`)
     this.tabList = [{ title: '', url: '' }]; this.activeTab = 0;                  // (the tab strip holds a list: there is one tab for now, the page of the window)
-    this.flip = false; this.tiled = ''; this.restoreRect = null;
+    this.flip = false;
     this.interactive = true; this.passing = undefined; this.passAt = 0; this.zone = false; this.pressed = false; this.lmb = false; this.inside = false; this.cursor = [0, 0];          // (click-through: see tick)
     this.wheelId = (this.kind === 'browser' ? 50000 : 60000) + (Math.abs(Number(this.win) || 0) % 10000);          // (the number the exe knows the wheel zone of this window by: center.js)
     this.el.innerHTML = '<div class="pbar">' + head + '<span class="pspace"></span><span class="pcopied">복사됨</span><span class="ptools"><button class="pback" tabindex="-1" title="뒤로">‹</button><button class="preload" tabindex="-1" title="새로고침">↻</button><button class="pclose" tabindex="-1" title="닫기">✕</button></span></div>' + row + '<div class="pbody"><div class="pscroll"></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div>';
@@ -39,13 +39,8 @@ export class WebPane {
     this.el.addEventListener('contextmenu', e => { e.preventDefault(); if (e.target.closest && e.target.closest('.pbar, .paddrbar')) this.center.menu(e, this); });
     if (this.kind === 'browser') { this.address(); this.setMode(info.mode); }
     this.place();
-    dragFrame(this, this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.lock && !this.tiled && !e.target.closest('button'));
-    // (the option "위쪽 바 더블클릭으로 전체 화면": a double click on the bar lays the window on its monitor, another one puts it back; not on a button, not while locked)
-    this.el.querySelector('.pbar').addEventListener('dblclick', e => {
-      if (!this.center.cfg().bar_fullscreen || this.lock || e.target.closest('button')) return;
-      if (this.tiled) this.untile(); else this.tile('full');
-    });
-    sizeEdges(this, () => !this.lock && !this.tiled, [190, 320]);                      // (the smallest a web window can be: a window made too small by mistake is hard to get back)
+    dragFrame(this, this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.lock && !e.target.closest('button'));
+    sizeEdges(this, () => !this.lock, [190, 320]);                      // (the smallest a web window can be: a window made too small by mistake is hard to get back)
     const q = s => this.el.querySelector(s);
     q('.pback').onclick = () => invoke('web_cmd', { label: this.label, cmd: 'back' }).catch(() => {});
     q('.preload').onclick = () => invoke('web_cmd', { label: this.label, cmd: 'reload' }).catch(() => {});
@@ -212,7 +207,6 @@ export class WebPane {
 
   // the place: the page is where its saved geometry says (the outer rectangle of the window of the system); the bar stands above it
   place() {
-    this.tiled = ''; this.restoreRect = null;                             // (the place of the settings: a window that was laid on a monitor is not any more)
     const g = layout.parseGeometry(this.savedGeometry()) || { w: 360, h: 640, x: null, y: null };
     const d = this.center.dpr(), [ox, oy] = this.center.origin();
     const m = this.center.mainScreen && this.center.mainScreen();                       // (no saved place: on the main screen; the area of all the screens has holes)
@@ -224,7 +218,7 @@ export class WebPane {
   }
   layout() {
     const r = this.rect;
-    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip); this.el.classList.toggle('tiled', !!this.tiled);
+    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip);
     const grip = this.el.querySelector('.pgrip'); if (grip) grip.style.bottom = this.flip ? this.head + 'px' : '';          // (the corner to resize by stays at the corner of the page, over the bars)
     this.el.style.left = r.x + 'px'; this.el.style.top = this.boxY() + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + this.head) + 'px';
   }
@@ -235,22 +229,18 @@ export class WebPane {
       { id, x: r.x * d, y: r.y * d, w: r.w * d, h: r.h * d, bar: 0, hit: false, web: this.label, z: Number(this.el.style.zIndex) || 0 },
       b('b', r.x, this.flip ? r.y + r.h + this.head - TITLE_H : r.y - this.head, r.w, TITLE_H),                  // (the title bar: the first line above the page; the last line below it)
       ...(this.kind === 'browser' ? [b('a', r.x, this.flip ? r.y + r.h : r.y - ADDR_H, r.w, ADDR_H)] : []),   // (the address: the line next to the page)
-      ...(this.lock || this.tiled ? [] : [b('l', r.x, r.y, EDGE, r.h), b('r', r.x + r.w - EDGE, r.y, EDGE, r.h), b('s', r.x, bot - EDGE, r.w, EDGE), b('g', r.x + r.w - GRIP, r.y + r.h - GRIP, GRIP, GRIP)]),
+      ...(this.lock ? [] : [b('l', r.x, r.y, EDGE, r.h), b('r', r.x + r.w - EDGE, r.y, EDGE, r.h), b('s', r.x, bot - EDGE, r.w, EDGE), b('g', r.x + r.w - GRIP, r.y + r.h - GRIP, GRIP, GRIP)]),
     ];
   }
   boxY() { return this.flip ? this.rect.y : this.rect.y - this.head; }
   box() { const r = this.rect, d = this.center.dpr(); return { id: 'w' + this.win, x: r.x * d, y: this.boxY() * d, w: r.w * d, h: (r.h + this.head) * d, bar: this.head * d, below: this.flip }; }
   screenBox() { const b = this.box(), [ox, oy] = this.center.origin(); return { x: ox + b.x, y: oy + b.y, w: b.w, h: b.h }; }
   save() {
-    if (this.tiled) return;                                                // (what lays a window on a monitor is not kept: the place of the settings stays)
     const r = this.rect, d = this.center.dpr(), [ox, oy] = this.center.origin();
     this.geo = layout.formatGeometry(r.w * d, r.h * d, ox + r.x * d, oy + r.y * d);
     emit(this.kind === 'browser' ? 'browser-geometry' : 'win-geometry', { id: this.win, geometry: this.geo });
   }
   note() { /* a web window has no lines to write a notice in */ }
-  // laid on the monitor it is on (frame.js tileBox): 'full' | 'top' | 'bottom' | 'left' | 'right' | 'tl' | 'tr' | 'bl' | 'br'; a window that is locked is not
-  tile(kind) { if (!this.lock) tileBox(this, kind); }
-  untile() { untileBox(this); }
 
   // the settings changed
   update() {

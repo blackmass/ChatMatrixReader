@@ -1,7 +1,6 @@
 // What the boxes of a control center have in common (a translation window: pane.js; a web window: webpane.js): a box with a place (`rect`: the text area, in the pixels of the page; the bar
 // stands above it), moved and made bigger by the mouse.
 import { T } from './core/timings.js';
-import { tileOf, textAreaOf } from './core/tiling.js';
 
 export const BAR_H = 22;
 // The Alt key lets a window go over the edge of a monitor without the resistance. It is built, not on: nobody asked for it yet (to turn it on: true).
@@ -99,27 +98,6 @@ export function moveBy(o, s, dx, dy, ev) {
     }
   }
   st.cur = A; set(A);
-}
-
-// Laying a box on its monitor (the one the middle of it is on, else the one it overlaps most): the work area (what the task bar and the menu bar leave) or a half or a quarter of it. The bar stays at the
-// top of the tile and the text is below it. The place the box had is kept in memory (`restoreRect`), and nothing of this is saved: a program that is started again has the box where it was. While a box is laid on
-// a monitor it is not moved or resized by the mouse (`o.tiled` is the kind of tile, '' = not laid).
-export function tileBox(o, kind) {
-  const mons = o.center.monitors ? o.center.monitors() : [];
-  if (!mons.length) return false;
-  const works = o.center.workAreas ? o.center.workAreas() : mons;
-  const m = monitorOf(mons, physical(o)) || mons[0], a = works[Math.max(0, mons.indexOf(m))] || m;
-  const [ox, oy] = o.center.origin(), d = o.center.dpr(), t = textAreaOf(tileOf(kind, a), o.head * d);
-  if (!o.tiled) o.restoreRect = { ...o.rect };
-  o.rect.x = (t[0] - ox) / d; o.rect.y = (t[1] - oy) / d; o.rect.w = t[2] / d; o.rect.h = t[3] / d;
-  o.tiled = kind; o.flip = false;
-  o.layout(); o.center.changed(o);
-  return true;
-}
-export function untileBox(o) {
-  if (o.tiled && o.restoreRect) Object.assign(o.rect, o.restoreRect);
-  o.restoreRect = null; o.tiled = '';
-  o.layout(); o.center.changed(o);
 }
 
 // After a move: a box whose middle is on no monitor (it was left in the space between them) is brought into the nearest one.

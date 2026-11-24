@@ -12,7 +12,7 @@ import { isMac } from './platform.js';
 import { T } from './core/timings.js';
 import { PageView } from './pageview.js';
 import * as settings from './settings.js';
-import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow, tileBox, untileBox } from './frame.js';
+import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow } from './frame.js';
 
 export { BAR_H };
 export const NATIVE_BAR_H = 28;                                           // (the bar of a window of the system is its title bar: higher; main.rs NATIVE_TITLE)
@@ -21,7 +21,7 @@ export class Pane {
   // center: { cfg(), dpr(), origin() -> [ox, oy] in pixels, changed(pane) }
   constructor(id, center) {
     this.id = id; this.center = center; this.label = `c${id}`;
-    this.head = this.fullBar() ? NATIVE_BAR_H : BAR_H; this.flip = false; this.tiled = ''; this.restoreRect = null;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
+    this.head = this.fullBar() ? NATIVE_BAR_H : BAR_H; this.flip = false;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
     this.lags = []; this.lmbAt = 0; this.lastDown = -1e9; this.wheelCount = 0;                  // (how long a click takes to reach the page: for the diagnosis in the options)
     this.review = false; this.reviewIdle = 0; this.reviewShown = false; this.zone = false; this.lastInput = -1e9;      // (reading the old chat: see userScrolled)
     this.interactive = true; this.outside = true; this.hover = false; this.wasThrough = null;      // (the state of the mouse: see tick)
@@ -49,15 +49,10 @@ export class Pane {
     }, true);         // (touched: this pane comes to the front of the center)
     this.place();
     // the bar moves the window (a tab only changes the chat when there are several: like 3.1.1)
-    this.drag(this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.opt('lock_window', false) && !this.tiled && !e.target.closest('button') && !(this.chats.size > 1 && e.target.closest('.ptab')));
-    // (the option "위쪽 바 더블클릭으로 전체 화면"): a double click on the bar lays the window on its monitor, another one puts it back. Not on a button, not on a tab that has others next to it (a quick second click on a tab is a tab), not while locked.
-    this.el.querySelector('.pbar').addEventListener('dblclick', e => {
-      if (!this.center.cfg().bar_fullscreen || this.opt('lock_window', false) || e.target.closest('button') || (this.chats.size > 1 && e.target.closest('.ptab'))) return;
-      if (this.tiled) this.untile(); else this.tile('full');
-    });
+    this.drag(this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.opt('lock_window', false) && !e.target.closest('button') && !(this.chats.size > 1 && e.target.closest('.ptab')));
     this.tools();
     if (center.native) this.titleBar();
-    sizeEdges(this, () => !this.opt('lock_window', false) && !this.tiled);         // (the corner at the bottom right and the edges left, right, bottom and the corner bottom left; the top is the bar)
+    sizeEdges(this, () => !this.opt('lock_window', false));         // (the corner at the bottom right and the edges left, right, bottom and the corner bottom left; the top is the bar)
     this.update();
   }
   // the bar as one band across the window (css .titled): always in a window of the system (it is its title bar), else when the option "바 모양" says so. The band is higher than the floating tabs.
@@ -135,13 +130,11 @@ export class Pane {
   savedGeometry() { return this.id === MAIN ? this.center.cfg().geometry : (this.conf() || {}).geometry; }
   place() {
     if (this.center.native) {                                                // (a window of the system: the text area is the window below the bar, whatever its size is now)
-      this.tiled = ''; this.restoreRect = null;
       this.rect = { x: 0, y: this.head, w: Math.max(40, innerWidth), h: Math.max(40, innerHeight - this.head - (this.center.nativeInset ? this.center.nativeInset() : 0)) };          // (below it: the send box, when it is open: sendrow.js)
       this.geo = this.seenGeo = this.savedGeometry() || '';
       this.layout();
       return;
     }
-    this.tiled = ''; this.restoreRect = null;                             // (the place of the settings: a window that was laid on a monitor is not any more)
     const cfg = this.center.cfg(), g = layout.parseGeometry(this.savedGeometry()) || { w: layout.DEFAULT_SIZE[0], h: layout.DEFAULT_SIZE[1], x: null, y: null };
     const d = this.center.dpr(), [ox, oy] = this.center.origin();
     let { x, y } = g;
@@ -159,7 +152,7 @@ export class Pane {
   }
   layout() {
     const r = this.rect;
-    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip); this.el.classList.toggle('tiled', !!this.tiled);          // (touching the top of a monitor: the bar goes below the text)
+    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip);          // (touching the top of a monitor: the bar goes below the text)
     const grip = this.el.querySelector('.pgrip'); if (grip) grip.style.bottom = this.flip ? this.head + 'px' : '';          // (the corner to resize by stays at the corner of the text, over the bar)
     this.el.style.left = r.x + 'px'; this.el.style.top = (this.flip ? r.y : r.y - this.head) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + this.head) + 'px';
   }
@@ -172,16 +165,13 @@ export class Pane {
   box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: this.boxY() * d, w: r.w * d, h: (r.h + this.head) * d, bar: this.head * d, below: this.flip }; }
   // where the text area is on the screen now: told to the hub, which keeps it in the settings (a window of 3.1.1 did the same)
   save() {
-    if (this.tiled || this.center.native) return;                          // (what lays a window on a monitor is not kept: the place of the settings stays. A window of the system: nothing is kept yet)
+    if (this.center.native) return;                                        // (a window of the system: its place is the system's, the exe tells it: native-geometry)
     const r = this.rect, d = this.center.dpr(), [ox, oy] = this.center.origin();
     this.geo = layout.formatGeometry(r.w * d, r.h * d, ox + r.x * d, oy + r.y * d);
     emit('win-geometry', { id: this.id, geometry: this.geo });
   }
 
   drag(target, fn, accept, flag) { dragFrame(this, target, fn, accept, flag); }
-  // laid on the monitor it is on (frame.js tileBox): 'full' | 'top' | 'bottom' | 'left' | 'right' | 'tl' | 'tr' | 'bl' | 'br'; a window that is locked is not
-  tile(kind) { if (!this.opt('lock_window', false)) tileBox(this, kind); }
-  untile() { untileBox(this); }
 
   // the settings changed (or the first time)
   update() {

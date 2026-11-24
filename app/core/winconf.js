@@ -163,6 +163,11 @@ export function windowMode(cfg, id) {
   return m === 0 && conf && conf.kind === 'web' ? 1 : m;                           // (a web window is never a window of the system: it is always on top or above the game)
 }
 
+// The kind of window as one word for the options (a window of the system | on top | above the game only) and back: the two settings it is made of (`o` has `topmost`, `topmost_wow_only`). A web window is never
+// 'normal' (windowMode above).
+export const windowKind = o => (o && o.topmost_wow_only ? 'wow' : o && o.topmost !== false ? 'top' : 'normal');
+export const kindPatch = k => ({ topmost: k === 'top', topmost_wow_only: k === 'wow' });
+
 export function headMode(conf, cfg = null) {
   const m = conf.head_mode;
   if (HEADS.includes(m)) return m;
