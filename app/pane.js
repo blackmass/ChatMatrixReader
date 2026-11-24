@@ -15,12 +15,13 @@ import * as settings from './settings.js';
 import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow, tileBox, untileBox } from './frame.js';
 
 export { BAR_H };
+export const NATIVE_BAR_H = 28;                                           // (the bar of a window of the system is its title bar: higher; main.rs NATIVE_TITLE)
 
 export class Pane {
   // center: { cfg(), dpr(), origin() -> [ox, oy] in pixels, changed(pane) }
   constructor(id, center) {
     this.id = id; this.center = center; this.label = `c${id}`;
-    this.head = BAR_H; this.flip = false; this.tiled = ''; this.restoreRect = null;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
+    this.head = center.native ? NATIVE_BAR_H : BAR_H; this.flip = false; this.tiled = ''; this.restoreRect = null;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
     this.lags = []; this.lmbAt = 0; this.lastDown = -1e9; this.wheelCount = 0;                  // (how long a click takes to reach the page: for the diagnosis in the options)
     this.review = false; this.reviewIdle = 0; this.reviewShown = false; this.zone = false; this.lastInput = -1e9;      // (reading the old chat: see userScrolled)
     this.interactive = true; this.outside = true; this.hover = false; this.wasThrough = null;      // (the state of the mouse: see tick)
@@ -54,6 +55,7 @@ export class Pane {
       if (this.tiled) this.untile(); else this.tile('full');
     });
     this.tools();
+    if (center.native) this.titleBar();
     sizeEdges(this, () => !this.opt('lock_window', false) && !this.tiled);         // (the corner at the bottom right and the edges left, right, bottom and the corner bottom left; the top is the bar)
     this.update();
   }
@@ -102,6 +104,20 @@ export class Pane {
     q('.pclose').onclick = async () => { this.save(); if (this.id === MAIN) invoke('quit_request').catch(() => {}); else emit('win-closed', { id: this.id }); };
     q('.pbar').addEventListener('mousedown', e => { if (e.target.tagName === 'BUTTON') e.preventDefault(); });
   }
+  // A window of the system without the frame of the system (the 3.2.1 test): our bar is its title bar. The system moves it (mouse down on the bar), a double click maximizes it; on Windows the three buttons
+  // are ours (the close one is the old ✕); on the mac the round buttons of the system lie over the left end of the bar.
+  titleBar() {
+    const bar = this.el.querySelector('.pbar'), tools = this.el.querySelector('.ptools'), act = a => invoke('native_action', { action: a }).catch(() => {});
+    this.el.classList.add('titled');
+    if (isMac) { this.el.classList.add('mactitle'); return; }
+    const mk = (cls, txt, title, a) => { const b = document.createElement('button'); b.className = cls; b.tabIndex = -1; b.title = title; b.textContent = txt; b.onclick = () => act(a); return b; };
+    tools.insertBefore(mk('pmin', '\u2013', '최소화', 'min'), this.el.querySelector('.pclose'));
+    tools.insertBefore(mk('pmax', '\u25A1', '최대화 / 이전 크기', 'max'), this.el.querySelector('.pclose'));
+    bar.addEventListener('mousedown', e => {
+      if (e.button !== 0 || e.target.closest('button') || (this.chats.size > 1 && e.target.closest('.ptab'))) return;
+      e.preventDefault(); act(e.detail >= 2 ? 'max' : 'drag');
+    });
+  }
   lamp(st, title) { const b = this.el.querySelector('.pvoice'); b.dataset.state = st; b.title = title; }
 
   // the place: the text area is where the window of 3.1.1 was (its saved geometry is the place and the size of the text area); the bar stands above it
@@ -109,7 +125,7 @@ export class Pane {
   place() {
     if (this.center.native) {                                                // (a window of the system: the text area is the window below the bar, whatever its size is now)
       this.tiled = ''; this.restoreRect = null;
-      this.rect = { x: 0, y: BAR_H, w: Math.max(40, innerWidth), h: Math.max(40, innerHeight - BAR_H - (this.center.nativeInset ? this.center.nativeInset() : 0)) };          // (below it: the send box, when it is open: sendrow.js)
+      this.rect = { x: 0, y: this.head, w: Math.max(40, innerWidth), h: Math.max(40, innerHeight - this.head - (this.center.nativeInset ? this.center.nativeInset() : 0)) };          // (below it: the send box, when it is open: sendrow.js)
       this.geo = this.seenGeo = this.savedGeometry() || '';
       this.layout();
       return;
@@ -133,16 +149,16 @@ export class Pane {
   layout() {
     const r = this.rect;
     this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip); this.el.classList.toggle('tiled', !!this.tiled);          // (touching the top of a monitor: the bar goes below the text)
-    const grip = this.el.querySelector('.pgrip'); if (grip) grip.style.bottom = this.flip ? BAR_H + 'px' : '';          // (the corner to resize by stays at the corner of the text, over the bar)
-    this.el.style.left = r.x + 'px'; this.el.style.top = (this.flip ? r.y : r.y - BAR_H) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + BAR_H) + 'px';
+    const grip = this.el.querySelector('.pgrip'); if (grip) grip.style.bottom = this.flip ? this.head + 'px' : '';          // (the corner to resize by stays at the corner of the text, over the bar)
+    this.el.style.left = r.x + 'px'; this.el.style.top = (this.flip ? r.y : r.y - this.head) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + this.head) + 'px';
   }
   // the blur behind the text area (0 off | 1 weak | 2 strong): the center makes a window of the system for it. While the window is cleared by the mouse or resized, the blur behind it goes too.
   blurLevel() { return Number(this.opt('blur', 0)) && !this.hover && !this.resizing ? Number(this.opt('blur', 0)) : 0; }
   // the box (the bar included) in pixels of the page, for the center
   // where it is on the screen (pixels): the page's origin plus the box
   screenBox() { const b = this.box(), [ox, oy] = this.center.origin(); return { x: ox + b.x, y: oy + b.y, w: b.w, h: b.h }; }
-  boxY() { return this.flip ? this.rect.y : this.rect.y - BAR_H; }
-  box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: this.boxY() * d, w: r.w * d, h: (r.h + BAR_H) * d, bar: BAR_H * d, below: this.flip }; }
+  boxY() { return this.flip ? this.rect.y : this.rect.y - this.head; }
+  box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: this.boxY() * d, w: r.w * d, h: (r.h + this.head) * d, bar: this.head * d, below: this.flip }; }
   // where the text area is on the screen now: told to the hub, which keeps it in the settings (a window of 3.1.1 did the same)
   save() {
     if (this.tiled || this.center.native) return;                          // (what lays a window on a monitor is not kept: the place of the settings stays. A window of the system: nothing is kept yet)

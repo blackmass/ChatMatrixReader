@@ -345,7 +345,12 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
         "center" => b.title("CMR Center").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).accept_first_mouse(true).inner_size(400.0, 300.0),
         // a window of the system with its own frame, title bar, task bar button (the test of 3.2.1: the window shows one translation window with the page of the center, see center.js `native`): the system does the
         // moving, the sizing, the snapping, the maximizing; it takes the keyboard like any window
-        "native" => b.title("ChatMatrix").visible(false).inner_size(520.0, 420.0).min_inner_size(240.0, 160.0),
+        // 3.2.1 test: no frame of the system, no title bar: the page draws all of it (its bar is the title bar, center.js `native`); the system still moves, sizes, snaps and maximizes the window
+        // (start_dragging, the edges: tauri's undecorated resizing). macOS: the title bar is laid over the page (the three round buttons of the system stay, in the corner of our bar)
+        #[cfg(not(target_os = "macos"))]
+        "native" => b.title("ChatMatrix").visible(false).transparent(true).decorations(false).shadow(true).inner_size(520.0, 420.0).min_inner_size(240.0, 160.0),
+        #[cfg(target_os = "macos")]
+        "native" => b.title("ChatMatrix").visible(false).title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true).inner_size(520.0, 420.0).min_inner_size(240.0, 160.0),
         "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),
         // the control window is the program's brain, not something to look at: it is never shown. An empty file "show_control" next to app/
@@ -493,7 +498,8 @@ async fn open_options(app: AppHandle) -> Result<(), String> {
 // ---- the translation windows that are windows of the system (neither on top nor above the game: winconf.windowMode 0). Their page is the page of the center in a mode that shows that one window and fills
 // its window (center.js `native`); the frame, the task bar button, the snapping are the system's. The hub (winmanager.js) decides which exist; they tell it when they are moved (their place is the saved
 // geometry of the window: the TEXT AREA, the same as a pane of a center, so a window that changes its kind stays where it is: the bar is the first NATIVE_BAR of the window of the system, the text below it).
-const NATIVE_BAR: f64 = 22.0;                                  // (css pixels: the bar of a translation window, center.js BAR_H)
+const NATIVE_BAR: f64 = 22.0;                                  // (css pixels: the bar of a translation window in a center, center.js BAR_H)
+const NATIVE_TITLE: f64 = 28.0;                                // (css pixels: the bar of a window of the system, it is its title bar: pane.js NATIVE_BAR_H)
 
 fn native_label(id: i64) -> String { format!("native{id}") }
 /// The label of the window of the system of a translation window ("main", "win3"), if it has one.
@@ -528,7 +534,7 @@ fn native_geometry(window: &tauri::Window) -> Option<String> {
     if window.is_minimized().unwrap_or(false) || window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) { return None; }
     let (p, s) = (window.inner_position().ok()?, window.inner_size().ok()?);
     if p.x < -30000 || s.width < 100 || s.height < 60 { return None; }
-    let bar = (NATIVE_BAR * window.scale_factor().unwrap_or(1.0)).round() as i32;
+    let bar = (NATIVE_TITLE * window.scale_factor().unwrap_or(1.0)).round() as i32;
     Some(format!("{}x{}+{}+{}", s.width, (s.height as i32 - bar).max(1), p.x, p.y + bar))
 }
 
@@ -544,7 +550,7 @@ async fn native_open(app: AppHandle, id: i64, title: Option<String>, geometry: O
     }
     let w = make_window(&app, &label, &format!("center.html?native={id}"), "native").map_err(|e| e.to_string())?;
     if let Some(t) = title.filter(|t| !t.trim().is_empty()) { let _ = w.set_title(&t.chars().take(80).collect::<String>()); }
-    let bar = (NATIVE_BAR * w.scale_factor().unwrap_or(1.0)).round() as i32;
+    let bar = (NATIVE_TITLE * w.scale_factor().unwrap_or(1.0)).round() as i32;
     match geometry.as_deref().and_then(parse_geometry).filter(|&(x, y, gw, gh)| gw >= 100 && gh >= 40 && on_a_screen(&app, x, y - bar, gw, gh + bar as u32)) {
         Some((x, y, gw, gh)) => place_inner(&w, x, y - bar, gw, gh + bar as u32),
         None => { let _ = w.center(); }
@@ -558,6 +564,18 @@ async fn native_close(app: AppHandle, id: i64) -> Result<(), String> {
     let label = native_label(id);
     if let Some(w) = app.get_webview_window(&label) { w.destroy().map_err(|e| e.to_string())?; }
     Ok(())
+}
+
+/// What the bar of a window of the system asks for: "drag" (the system moves the window from here: snapping, the full-screen gesture of the mac work as for any window), "min", "max" (maximize / restore).
+#[tauri::command]
+fn native_action(window: tauri::WebviewWindow, action: String) -> Result<(), String> {
+    let e = |e: tauri::Error| e.to_string();
+    match action.as_str() {
+        "drag" => window.start_dragging().map_err(e),
+        "min" => window.minimize().map_err(e),
+        "max" => if window.is_maximized().unwrap_or(false) { window.unmaximize().map_err(e) } else { window.maximize().map_err(e) },
+        _ => Err(format!("unknown action {action}")),
+    }
 }
 
 /// Where the page of a window of the system starts on the screen (its inner area, in pixels of the screen) and the scale of the screen it is on: the page works from it (center.js: native).
@@ -1240,6 +1258,7 @@ fn main() {
             native_open,
             native_close,
             native_origin,
+            native_action,
             open_url,
             open_chat_url,
             set_window_rect,
