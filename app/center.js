@@ -18,15 +18,20 @@ if (isMac) document.body.classList.add('mac');
 import { defaultRegistry } from './widgets/defaults.js';
 import { syncPluginDefs } from './widgets/registry.js';
 
-const q = new URLSearchParams(location.search), mode = Number(q.get('mode')) || 0;
+const q = new URLSearchParams(location.search);
+// ?native=<window number>: this page is not a center over the screens but the page of a window of the system (3.2.1 test: main.rs native_open) that shows that one translation window and nothing else, filling
+// its window below the frame the system gives it. The system moves it, sizes it, snaps it; no click-through, no order of its own, nothing is saved about its place yet.
+const nativeId = Number(q.get('native')) || 0;
+const mode = nativeId ? -1 : Number(q.get('mode')) || 0;
 let ox = Number(q.get('ox')) || 0, oy = Number(q.get('oy')) || 0;                    // (where the page starts on the screen: it changes when the screens do)
-const label = 'center' + mode;
+const label = nativeId ? 'native' + nativeId : 'center' + mode;
+if (nativeId) document.body.classList.add('native');
 const dpr = () => window.devicePixelRatio || 1;
 let cfg = await settings.load({ readOnly: true });
 await startI18n(settings);
 await fonts.loadAll().catch(() => []);
-document.title = 'CMR Center ' + mode;
-const gameTitle = () => invoke('center_title', { title: cfg.wow_window_title || '' }).catch(() => {});        // (the program looks for the window of the game: with this title when it has no known program name)
+document.title = nativeId ? 'ChatMatrix ' + nativeId : 'CMR Center ' + mode;
+const gameTitle = () => (nativeId ? null : invoke('center_title', { title: cfg.wow_window_title || '' }).catch(() => {}));        // (the program looks for the window of the game: with this title when it has no known program name)
 gameTitle();
 document.documentElement.style.setProperty('--cv-tip-max', T.TIP_MAX_W + 'px');                 // (the width of the tip of a link)
 
@@ -42,10 +47,12 @@ let works = [];                                // (the same screens without the 
 let screens = [];                              // (all the screens, see below: declared before anything can ask for them, a layout that comes early must not find it not made)
 const center = {
   label,
+  native: !!nativeId,
   cfg: () => cfg,
   dpr,
   origin: () => [ox, oy],
   mainScreen: () => screens[0] || null,
+  workAreas: () => (works.length ? works : screens),                 // (the same screens without the task bar, the menu bar, the dock: what a window laid on a monitor fills)
   // where a window with no saved place goes: the middle of the work area of the main screen, a step further when another window stands there (core/winlayout.js firstPlace). Screen pixels, or null (not known yet)
   firstSpot(self, w, h, headCss) {
     const a = works[0] || screens[0];
@@ -86,7 +93,8 @@ const browserMode = id => { const b = (cfg.browser_windows || []).find(x => x.id
 const modeOf = id => (optOf(id, 'topmost_wow_only', false) ? 2 : optOf(id, 'topmost', true) ? 1 : 0);
 
 function sync() {
-  const want = new Set([...open].filter(id => (id === MAIN || cfg.child_windows.some(c => c.id === id && c.kind !== 'web')) && !winconf.dockHost(cfg.child_windows, id) && modeOf(id) === mode));
+  const want = nativeId ? new Set(nativeId === MAIN || cfg.child_windows.some(c => c.id === nativeId && c.kind !== 'web') ? [nativeId] : [])
+    : new Set([...open].filter(id => (id === MAIN || cfg.child_windows.some(c => c.id === id && c.kind !== 'web')) && !winconf.dockHost(cfg.child_windows, id) && modeOf(id) === mode));
   for (const id of want) if (!panes.has(id)) { const p = new Pane(id, center); panes.set(id, p); if (lampState) p.lamp(lampState.st, lampState.title); p.hello(); }
   for (const [id, p] of [...panes]) if (!want.has(id)) { p.destroy(); panes.delete(id); }
   // the web windows of this order
@@ -104,12 +112,23 @@ const menuEl = document.createElement('div');
 menuEl.id = 'ctx'; menuEl.hidden = true; menuEl.dataset.notr = ''; document.body.append(menuEl);
 let menuPane = null;
 function hideMenu() { if (menuEl.hidden) return; menuPane = null; menuEl.hidden = true; lastKey = ''; report(); }
-function showMenu(ev, pane) { openMenu(menuList({ cfg, pane, ev, open, browsersOpen: new Set(webBy.browser.map(w => w.win)) }), ev, pane); }
-function openMenu(list, ev, pane) {
+// (`nativeTest`: the marker file `native_test` next to the program is there: the item of the test of the windows of the system. Asked each time, so the file needs no restart)
+async function showMenu(ev, pane) {
+  const nativeTest = await invoke('native_test_on').catch(() => false);
+  openMenu(menuList({ cfg, pane, ev, open, browsersOpen: new Set(webBy.browser.map(w => w.win)), nativeTest }), ev, pane);
+}
+// An item can have `sub` (a list): a click shows that list in the place of this one, with a way back as its first line (two levels, no more); the menu stays open.
+function openMenu(list, ev, pane, parent = null) {
   menuEl.replaceChildren();
-  for (const e of list) {
+  for (const e of parent ? [{ text: '‹ ' + tr('뒤로'), back: true }, { cls: 'sep' }, ...list] : list) {
     const d = document.createElement('div'); d.className = e.cls || '';
-    if (e.cls !== 'sep') { d.textContent = e.text; if (e.fn && !(e.cls || '').includes('off')) d.onclick = () => { hideMenu(); e.fn(); }; }
+    if (e.cls !== 'sep') {
+      const off = (e.cls || '').includes('off');
+      d.textContent = e.text + (e.sub ? '  ▸' : '');
+      if (e.back) d.onclick = () => openMenu(parent, ev, pane);
+      else if (e.sub && !off) d.onclick = () => openMenu(e.sub, ev, pane, list);
+      else if (e.fn && !off) d.onclick = () => { hideMenu(); e.fn(); };
+    }
     menuEl.append(d);
   }
   menuPane = pane; menuEl.hidden = false; lastKey = ''; report();
@@ -218,6 +237,7 @@ function clipWebs() {
   }
 }
 function report() {
+  if (nativeId) return;                                              // (no center: the system has the window and the mouse)
   clipWebs();
   const list = [...panes.values()].map(p => ({ ...p.box(), hit: p.interactive, blur: p.blurLevel() })).concat([...webs.values()].flatMap(p => p.boxes()));          // (a window that is click-through takes no mouse: it goes through; the place is kept for the send box)
   const wheel = [...panes.values()].filter(p => p.zone).map(p => p.box()).concat([...webs.values()].filter(p => p.zone).map(p => p.wheelBox()));                    // (the wheel over these goes to the window, not to the game)
@@ -266,6 +286,7 @@ await listen('voice-lamp', e => {
 // the size of everything: "화면 배율" (0 = as the main screen has it); the notice says it once when it is not 100%
 let scaleTold = false;
 async function applyScale() {
+  if (nativeId) return;
   try { await invoke('center_zoom', { label, scale: (Number(cfg.center_scale) || 0) / 100 }); } catch { return; }
   for (const p of everyBox()) p.place();
   report();
@@ -276,6 +297,7 @@ async function applyScale() {
 }
 // the screens changed (or this is the start): where the page starts is told again; a window that is out of every screen comes back to the main one, once told
 function fit() {
+  if (nativeId) return;
   const d = dpr(), moved = [];
   for (const p of everyBox()) {
     const b = p.screenBox(), seen = screens.some(m => Math.min(b.x + b.w, m[0] + m[2]) - Math.max(b.x, m[0]) >= 60 && Math.min(b.y + b.h, m[1] + m[3]) - Math.max(b.y, m[1]) >= 22);
@@ -297,7 +319,7 @@ function layout(l) {
   works = l.work || [];
   return applyScale().then(fit);
 }
-await listen('center-layout', e => layout(e.payload));
+await listen('center-layout', e => { if (!nativeId) layout(e.payload); });
 // the web windows: which are open (the hub), the title and the address of the page, how far it has scrolled (the program: webwin.rs)
 await listen('web-state', e => { webBy[e.payload.source === 'browser' ? 'browser' : 'plugin'] = e.payload.windows || []; webWins = [...webBy.plugin, ...webBy.browser]; sync(); });
 await listen('web-zoom', e => { const p = webs.get(e.payload.label); if (p && p.setZoom) p.setZoom(e.payload.zoom); });
@@ -325,8 +347,12 @@ emit('voice-lamp-hello', {});
 emit('win-state-hello', {});
 sync();
 await applyScale();
-await layout(await invoke('center_layout').catch(() => null));
+if (nativeId) {                                                    // (where the page starts on the screen: asked for now and then; the pane fills the window, also when the window is made larger)
+  const where = async () => { try { const o = await invoke('native_origin', { label }); if (o && (o.x !== ox || o.y !== oy)) { ox = o.x; oy = o.y; } } catch { /* the window is gone */ } };
+  await where(); setInterval(where, 250);
+  addEventListener('resize', () => { for (const p of panes.values()) p.place(); });
+} else await layout(await invoke('center_layout').catch(() => null));
 report();
-invoke('center_ready', { label }).catch(() => {});                    // (the program shows the three centers when all of them have said this: nothing is seen before it is drawn)
+if (!nativeId) invoke('center_ready', { label }).catch(() => {});                    // (the program shows the three centers when all of them have said this: nothing is seen before it is drawn)
 setInterval(report, 1000);
 perfReport('center' + mode, emit);                                  // (how long the jobs of this page take: the options show it)

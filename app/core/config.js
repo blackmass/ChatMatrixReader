@@ -152,6 +152,7 @@ export const DEFAULTS = {
     center_scale: 0,                       // 3.2: the size of the translation windows' contents: 0 = as the main screen has it, else a percent (100 ... 200)
     through_tips: true,                    // click-through windows: the tip of a link (item, quest ...) under the mouse is shown (the page cannot see the mouse: the window loop does)
     debug_log: debuglog.defaults(),         // 3.2: the areas of the detailed log that are on (Options > 기록 > 상세 기록; all off)
+    bar_fullscreen: false,                 // 3.2.1: a double click on the bar of a window lays it on its monitor (and back), and the menu of the bar has the layouts (half, quarter). Off: neither
     chat_links: true,                      // 3.2: a web address in the chat is a link: [discord.gg/abc] (a click asks where to open it). Off: it stays plain text
     read_matrix: true,                     // 3.2: the screen is read for the chat matrix (off: only the overlay is used; read once at the start)
     auto_copy: false,                      // the text selected in a window is copied when the mouse leaves the window
@@ -199,6 +200,7 @@ export function normalize(saved) {
   cfg.auto_copy = cfg.auto_copy === true;
   cfg.read_matrix = cfg.read_matrix !== false;
   cfg.chat_links = cfg.chat_links !== false;
+  cfg.bar_fullscreen = cfg.bar_fullscreen === true;
   cfg.by_method = cleanByMethod(cfg.by_method);
   if (typeof cfg.bg_opacity === 'number' && cfg.bg_opacity > winconf.MAX_BG_OPACITY) cfg.bg_opacity = winconf.MAX_BG_OPACITY;          // (window 1: see MAX_BG_OPACITY)
   cfg.debug_log = debuglog.normalize(cfg.debug_log);

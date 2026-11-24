@@ -12,7 +12,7 @@ import { isMac } from './platform.js';
 import { T } from './core/timings.js';
 import { PageView } from './pageview.js';
 import * as settings from './settings.js';
-import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow } from './frame.js';
+import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow, tileBox, untileBox } from './frame.js';
 
 export { BAR_H };
 
@@ -20,7 +20,7 @@ export class Pane {
   // center: { cfg(), dpr(), origin() -> [ox, oy] in pixels, changed(pane) }
   constructor(id, center) {
     this.id = id; this.center = center; this.label = `c${id}`;
-    this.head = BAR_H; this.flip = false;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
+    this.head = BAR_H; this.flip = false; this.tiled = ''; this.restoreRect = null;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
     this.lags = []; this.lmbAt = 0; this.lastDown = -1e9; this.wheelCount = 0;                  // (how long a click takes to reach the page: for the diagnosis in the options)
     this.review = false; this.reviewIdle = 0; this.reviewShown = false; this.zone = false; this.lastInput = -1e9;      // (reading the old chat: see userScrolled)
     this.interactive = true; this.outside = true; this.hover = false; this.wasThrough = null;      // (the state of the mouse: see tick)
@@ -47,15 +47,21 @@ export class Pane {
     }, true);         // (touched: this pane comes to the front of the center)
     this.place();
     // the bar moves the window (a tab only changes the chat when there are several: like 3.1.1)
-    this.drag(this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.opt('lock_window', false) && !e.target.closest('button') && !(this.chats.size > 1 && e.target.closest('.ptab')));
+    this.drag(this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.opt('lock_window', false) && !this.tiled && !e.target.closest('button') && !(this.chats.size > 1 && e.target.closest('.ptab')));
+    // (the option "위쪽 바 더블클릭으로 전체 화면"): a double click on the bar lays the window on its monitor, another one puts it back. Not on a button, not on a tab that has others next to it (a quick second click on a tab is a tab), not while locked.
+    this.el.querySelector('.pbar').addEventListener('dblclick', e => {
+      if (!this.center.cfg().bar_fullscreen || this.opt('lock_window', false) || e.target.closest('button') || (this.chats.size > 1 && e.target.closest('.ptab'))) return;
+      if (this.tiled) this.untile(); else this.tile('full');
+    });
     this.tools();
-    sizeEdges(this, () => !this.opt('lock_window', false));         // (the corner at the bottom right and the edges left, right, bottom and the corner bottom left; the top is the bar)
+    sizeEdges(this, () => !this.opt('lock_window', false) && !this.tiled);         // (the corner at the bottom right and the edges left, right, bottom and the corner bottom left; the top is the bar)
     this.update();
   }
   confOf(id) { const cfg = this.center.cfg(); return id === MAIN ? null : cfg.child_windows.find(c => c.id === id) || winconf.newConf(id, [...winconf.KNOWN, winconf.ETC]); }
   optOf(id, key, dflt) { const cfg = this.center.cfg(); return id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? dflt) : winconf.opt(this.confOf(id), cfg, key, dflt); }
   conf() { return this.confOf(this.id); }
-  opt(key, dflt) { return this.optOf(this.id, key, dflt); }
+  // (a window of the system, center.js `native`: the system moves it, sizes it and has it in front: locked for our own frame, and nothing to go through)
+  opt(key, dflt) { if (this.center.native && (key === 'lock_window' || key === 'click_through' || key === 'hover_clear')) return key === 'lock_window'; return this.optOf(this.id, key, dflt); }
   // an option of a chat: what belongs to the window (place, order, blur, ...) follows the host of the tabs, the rest (the look of the text, the filter) is its own
   copt(id, key, dflt) { return id === this.id || winconf.HOST_KEYS.has(key) ? this.opt(key, dflt) : this.optOf(id, key, dflt); }
 
@@ -101,6 +107,14 @@ export class Pane {
   // the place: the text area is where the window of 3.1.1 was (its saved geometry is the place and the size of the text area); the bar stands above it
   savedGeometry() { return this.id === MAIN ? this.center.cfg().geometry : (this.conf() || {}).geometry; }
   place() {
+    if (this.center.native) {                                                // (a window of the system: the text area is the window below the bar, whatever its size is now)
+      this.tiled = ''; this.restoreRect = null;
+      this.rect = { x: 0, y: BAR_H, w: Math.max(40, innerWidth), h: Math.max(40, innerHeight - BAR_H) };
+      this.geo = this.seenGeo = this.savedGeometry() || '';
+      this.layout();
+      return;
+    }
+    this.tiled = ''; this.restoreRect = null;                             // (the place of the settings: a window that was laid on a monitor is not any more)
     const cfg = this.center.cfg(), g = layout.parseGeometry(this.savedGeometry()) || { w: layout.DEFAULT_SIZE[0], h: layout.DEFAULT_SIZE[1], x: null, y: null };
     const d = this.center.dpr(), [ox, oy] = this.center.origin();
     let { x, y } = g;
@@ -118,7 +132,7 @@ export class Pane {
   }
   layout() {
     const r = this.rect;
-    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip);                              // (touching the top of a monitor: the bar goes below the text)
+    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip); this.el.classList.toggle('tiled', !!this.tiled);          // (touching the top of a monitor: the bar goes below the text)
     const grip = this.el.querySelector('.pgrip'); if (grip) grip.style.bottom = this.flip ? BAR_H + 'px' : '';          // (the corner to resize by stays at the corner of the text, over the bar)
     this.el.style.left = r.x + 'px'; this.el.style.top = (this.flip ? r.y : r.y - BAR_H) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + BAR_H) + 'px';
   }
@@ -131,12 +145,16 @@ export class Pane {
   box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: this.boxY() * d, w: r.w * d, h: (r.h + BAR_H) * d, bar: BAR_H * d, below: this.flip }; }
   // where the text area is on the screen now: told to the hub, which keeps it in the settings (a window of 3.1.1 did the same)
   save() {
+    if (this.tiled || this.center.native) return;                          // (what lays a window on a monitor is not kept: the place of the settings stays. A window of the system: nothing is kept yet)
     const r = this.rect, d = this.center.dpr(), [ox, oy] = this.center.origin();
     this.geo = layout.formatGeometry(r.w * d, r.h * d, ox + r.x * d, oy + r.y * d);
     emit('win-geometry', { id: this.id, geometry: this.geo });
   }
 
   drag(target, fn, accept, flag) { dragFrame(this, target, fn, accept, flag); }
+  // laid on the monitor it is on (frame.js tileBox): 'full' | 'top' | 'bottom' | 'left' | 'right' | 'tl' | 'tr' | 'bl' | 'br'; a window that is locked is not
+  tile(kind) { if (!this.opt('lock_window', false)) tileBox(this, kind); }
+  untile() { untileBox(this); }
 
   // the settings changed (or the first time)
   update() {

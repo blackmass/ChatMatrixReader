@@ -84,6 +84,8 @@ async function invoke(cmd, a = {}) {
     case 'web_info': return { exists: true, visible: true, position: [100, 50], size: [360, 640] };
     case 'web_cmd': webCalls.push(['cmd', a.label, a.cmd, a.url]); return null;
     case 'web_alpha': webCalls.push(['alpha', a.label, a.alpha]); return null;
+    case 'native_origin': return { x: 300, y: 200, scale: 1 };
+    case 'native_open': webCalls.push(['native_open', a.id, a.title]); return null;
     case 'web_through': webCalls.push(['through', a.label, a.on, a.enabled]); return null;
     case 'web_wheel': webCalls.push(['wheel', a.label, a.x, a.y, a.delta]); return null;
     case 'web_ua': webCalls.push(['ua', a.label, a.ua, a.hints]); return null;
@@ -1155,6 +1157,57 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
       kb.cx = 0; kb.cy = 0;
       await until(() => th()[2] === false, 'browser/through: off: the page takes the mouse', 4000);
       await until(() => webCalls.filter(c => c[0] === 'through' && c[1] === 'web_b1').at(-1)[3] === false, 'browser/through: off: the page is told it is not click-through any more', 4000);
+    }
+    // laying a window on its monitor (3.2.1): off by default; with the option, a double click on the bar fills the monitor, another puts it back; the menu has the halves and the quarters; nothing is saved
+    {
+      const boxOf = id => centerRects.at(-1).panes.find(p => p.id === id);
+      const bar = cp.locator('.pane:not(.webpane) .pbar').first();
+      const dbl = () => bar.locator('.pspace').dispatchEvent('dblclick', { bubbles: true });
+      await cp.waitForTimeout(300);
+      const b0 = { ...boxOf('1') }, geo0 = cfgFile().geometry;
+      await dbl(); await cp.waitForTimeout(300);
+      ok(boxOf('1').w === b0.w && boxOf('1').h === b0.h, 'tile: a double click on the bar does nothing while the option is off');
+      await control.evaluate(() => import('./settings.js').then(m => m.set({ bar_fullscreen: true })));
+      await cp.waitForTimeout(300);
+      await dbl();
+      await until(() => boxOf('1').w === 3840 && boxOf('1').h === 2160 && boxOf('1').x === 0 && boxOf('1').y === 0, 'tile: a double click on the bar fills the monitor (the bar and the text: the whole monitor)', 4000);
+      ok(await cp.locator('.pane:not(.webpane)').first().evaluate(e => e.classList.contains('tiled')), 'tile: the window says it is laid on the monitor (the grips are hidden)');
+      ok(cfgFile().geometry === geo0, 'tile: the place of the settings is not changed by it');
+      await dbl();
+      await until(() => boxOf('1').w === b0.w && boxOf('1').h === b0.h && boxOf('1').x === b0.x && boxOf('1').y === b0.y, 'tile: another double click puts it back to the size and the place it had', 4000);
+      // the menu: "전체 화면" has a second level
+      await bar.dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 10 });
+      await until(async () => (await cp.locator('#ctx').isVisible()) && (await cp.locator('#ctx div', { hasText: '전체 화면' }).count()) > 0, 'tile: the menu of the bar has "전체 화면"', 4000);
+      await cp.locator('#ctx div', { hasText: '전체 화면' }).first().click();
+      await until(async () => (await cp.locator('#ctx div', { hasText: '왼쪽 절반' }).count()) > 0 && (await cp.locator('#ctx div', { hasText: '뒤로' }).count()) > 0, 'tile: its second level has the halves, the quarters and a way back', 4000);
+      ok((await cp.locator('#ctx div').allTextContents()).join('|').includes('오른쪽 아래'), 'tile: the second level has the corners too');
+      await cp.locator('#ctx div', { hasText: '왼쪽 절반' }).first().click();
+      await until(() => boxOf('1').w === 1920 && boxOf('1').h === 2160 && boxOf('1').x === 0, 'tile: the left half of the monitor', 4000);
+      await bar.dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 10 });
+      await cp.locator('#ctx div', { hasText: '전체 화면' }).first().click();
+      await cp.locator('#ctx div', { hasText: '오른쪽 아래' }).first().click();
+      await until(() => boxOf('1').w === 1920 && boxOf('1').h === 1080 && boxOf('1').x === 1920 && boxOf('1').y === 1080, 'tile: from one tile to another: the bottom right quarter', 4000);
+      await bar.dispatchEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 10 });
+      await cp.locator('#ctx div', { hasText: '전체 화면' }).first().click();
+      await cp.locator('#ctx div', { hasText: '원래 크기로' }).first().click();
+      await until(() => boxOf('1').w === b0.w && boxOf('1').h === b0.h && boxOf('1').x === b0.x && boxOf('1').y === b0.y, 'tile: "원래 크기로" puts it back to what it was before the first tile', 4000);
+      await control.evaluate(() => import('./settings.js').then(m => m.set({ bar_fullscreen: false })));
+      await cp.waitForTimeout(200);
+    }
+    // a translation window as a window of the system (3.2.1 test: center.html?native=<id>): the pane fills the page below the frame the system gives, nothing of a center is done
+    {
+      const np = await open('center.html?native=1', { width: 700, height: 500 });
+      await until(async () => (await np.locator('.pane').count()) === 1, 'native: the page of a window of the system has the pane of its window', 8000);
+      const fill = async (w, h, what) => { await until(async () => { const r = await np.locator('.pane').first().boundingBox(); return r && Math.abs(r.width - w) < 2 && Math.abs(r.height - h) < 2 && r.x === 0 && r.y === 0; }, what, 4000); };
+      await fill(700, 500, 'native: the pane (the bar and the text) fills the window');
+      await np.setViewportSize({ width: 900, height: 620 });
+      await fill(900, 620, 'native: the pane follows when the system makes the window larger');
+      ok(await np.evaluate(() => document.body.classList.contains('native')) && await np.locator('.pane.locked').count() === 1, 'native: the page knows it is a window of the system, and the pane is not moved or resized by our frame');
+      ok(await np.locator('.pane .pgrip').first().evaluate(e => getComputedStyle(e).display === 'none'), 'native: no grip to resize by (the system has the frame)');
+      await np.waitForTimeout(500);
+      ok(!centerRects.some(r => r.label === 'native1'), 'native: no center is told about it (no hit boxes, no blur, no wheel zone)');
+      ok(await np.locator('.pane .plines').count() >= 1, 'native: the lines are there');
+      await np.close();
     }
     // the order of the web windows: the center draws their frames by `z` and tells the program, which puts their pages in the same order; every translation window is above them all
     await control.evaluate(() => import('./settings.js').then(m => m.set({ browser_windows: [...m.cfg().browser_windows, { id: 2, name: '', mode: 'mobile', start_kind: 'url', start_url: 'https://www.google.com/', last_url: '', persist: false, topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1, idle_alpha: 1 }] })));

@@ -52,6 +52,8 @@ html, body.center { margin: 0; width: 100%; height: 100%; background: transparen
 .pane.has-alert.hide-tabs.outside .ptab.alert { opacity: 1; transition: none; }
 .pane.locked .pbar { cursor: default; }
 .pane.locked .pgrip { display: none !important; }
+body.native { background: #1b1c20; }          /* (a window of the system is not transparent) */
+.pane.tiled .pgrip, .pane.tiled .e-l, .pane.tiled .e-r, .pane.tiled .e-b, .pane.tiled .e-bl, .pane.tiled .pedge { display: none !important; }          /* (laid on a monitor: nothing to resize by) */
 
 /* reading the earlier chat while the window is click-through (the wheel up over it): a coloured frame and a way back down */
 .pane.review .pbody::after { display: block; border: 2px solid #e0a030; }

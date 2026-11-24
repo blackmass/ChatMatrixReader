@@ -5,10 +5,22 @@ import * as winconf from './core/winconf.js';
 import { tr } from './core/i18n.js';
 import { nameFor } from './winname.js';
 import * as B from './core/browsers.js';
+import { TILES } from './core/tiling.js';
 
-export function menuList({ cfg, pane, ev, open, browsersOpen = new Set() }) {
+// "전체 화면" (only with the option "위쪽 바 더블클릭으로 전체 화면"): the second level lists where the window goes on its monitor. A window that is locked has it grey.
+function tileMenu(cfg, pane, list) {
+  if (!cfg.bar_fullscreen) return;
+  const names = { full: tr('꽉 채우기'), top: tr('위쪽 절반'), bottom: tr('아래쪽 절반'), left: tr('왼쪽 절반'), right: tr('오른쪽 절반'), tl: tr('왼쪽 위'), tr: tr('오른쪽 위'), bl: tr('왼쪽 아래'), br: tr('오른쪽 아래') };
+  const sub = [];
+  if (pane.tiled) sub.push({ text: tr('원래 크기로'), fn: () => pane.untile() }, { cls: 'sep' });
+  for (const k of TILES) sub.push({ text: names[k], fn: () => pane.tile(k), cls: pane.tiled === k ? 'on' : '' });
+  list.push({ text: tr('전체 화면'), sub, cls: pane.opt('lock_window', false) ? 'off' : '' });
+}
+
+export function menuList({ cfg, pane, ev, open, browsersOpen = new Set(), nativeTest = false }) {
   const list = [], add = (text, fn, cls = '') => list.push({ text, fn, cls });
   if (pane.kind === 'browser') return browserMenu(cfg, pane, add, list);
+  if (pane.kind === 'web') return webMenu(cfg, pane, add, list);
   // the tab that was clicked with the right button (its name, without being shown first); anywhere else: the tab that is shown
   const tabEl = ev.target.closest && ev.target.closest('.ptab');
   const target = pane.chats.get(tabEl ? Number(tabEl.dataset.chat) : pane.active) || pane.chats.get(pane.id);
@@ -28,6 +40,8 @@ export function menuList({ cfg, pane, ev, open, browsersOpen = new Set() }) {
     openOptions();
   });
   const picked = getSelection().toString();
+  tileMenu(cfg, pane, list);
+  if (nativeTest && !pane.center.native) add(tr('독립 창으로 열기 (시험)'), () => invoke('native_open', { id: target.id, title: nameFor(cfg, target.id) }).catch(e => pane.note('✖ ' + e)));
   add(tr('선택한 글 복사'), () => { try { window.__TAURI__.clipboardManager.writeText(picked); } catch { document.execCommand('copy'); } }, picked ? '' : 'off');
   add(tr('창 비우기'), () => target.view.apply(target.feed.clear(), target.feed.model));
   // merging: a tab leaves its window; a window (that has no tabs of its own and is not the main one) becomes a tab of another
@@ -67,8 +81,20 @@ function browserMenu(cfg, pane, add, list) {
     emit('cfg-patch', { patch: { bookmarks: [...(cfg.bookmarks || []), { name: pane.title || '', url: pane.url }] } });
   }, B.isWebUrl(pane.url) && !marks.some(m => m.url === pane.url) ? '' : 'off');
   add(tr('현재 페이지를 내 브라우저에서 열기'), () => invoke('web_cmd', { label: pane.label, cmd: 'external' }).catch(() => {}), B.isWebUrl(pane.url) ? '' : 'off');
+  tileMenu(cfg, pane, list);
   add(tr('이 창의 설정…'), () => {
     try { localStorage.setItem('cmr-browser-sel', 'b' + pane.win); localStorage.setItem('cmr-options-tab', 'browser'); } catch { /* the options open as they were */ }
+    invoke('open_options').catch(() => {});
+  });
+  return list;
+}
+
+// the menu of a web window of a plugin (a page of the web the plugin opened: the addresses are the plugin's)
+function webMenu(cfg, pane, add, list) {
+  add(tr('현재 페이지를 내 브라우저에서 열기'), () => invoke('web_cmd', { label: pane.label, cmd: 'external' }).catch(() => {}), B.isWebUrl(pane.url) ? '' : 'off');
+  tileMenu(cfg, pane, list);
+  add(tr('이 창의 설정…'), () => {
+    try { localStorage.setItem('cmr-browser-sel', 'w' + pane.win); localStorage.setItem('cmr-options-tab', 'browser'); } catch { /* the options open as they were */ }
     invoke('open_options').catch(() => {});
   });
   return list;

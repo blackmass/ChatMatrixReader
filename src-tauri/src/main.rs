@@ -341,6 +341,9 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
         // the blur of a pane (center.rs): an empty transparent window under its center, the system blurs what is behind it
         "blur" => b.title("CMR Blur").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).inner_size(100.0, 100.0),
         "center" => b.title("CMR Center").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).accept_first_mouse(true).inner_size(400.0, 300.0),
+        // a window of the system with its own frame, title bar, task bar button (the test of 3.2.1: the window shows one translation window with the page of the center, see center.js `native`): the system does the
+        // moving, the sizing, the snapping, the maximizing; it takes the keyboard like any window
+        "native" => b.title("ChatMatrix").inner_size(520.0, 420.0).min_inner_size(240.0, 160.0).center(),
         "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),
         // the control window is the program's brain, not something to look at: it is never shown. An empty file "show_control" next to app/
@@ -483,6 +486,34 @@ async fn open_options(app: AppHandle) -> Result<(), String> {
         return r;
     }
     make_window(&app, "options", "options.html", "options").map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Is the test of the windows of the system on? An empty file `native_test` next to the program (like `show_control`): the menu of a translation window has the item for it. Looked at each time the menu opens, so
+/// making or deleting the file needs no restart.
+#[tauri::command]
+fn native_test_on() -> bool { base_dir().join("native_test").exists() }
+
+/// A translation window as a window of the system (3.2.1 test): the page of the center in a mode that shows only window `id`, filling its window. The window is made once; a second call shows it.
+/// `title`: the name of the window (the title bar says it). Nothing about it is saved yet.
+#[tauri::command]
+async fn native_open(app: AppHandle, id: i64, title: Option<String>) -> Result<(), String> {
+    let label = format!("native{id}");
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        return w.set_focus().map_err(|e| e.to_string());
+    }
+    let w = make_window(&app, &label, &format!("center.html?native={id}"), "native").map_err(|e| e.to_string())?;
+    if let Some(t) = title.filter(|t| !t.trim().is_empty()) { let _ = w.set_title(&format!("ChatMatrix · {}", t.chars().take(60).collect::<String>())); }
+    Ok(())
+}
+
+/// Where the page of a window of the system starts on the screen (its inner area, in pixels of the screen) and the scale of the screen it is on: the page works from it (center.js: native).
+#[tauri::command]
+async fn native_origin(app: AppHandle, label: String) -> Result<serde_json::Value, String> {
+    let w = app.get_webview_window(&label).ok_or("no such window")?;
+    let p = w.inner_position().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "x": p.x, "y": p.y, "scale": w.scale_factor().unwrap_or(1.0) }))
 }
 
 /// Shows the send box next to the window `label` (same width) and gives it the keyboard. `place`: "auto" (or nothing) = under the window, above it when under it
@@ -1129,6 +1160,9 @@ fn main() {
             find_game,
             capture,
             open_options,
+            native_open,
+            native_test_on,
+            native_origin,
             open_url,
             open_chat_url,
             set_window_rect,
