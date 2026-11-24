@@ -866,16 +866,24 @@ pub fn set_center_hwnd(center: isize, hwnd: isize) {
     if let Ok(mut l) = CENTER_NUMS.lock() { l.retain(|e| e.0 != center); l.push((center, hwnd, number)); }
 }
 
+/// A window that does not count as covering: a window of this program, of the layers of the screen saver and the pointer, an empty one, and a cover of the whole screen above the ordinary windows (the Dock has an
+/// invisible one of the size of the screen at layer 20: it lets the mouse through to what is under it, but the list of windows does not say so).
+fn not_a_cover(w: &SysWin, me: i32, screen: (f64, f64)) -> bool {
+    w.pid == me || w.layer >= 100 || w.w < 1.0 || w.h < 1.0 || (w.layer > 0 && w.w >= screen.0 - 1.0 && w.h >= screen.1 - 1.0)
+}
+fn main_screen_size() -> (f64, f64) { let b = CGDisplay::main().bounds(); (b.size.width, b.size.height) }
+
 /// (only for the detailed log "mouse") What the check of `covered_by_other` sees: where the center is in the list of windows, and the first window that covers the point above it.
 fn diag_cover(center: isize, x: f64, y: f64) -> String {
     let number = CENTER_NUMS.try_lock().ok().and_then(|l| l.iter().find(|e| e.0 == center).map(|e| e.2)).unwrap_or(0);
     let me = std::process::id() as i32;
+    let screen = main_screen_size();
     let list = windows();
     let pos = list.iter().position(|w| w.number as isize == number);
     let mut over = String::from("nothing");
     for w in list.iter() {
         if w.number as isize == number { break; }
-        if w.pid == me || w.layer >= 100 || w.w < 1.0 || w.h < 1.0 { continue; }
+        if not_a_cover(w, me, screen) { continue; }
         if x >= w.x && x < w.x + w.w && y >= w.y && y < w.y + w.h { over = format!("{} (layer {}, {}x{} at {},{}, number {})", w.owner, w.layer, w.w as i32, w.h as i32, w.x as i32, w.y as i32, w.number); break; }
     }
     format!("number {number}, found at {pos:?} of {} windows, covered by: {over}", list.len())
@@ -903,9 +911,10 @@ fn covered_by_other(center: isize, x: f64, y: f64) -> bool {
     let number = CENTER_NUMS.try_lock().ok().and_then(|l| l.iter().find(|e| e.0 == center).map(|e| e.2)).unwrap_or(0);
     if number <= 0 { return false; }
     let me = std::process::id() as i32;
+    let screen = main_screen_size();
     for w in windows() {
         if w.number as isize == number { return false; }                             // (the center itself: nothing above it covers)
-        if w.pid == me || w.layer >= 100 || w.w < 1.0 || w.h < 1.0 { continue; }
+        if not_a_cover(&w, me, screen) { continue; }
         if x >= w.x && x < w.x + w.w && y >= w.y && y < w.y + w.h { return true; }
     }
     false
