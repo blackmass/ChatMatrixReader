@@ -19,3 +19,10 @@ check(w.wantedOpen({ id: 3, open_mode: 'always' }, new Set()) && !w.wantedOpen({
   const crowd = []; for (let i = 0; i < 60; i++) crowd.push({ x: 540 + 36 * i, y: 149 + 36 * i });
   eq(w.firstPlace({ w: 360, h: 640 }, area, crowd, 44), [540, 149], 'no room for another step: the middle again');
 }
+
+// a window that may be click-through: does it take the mouse now?
+{
+  const t = (o) => w.takesMouse({ through: true, held: false, inside: false, game: true, drag: false, ...o });
+  eq([t({}), t({ through: false }), t({ held: true }), t({ held: true, inside: true }), t({ inside: true }), t({ game: false }), t({ drag: true })], [false, true, false, true, false, true, true],
+    'takesMouse: not through = yes; through = only with the keys and the pointer over it, with no game, or while a drag goes on');
+}

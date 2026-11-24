@@ -16,7 +16,7 @@ export const isWebUrl = text => {
 
 export const defaultBrowser = id => ({
   id, name: '', mode: 'mobile', start_kind: 'url', start_url: START_URL, last_url: '', persist: false,
-  topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1, idle_alpha: 1, hide_ui: false,
+  topmost: true, topmost_wow_only: false, lock_window: false, geometry: '', zoom: 1, idle_alpha: 1, hide_ui: false, click_through: false,
   shift_scroll: false, ctrl_zoom: true, rclick_close: false, rclick_copy: true, remember_zoom: false,
 });
 
@@ -39,8 +39,9 @@ export function normalizeBrowsers(list) {
     d.last_url = isWebUrl(text(it.last_url, 2000)) ? text(it.last_url, 2000) : '';
     d.persist = flag(it.persist, false);
     d.topmost = flag(it.topmost, true); d.topmost_wow_only = flag(it.topmost_wow_only, false);
-    if (d.topmost_wow_only) d.topmost = false;
+    if (d.topmost_wow_only) d.topmost = false; else d.topmost = true;                // (always on top or above the game only, one of the two: earlier versions let it be neither)
     d.lock_window = flag(it.lock_window, false);
+    d.click_through = flag(it.click_through, false);                                                          // (the mouse goes through the window to the game; the interact keys of the translation windows take it back)
     d.geometry = /^\d+x\d+\+-?\d+\+-?\d+$/.test(text(it.geometry, 40)) ? text(it.geometry, 40) : '';
     d.zoom = Number.isFinite(it.zoom) ? Math.min(3, Math.max(0.3, Math.round(it.zoom * 10) / 10)) : 1;             // (how large the page is drawn: 30 % .. 300 %, by steps of 10 %)
     d.hide_ui = flag(it.hide_ui, false);                                                                      // (the bars, the address and the frame are hidden while the mouse is not over the window)

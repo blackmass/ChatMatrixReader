@@ -6,6 +6,7 @@ import { transport } from './transport.js';
 import * as settings from './settings.js';
 import { log } from './core/log.js';
 import { Glossary } from './core/glossary.js';
+import { glossaryFiles, withMethod } from './core/translate_rules.js';
 import { startI18n } from './i18n_host.js';
 import { tr } from './core/i18n.js';
 import { startUpkeep } from './upkeep_host.js';
@@ -43,7 +44,7 @@ log.sink = (level, msg) => {
 const cfg = await settings.load();
 await startI18n(settings);
 const glossary = new Glossary(files);
-glossary.ensureDefault(cfg.glossary_file);                      // Glossary.txt from Glossary.sample.txt on the first start
+for (const name of glossaryFiles(cfg)) glossary.ensureDefault(name);       // Glossary.txt from Glossary.sample.txt on the first start (and the files the methods have of their own)
 const translator = new Translator({ http: makeHttp(transport), glossary, usage: new Usage(files) });
 
 // ---- events for the windows (kept a while, so a window opened later can catch up)
@@ -74,10 +75,15 @@ listen('rpc-translate', async ev => {                           // other windows
   catch (e) { emit('rpc-result', { id, error: String(e?.message || e) }); }
 });
 
-// the translation test of the options window: the translation method as it is set now (glossary, prompt ...), and how long it took
+// the translation test of the options window: the translation method as it is set now (glossary, prompt ...), and how long it took.
+// `method`: none = how the lines of the chat are translated (the method of the translation tab, with what that method has of its own); 'shared' = that method with the settings every method shares
+// (the first page of the glossary tab); google | openai | custom = that method, with what it has of its own (the page of the glossary tab that is open)
 listen('rpc-test', async ev => {
-  const { id, text } = ev.payload;
-  const cfg = { ...settings.cfg() }, t0 = performance.now();
+  const { id, text, method } = ev.payload;
+  let cfg = { ...settings.cfg() };
+  const t0 = performance.now();
+  if (['google', 'openai', 'custom'].includes(method)) cfg.translator = method;
+  if (method !== 'shared') cfg = withMethod(cfg);
   const ms = () => Math.round(performance.now() - t0);
   const who = cfg.translator === 'google' ? 'Google' + (googleKey(cfg) ? ' (API Key)' : '')
     : cfg.translator === 'custom' ? (cfg.custom_preset || cfg.custom_url || 'HTTP') : (cfg.api_model || cfg.api_url || 'AI');

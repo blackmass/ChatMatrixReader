@@ -37,7 +37,7 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, plac
   // what the user chose (the window entry may not be there yet: the defaults of a new window)
   const opts = id => {
     const c = getConf(id) || {}, g = parseGeom(c.geometry);
-    return { cookies: !!c.cookies, ...(g || {}) };                    // (the login is kept when the user chose it for this window: Options > 미니 브라우저)
+    return { cookies: !!c.cookies, click_through: !!c.click_through, ...(g || {}) };                    // (the login is kept when the user chose it for this window: Options > 미니 브라우저)
   };
 
   // the open windows, told to the centers: { win: the number of its entry in the list of windows, label, title, lock }
@@ -76,7 +76,7 @@ export function createWebHost({ getEntry, getConf, patchConf, invoke, note, plac
     async open(id, { url, title = '', mobile = true }, patterns, openAllow = []) {
       const w = opts(id);
       const phone = mobile ? mobileProfile() : {};                    // (the same phone as a window of the mini browser: the user agent and the headers of the browser that say the same)
-      const args = { label: webLabel(id), url, title, ua: phone.ua || '', ua_hints: phone.hints || null, allow: patterns, open_allow: openAllow, persist: !!w.cookies, shift_scroll: !!w.shift_scroll, rclick_copy: w.rclick_copy !== false, key: id, render: getRender(),
+      const args = { label: webLabel(id), url, title, ua: phone.ua || '', ua_hints: phone.hints || null, allow: patterns, open_allow: openAllow, persist: !!w.cookies, shift_scroll: !!w.shift_scroll, rclick_copy: w.rclick_copy !== false, through: !!w.click_through, key: id, render: getRender(),
         w: Number.isFinite(w.w) ? w.w : null, h: Number.isFinite(w.h) ? w.h : null, x: Number.isFinite(w.x) ? w.x : null, y: Number.isFinite(w.y) ? w.y : null };
       if (args.w === null || args.h === null) { delete args.w; delete args.h; delete args.x; delete args.y; args.w = DEFAULT_W; args.h = DEFAULT_H;
         const at = await place(DEFAULT_W, DEFAULT_H, 22); if (at) { args.x = at[0]; args.y = at[1]; } }          // (the first time: the middle of the screen, never under the menu bar)

@@ -6,6 +6,7 @@ import { LostHint } from './core/upkeep.js';
 import { log } from './core/log.js';
 import { tr } from './core/i18n.js';
 import { every } from './core/timings.js';
+import { isMac } from './platform.js';
 
 const invoke = window.__TAURI__.core.invoke;
 // The wait between two looks. On macOS the timers of a page that is not in front are slowed down by the system (seconds instead of 33 ms), so the exe
@@ -60,6 +61,38 @@ export function startCapture({ settings, publish, pipeline }) {
       }
     },
   };
+  // How the screen is read ("화면 읽기 방식", a test): 'window' = the window of the game only (the exe: capture_game), what stands over it is not in the picture. Whatever goes wrong, the screen is read as before for a
+  // while and the reason is in the log; the time of both ways is told now and then.
+  const way = { mode: 'screen', started: false, backoffUntil: 0, lastWhy: '', n: { window: 0, screen: 0, failed: 0 }, ms: { window: 0, screen: 0 }, at: nowSec() };
+  io.grab = async (x, y, w, h) => {
+    const want = settings.cfg().capture_mode === 'window' && game.hwnd && !isMac;                // (not made for the Mac yet: a setting that came from a Windows computer is read as "screen" here)
+    if (!want && (way.mode === 'window' || way.started)) { if (way.mode === 'window') log.info('캡처: 화면 읽기 방식: 화면'); way.mode = 'screen'; way.started = false; invoke('capture_game_stop').catch(() => {}); }          // (the option is off: the exe lets the window go)
+    if (want && nowSec() >= way.backoffUntil) {
+      const t0 = performance.now();
+      way.started = true;
+      try {
+        const u8 = new Uint8Array(await invoke('capture_game', { hwnd: game.hwnd, x, y, w, h }));
+        const head = new DataView(u8.buffer, u8.byteOffset, 8);
+        if (way.mode !== 'window') { way.mode = 'window'; log.info('캡처: 화면 읽기 방식: 게임 창'); }
+        way.n.window++; way.ms.window += performance.now() - t0;
+        return { px: u8.subarray(8), width: head.getUint32(0, true), height: head.getUint32(4, true) };
+      } catch (e) {
+        const why = String(e && e.message || e);
+        way.n.failed++; way.backoffUntil = nowSec() + 10;
+        if (way.mode === 'window') way.mode = 'screen';
+        if (why !== way.lastWhy) { way.lastWhy = why; log.warn('캡처: 게임 창 읽기가 안 돼서 화면으로 읽습니다 (10초 뒤 다시 시도): ' + why); }
+      }
+    }
+    const t1 = performance.now();
+    const r = await grab(x, y, w, h);
+    way.n.screen++; way.ms.screen += performance.now() - t1;
+    return r;
+  };
+  const wayReport = () => {                                     // every half minute that the test is on: how long each way took
+    if (nowSec() - way.at < 30) return;
+    if (settings.cfg().capture_mode === 'window' || way.n.window) log.info(`캡처: 게임 창 ${way.n.window}회 평균 ${(way.ms.window / Math.max(1, way.n.window)).toFixed(1)}ms, 화면 ${way.n.screen}회 평균 ${(way.ms.screen / Math.max(1, way.n.screen)).toFixed(1)}ms, 게임 창 실패 ${way.n.failed}회`);
+    way.n = { window: 0, screen: 0, failed: 0 }; way.ms = { window: 0, screen: 0 }; way.at = nowSec();
+  };
   const worker = new CaptureWorker(io, out, () => settings.cfg());
   // Off ("매트릭스 읽기", for who uses only the overlay): the screen is never read, nothing about the matrix is said. The game window is still looked for (the order of the windows, "quit with the game"). Read once: a change is for the next start.
   const reading = settings.cfg().read_matrix !== false;
@@ -81,6 +114,7 @@ export function startCapture({ settings, publish, pipeline }) {
       if (reading && game.front && !wasFront && !connected) for (const ms of [400, 1500]) setTimeout(() => { if (!connected) { log.info('게임으로 돌아옴: 매트릭스를 읽고 있지 않아 다시 찾습니다'); worker.research(); } }, ms);
       wasFront = game.front;
       publish(pipeline.tick(nowSec()));
+      wayReport();
       const act = reading ? lost.check(cfg, game.found ? game : null, connected, nowSec()) : null;
       if (act && act[0] === 'show') {
         // act[1] = no position was ever found: the guide of the first start (the game may not even be running)
@@ -101,7 +135,7 @@ export function startCapture({ settings, publish, pipeline }) {
   return {
     worker, game, reading,
     research() { if (!reading) { system('ℹ ' + tr('매트릭스 읽기가 꺼져 있습니다. 옵션 > 일반에서 켜고 다시 시작하세요.')); return; } log.info('매트릭스 다시 찾기 요청'); awaiting = true; worker.research(); system('ℹ ' + tr('매트릭스를 다시 찾습니다...')); },
-    stop() { worker.stop(); timer.stop(); },
+    stop() { worker.stop(); timer.stop(); invoke('capture_game_stop').catch(() => {}); },
     connected: () => connected,
   };
 }

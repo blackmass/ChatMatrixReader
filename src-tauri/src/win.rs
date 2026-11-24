@@ -307,6 +307,18 @@ pub fn set_alpha(hwnd: isize, alpha: f64) {
     }
 }
 
+/// A window the mouse goes through (click-through): the clicks, the wheel and the pointer go to what is behind it. `WS_EX_TRANSPARENT` on a layered window: the system skips the window
+/// (and the web view in it) when it looks for what is under the pointer. Only the two style bits (tao is not asked: the window it thinks is hidden is hidden by a change of its flags).
+pub fn set_clickthrough(hwnd: isize, on: bool) {
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let new = if on { style | 0x20 | 0x8_0000 } else { style & !0x20 };          // WS_EX_TRANSPARENT | WS_EX_LAYERED (the layered style stays when it is off: the fade of the page uses it)
+        if new == style { return; }
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new);
+        if on && style & 0x8_0000 == 0 { SetLayeredWindowAttributes(hwnd, 0, 255, 0x2); }          // (a layered window that has no attributes is not drawn)
+    }
+}
+
 /// (macOS: see mac.rs; here nothing: a layered window fades by itself)
 pub fn fade_begin(_hwnd: isize) {}
 pub fn fade_end(_hwnd: isize) {}
@@ -518,22 +530,65 @@ extern "system" {
     fn MessageBoxW(hwnd: Handle, text: *const u16, caption: *const u16, flags: u32) -> i32;
 }
 
+static CENTER_HWNDS: Mutex<Vec<(isize, isize)>> = Mutex::new(Vec::new());             // the window of each control center: (center, window handle)
+/// The window of a control center (told by the page of the center: the wheel is not taken where a window of another program stands over it).
+pub fn set_center_hwnd(center: isize, hwnd: isize) {
+    if let Ok(mut l) = CENTER_HWNDS.lock() { l.retain(|e| e.0 != center); l.push((center, hwnd)); }
+}
+
+#[link(name = "dwmapi")]
+extern "system" { fn DwmGetWindowAttribute(hwnd: Handle, attr: u32, value: *mut c_void, size: u32) -> i32; }
+
+/// The window that stands over `hwnd` and covers the point (x, y), if there is one: the windows above it in the order of the screen, the first that is shown, is not a window the mouse goes through
+/// (WS_EX_TRANSPARENT with WS_EX_LAYERED: the overlays of other programs, our own centers), is not hidden by the system (a window of another desktop) and has the point inside its drawn frame.
+/// Only the state of the windows is read: no window is asked anything (this runs in the hook of the mouse: a window of another program that waits must not hold the mouse).
+fn window_over(hwnd: isize, x: i32, y: i32) -> Option<isize> {
+    unsafe {
+        let mut w = GetTopWindow(0);
+        let mut n = 0;
+        while w != 0 && w != hwnd && n < 4000 {
+            n += 1;
+            if IsWindowVisible(w) != 0 && IsIconic(w) == 0 {
+                let ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
+                let mut cloaked = 0u32;
+                DwmGetWindowAttribute(w, 14, &mut cloaked as *mut u32 as *mut c_void, 4);                   // DWMWA_CLOAKED
+                if !(ex & 0x20 != 0 && ex & 0x8_0000 != 0) && cloaked == 0 {
+                    let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                    let framed = DwmGetWindowAttribute(w, 9, &mut r as *mut RECT as *mut c_void, 16) == 0;       // DWMWA_EXTENDED_FRAME_BOUNDS: without the invisible border of a window
+                    if (framed || GetWindowRect(w, &mut r) != 0) && x >= r.left && x < r.right && y >= r.top && y < r.bottom { return Some(w); }
+                }
+            }
+            w = GetWindow(w, 2);                                              // GW_HWNDNEXT
+        }
+    }
+    None
+}
+
 unsafe extern "system" fn wheel_proc(code: i32, w: usize, l: isize) -> isize {
     if code == 0 && w == 0x020A {                                          // WM_MOUSEWHEEL
         let info = &*(l as *const MsllHook);
         let delta = (info.mouseData >> 16) as i16;
         // the panes of the control centers that are click-through (center.rs): the wheel over them is not for the program in front
+        // (the zones that hold the point first; then the windows are looked at, with no lock held)
+        let mut hits: Vec<(isize, isize)> = Vec::new();
         if let Ok(zones) = PANE_ZONES.try_lock() {
             let (px, py) = (info.pt.x as f64, info.pt.y as f64);
-            for &(_, key, r) in zones.iter() {
-                if px >= r[0] && px < r[2] && py >= r[1] && py < r[3] {
-                    if let Ok(mut list) = WHEEL.try_lock() {
-                        list.push((WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, key, delta));
-                        if list.len() > 200 { list.remove(0); }
-                    }
-                    return 1;
+            for &(center, key, r) in zones.iter() { if px >= r[0] && px < r[2] && py >= r[1] && py < r[3] { hits.push((center, key)); } }
+        }
+        for (center, key) in hits {
+            // a window of another program that stands over the window of the center at this point (a browser over the game): the wheel is for it, not for the window under it
+            let center_hwnd = CENTER_HWNDS.try_lock().ok().and_then(|l| l.iter().find(|e| e.0 == center).map(|e| e.1)).unwrap_or(0);
+            if center_hwnd != 0 {
+                if let Some(over) = window_over(center_hwnd, info.pt.x, info.pt.y) {
+                    if crate::debug_on("mouse") { crate::debug_log("mouse", &format!("the wheel over a click-through window is left to {}, which stands over it", describe(over))); }
+                    continue;
                 }
             }
+            if let Ok(mut list) = WHEEL.try_lock() {
+                list.push((WHEEL_SEQ.fetch_add(1, Ordering::SeqCst) + 1, key, delta));
+                if list.len() > 200 { list.remove(0); }
+            }
+            return 1;
         }
     }
     CallNextHookEx(0, code, w, l)

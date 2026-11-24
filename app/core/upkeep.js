@@ -6,7 +6,7 @@
 //   lost = new LostHint();       text = lost.check(cfg, game, connected, now)   the hint to show when the matrix is not being read
 // Every check waits one more round before it acts: a file or a setting may still be being written when it is first seen to differ.
 // Port of upkeep.py. Keys are compared as JSON text (the Python tuples).
-import { modesInUse, onlySendingUses } from './translate_rules.js';
+import { modesInUse, onlySendingUses, withMethod, glossaryFiles } from './translate_rules.js';
 import { googleKey, sendCfg } from './translate.js';
 
 export const LOST_AFTER = 5.0;           // seconds without a matrix before the hint shows (first start: at once)
@@ -49,7 +49,8 @@ export async function warmKey(glossary, cfg) {
     const c2 = sendCfg(cfg);
     return J([mode, 'send', c2.prompt ?? null, (c2.extra_prompt || '').trim(), extra]);
   }
-  return J([mode, cfg.prompt ?? null, (cfg.extra_prompt || '').trim(), await glossary.cacheKey(cfg), extra]);
+  const c = withMethod({ ...cfg, translator: mode });          // (what the method has of its own: its prompt and glossary)
+  return J([mode, c.prompt ?? null, (c.extra_prompt || '').trim(), await glossary.cacheKey(c), extra]);
 }
 
 export class ConnWatch {
@@ -87,17 +88,20 @@ export class WarmWatch {
 }
 
 export class GlossWatch {
-  constructor(glossary, cfg = null) { this.glossary = glossary; this.last = null; this.pending = null; this.ready = cfg !== null ? glossary.signature(cfg.glossary_file).then(s => { this.last = s; }) : Promise.resolve(); }
+  constructor(glossary, cfg = null) { this.glossary = glossary; this.last = null; this.pending = null; this.ready = cfg !== null ? this.sig(cfg).then(s => { this.last = s; }) : Promise.resolve(); }
+  // the files of every glossary in use, as one text (the shared one and the ones of the methods: one name = what its file says)
+  async sig(cfg) { return (await Promise.all(glossaryFiles(cfg).map(n => this.glossary.signature(n)))).join('|'); }
 
   // -> the number of entries when the file was saved (and a translation method is on), else null
   async check(cfg) {
     await this.ready;
-    const sig = await this.glossary.signature(cfg.glossary_file);
+    const sig = await this.sig(cfg);
     const none = (cfg.translator ?? 'none') === 'none';
     if (sig === this.last || none) { this.pending = null; if (none) this.last = sig; return null; }
     if (this.pending !== sig) { this.pending = sig; return null; }
     this.last = sig; this.pending = null;
-    return (await this.glossary.entries(cfg.glossary_file, true)).length;
+    let n = 0; for (const name of glossaryFiles(cfg)) n += (await this.glossary.entries(name, true)).length;
+    return n;
   }
 }
 

@@ -15,12 +15,13 @@ import * as settings from './settings.js';
 import { BAR_H, dragFrame, sizeEdges, moveBy, barBelow } from './frame.js';
 
 export { BAR_H };
+export const NATIVE_BAR_H = 28;                                           // (the bar of a window of the system is its title bar: higher; main.rs NATIVE_TITLE)
 
 export class Pane {
   // center: { cfg(), dpr(), origin() -> [ox, oy] in pixels, changed(pane) }
   constructor(id, center) {
     this.id = id; this.center = center; this.label = `c${id}`;
-    this.head = BAR_H; this.flip = false;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
+    this.head = this.fullBar() ? NATIVE_BAR_H : BAR_H; this.flip = false;                              // (the bar: how high it is, and whether it is below the text: frame.js barBelow)
     this.lags = []; this.lmbAt = 0; this.lastDown = -1e9; this.wheelCount = 0;                  // (how long a click takes to reach the page: for the diagnosis in the options)
     this.review = false; this.reviewIdle = 0; this.reviewShown = false; this.zone = false; this.lastInput = -1e9;      // (reading the old chat: see userScrolled)
     this.interactive = true; this.outside = true; this.hover = false; this.wasThrough = null;      // (the state of the mouse: see tick)
@@ -28,6 +29,7 @@ export class Pane {
     this.el = document.createElement('div'); this.el.className = 'pane'; this.el.dataset.id = String(id);
     this.el.innerHTML = '<div class="pbar"><span class="ptabs"></span><span class="pspace"></span><span class="ptools"><button class="presearch" tabindex="-1" title="매트릭스 다시 찾기">⟳</button><button class="pvoice" tabindex="-1" title="음성인식 켜기" data-state="off"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor"/><path class="waves" d="M11.2 5.4a3.6 3.6 0 0 1 0 5.2M13 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button><button class="poptions" tabindex="-1" title="옵션">⚙</button><button class="pclose" tabindex="-1">✕</button></span></div><div class="pbody"><div class="pbg"></div><div class="pwidgets" data-notr></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div><button class="ptobottom" tabindex="-1" title="이전 대화를 보는 중입니다. 누르면 맨 아래(최신 글)로 돌아갑니다">↓ 맨 아래로</button>';
     this.tabs = this.el.querySelector('.ptabs');
+    this.el.classList.toggle('titled', this.fullBar());
     document.body.append(this.el);
     this.widgets = new WidgetLayer({ root: this.el.querySelector('.pwidgets'), registry: center.registry });     // (the widgets of the window: its host's, like in 3.1.1)
     this.widgetIds = '';
@@ -49,13 +51,22 @@ export class Pane {
     // the bar moves the window (a tab only changes the chat when there are several: like 3.1.1)
     this.drag(this.el.querySelector('.pbar'), (s, dx, dy, ev) => moveBy(this, s, dx, dy, ev), e => !this.opt('lock_window', false) && !e.target.closest('button') && !(this.chats.size > 1 && e.target.closest('.ptab')));
     this.tools();
+    if (center.native) this.titleBar();
     sizeEdges(this, () => !this.opt('lock_window', false));         // (the corner at the bottom right and the edges left, right, bottom and the corner bottom left; the top is the bar)
     this.update();
+  }
+  // the bar as one band across the window (css .titled): always in a window of the system (it is its title bar), else when the option "바 모양" says so. The band is higher than the floating tabs.
+  fullBar() { return this.center.native || this.center.cfg().bar_style === 'full'; }
+  barStyle() {
+    const full = this.fullBar(), head = full ? NATIVE_BAR_H : BAR_H;
+    this.el.classList.toggle('titled', full);
+    if (head !== this.head) { this.head = head; this.layout(); this.center.changed(this); }              // (the text area stays where it is: the bar is above it, or below it)
   }
   confOf(id) { const cfg = this.center.cfg(); return id === MAIN ? null : cfg.child_windows.find(c => c.id === id) || winconf.newConf(id, [...winconf.KNOWN, winconf.ETC]); }
   optOf(id, key, dflt) { const cfg = this.center.cfg(); return id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? dflt) : winconf.opt(this.confOf(id), cfg, key, dflt); }
   conf() { return this.confOf(this.id); }
-  opt(key, dflt) { return this.optOf(this.id, key, dflt); }
+  // (a window of the system, center.js `native`: the system moves it, sizes it and has it in front: locked for our own frame, and nothing to go through)
+  opt(key, dflt) { if (this.center.native && (key === 'lock_window' || key === 'click_through' || key === 'hover_clear' || key === 'hide_tools' || key === 'hide_tabs')) return key === 'lock_window'; return this.optOf(this.id, key, dflt); }          // (the bar is the title bar: its tabs and buttons are always there)
   // an option of a chat: what belongs to the window (place, order, blur, ...) follows the host of the tabs, the rest (the look of the text, the filter) is its own
   copt(id, key, dflt) { return id === this.id || winconf.HOST_KEYS.has(key) ? this.opt(key, dflt) : this.optOf(id, key, dflt); }
 
@@ -96,11 +107,34 @@ export class Pane {
     q('.pclose').onclick = async () => { this.save(); if (this.id === MAIN) invoke('quit_request').catch(() => {}); else emit('win-closed', { id: this.id }); };
     q('.pbar').addEventListener('mousedown', e => { if (e.target.tagName === 'BUTTON') e.preventDefault(); });
   }
+  // A window of the system without the frame of the system (the 3.2.1 test): our bar is its title bar. The system moves it (mouse down on the bar), a double click maximizes it; on Windows the three buttons
+  // are ours (the close one is the old ✕); on the mac the round buttons of the system lie over the left end of the bar (the mac has them in its own place; the bar only leaves it empty).
+  titleBar() {
+    const bar = this.el.querySelector('.pbar'), tools = this.el.querySelector('.ptools'), act = a => invoke('native_action', { action: a }).catch(() => {});
+    this.el.classList.add('titled');
+    if (isMac) { this.el.classList.add('mactitle'); }
+    else {
+      const mk = (cls, txt, title, a) => { const b = document.createElement('button'); b.className = cls; b.tabIndex = -1; b.title = title; b.textContent = txt; b.onclick = () => act(a); return b; };
+      tools.insertBefore(mk('pmin', '\u2013', '최소화', 'min'), this.el.querySelector('.pclose'));
+      tools.insertBefore(mk('pmax', '\u25A1', '최대화 / 이전 크기', 'max'), this.el.querySelector('.pclose'));
+    }
+    // (both systems: the page has the bar, so it asks the system to move the window, and the double click is the system's own: the mac does what the user chose in its settings)
+    bar.addEventListener('mousedown', e => {
+      if (e.button !== 0 || e.target.closest('button') || (this.chats.size > 1 && e.target.closest('.ptab'))) return;
+      e.preventDefault(); act(e.detail >= 2 ? 'max' : 'drag');
+    });
+  }
   lamp(st, title) { const b = this.el.querySelector('.pvoice'); b.dataset.state = st; b.title = title; }
 
   // the place: the text area is where the window of 3.1.1 was (its saved geometry is the place and the size of the text area); the bar stands above it
   savedGeometry() { return this.id === MAIN ? this.center.cfg().geometry : (this.conf() || {}).geometry; }
   place() {
+    if (this.center.native) {                                                // (a window of the system: the text area is the window below the bar, whatever its size is now)
+      this.rect = { x: 0, y: this.head, w: Math.max(40, innerWidth), h: Math.max(40, innerHeight - this.head - (this.center.nativeInset ? this.center.nativeInset() : 0)) };          // (below it: the send box, when it is open: sendrow.js)
+      this.geo = this.seenGeo = this.savedGeometry() || '';
+      this.layout();
+      return;
+    }
     const cfg = this.center.cfg(), g = layout.parseGeometry(this.savedGeometry()) || { w: layout.DEFAULT_SIZE[0], h: layout.DEFAULT_SIZE[1], x: null, y: null };
     const d = this.center.dpr(), [ox, oy] = this.center.origin();
     let { x, y } = g;
@@ -118,19 +152,20 @@ export class Pane {
   }
   layout() {
     const r = this.rect;
-    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip);                              // (touching the top of a monitor: the bar goes below the text)
-    const grip = this.el.querySelector('.pgrip'); if (grip) grip.style.bottom = this.flip ? BAR_H + 'px' : '';          // (the corner to resize by stays at the corner of the text, over the bar)
-    this.el.style.left = r.x + 'px'; this.el.style.top = (this.flip ? r.y : r.y - BAR_H) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + BAR_H) + 'px';
+    this.flip = barBelow(this); this.el.classList.toggle('flip', this.flip);          // (touching the top of a monitor: the bar goes below the text)
+    const grip = this.el.querySelector('.pgrip'); if (grip) grip.style.bottom = this.flip ? this.head + 'px' : '';          // (the corner to resize by stays at the corner of the text, over the bar)
+    this.el.style.left = r.x + 'px'; this.el.style.top = (this.flip ? r.y : r.y - this.head) + 'px'; this.el.style.width = r.w + 'px'; this.el.style.height = (r.h + this.head) + 'px';
   }
   // the blur behind the text area (0 off | 1 weak | 2 strong): the center makes a window of the system for it. While the window is cleared by the mouse or resized, the blur behind it goes too.
   blurLevel() { return Number(this.opt('blur', 0)) && !this.hover && !this.resizing ? Number(this.opt('blur', 0)) : 0; }
   // the box (the bar included) in pixels of the page, for the center
   // where it is on the screen (pixels): the page's origin plus the box
   screenBox() { const b = this.box(), [ox, oy] = this.center.origin(); return { x: ox + b.x, y: oy + b.y, w: b.w, h: b.h }; }
-  boxY() { return this.flip ? this.rect.y : this.rect.y - BAR_H; }
-  box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: this.boxY() * d, w: r.w * d, h: (r.h + BAR_H) * d, bar: BAR_H * d, below: this.flip }; }
+  boxY() { return this.flip ? this.rect.y : this.rect.y - this.head; }
+  box() { const r = this.rect, d = this.center.dpr(); return { id: String(this.id), x: r.x * d, y: this.boxY() * d, w: r.w * d, h: (r.h + this.head) * d, bar: this.head * d, below: this.flip }; }
   // where the text area is on the screen now: told to the hub, which keeps it in the settings (a window of 3.1.1 did the same)
   save() {
+    if (this.center.native) return;                                        // (a window of the system: its place is the system's, the exe tells it: native-geometry)
     const r = this.rect, d = this.center.dpr(), [ox, oy] = this.center.origin();
     this.geo = layout.formatGeometry(r.w * d, r.h * d, ox + r.x * d, oy + r.y * d);
     emit('win-geometry', { id: this.id, geometry: this.geo });
@@ -142,6 +177,7 @@ export class Pane {
   update() {
     const cfg = this.center.cfg();
     this.syncChats();
+    this.barStyle();
     const sg = this.savedGeometry() || '';
     if (sg !== this.seenGeo) {                                        // (the saved place changed: when it is not this window's own echo, someone else moved it: the options, the program)
       this.seenGeo = sg;

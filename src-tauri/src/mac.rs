@@ -397,7 +397,9 @@ fn prepare(hwnd: isize) {
     unsafe {
         let w = obj(hwnd);
         let _: () = msg_send![w, setHidesOnDeactivate: Bool::NO];                  // (a tool window is hidden while another program is active)
-        let behavior: usize = (1 << 0) | (1 << 8) | (1 << 6);                      // CanJoinAllSpaces | FullScreenAuxiliary | IgnoresCycle
+        // CanJoinAllSpaces | Stationary | FullScreenAuxiliary | IgnoresCycle. Stationary: Mission Control (the three fingers up) does not show the window as one more window of its own (the centers are windows of
+        // the size of the screen: they showed there as "CMR Center"); it stays where it is. If a Mac still shows them, the bit to try instead is Transient (1 << 3).
+        let behavior: usize = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 6);
         let _: () = msg_send![w, setCollectionBehavior: behavior];
         let _: () = msg_send![w, setHasShadow: Bool::NO];                          // (a translucent window gets a dark outline from the system's shadow)
     }
@@ -407,6 +409,26 @@ fn prepare(hwnd: isize) {
 /// is not slowed down), a fully transparent one may not.
 pub fn set_alpha(hwnd: isize, alpha: f64) {
     on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setAlphaValue: alpha]; });
+}
+
+/// A double click on a title bar that the page draws itself, answered as the system does it for its own title bars: what the user chose in the settings of the Mac ("Double-click a window's title bar to":
+/// zoom, which is also what puts back a window laid on a half of the screen / minimize / nothing). Nothing chosen = zoom.
+pub fn title_double_click(hwnd: isize) {
+    on_main(|| unsafe {
+        let defaults: *mut AnyObject = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let value: *mut AnyObject = msg_send![&*defaults, stringForKey: ns_string("AppleActionOnDoubleClick")];
+        let w = obj(hwnd);
+        match string_of(value).as_str() {
+            "None" => {}
+            "Minimize" => { let _: () = msg_send![w, performMiniaturize: std::ptr::null_mut::<AnyObject>()]; }
+            _ => { let _: () = msg_send![w, performZoom: std::ptr::null_mut::<AnyObject>()]; }
+        }
+    });
+}
+
+/// A window the mouse goes through (click-through): the clicks and the wheel go to what is behind it.
+pub fn set_clickthrough(hwnd: isize, on: bool) {
+    on_main(|| unsafe { let _: () = msg_send![obj(hwnd), setIgnoresMouseEvents: Bool::new(on)]; });
 }
 
 static ACTIVITY: Mutex<usize> = Mutex::new(0);
@@ -795,10 +817,16 @@ extern "C" fn wheel_tap(_proxy: *mut c_void, kind: u32, event: *mut c_void, _inf
         if target.is_none() {
             if let Ok(zones) = ZONES.try_lock() {
                 for &(h, _down, r) in zones.iter() {
-                    if at.x >= r[0] && at.x < r[2] && at.y >= r[1] && at.y < r[3] { target = Some(h); break; }
+                    if at.x >= r[0] && at.x < r[2] && at.y >= r[1] && at.y < r[3] {
+                        // a window of another program (the Finder, a browser) stands over the center here: the turn is for it, not for the window under it. Not locked either: the next turn of the gesture asks again.
+                        let center = (-h) / 100000 - 1;
+                        if covered_by_other(center, at.x, at.y) { continue; }
+                        target = Some(h); break;
+                    }
                 }
             }
         }
+        if crate::debug_on("mouse") { wheel_log(at.x, at.y, target); }
         let Some(h) = target else { return event };
         if let Ok(mut lock) = LOCK.try_lock() { *lock = Some((h, Instant::now())); }
         match SINK.get() {
@@ -837,6 +865,7 @@ fn ensure_hook() -> bool {
     if !made && !ASKED_LISTEN.swap(true, Ordering::SeqCst) {
         unsafe { CGRequestListenEventAccess(); CGRequestPostEventAccess(); }       // (the system asks the user once: Input Monitoring, Accessibility)
     }
+    if crate::debug_on("mouse") { crate::debug_log("mouse", &format!("the tap of the wheel: {}", if made { "made" } else { "NOT made (the permission is missing?)" })); }
     if let Ok(mut h) = HOOK.lock() { *h = Some((made, Instant::now())); }
     made
 }
@@ -845,6 +874,69 @@ pub fn start_wheel_hook() {}
 
 /// The panes of a control center that want the wheel (in place of the earlier ones of that center): (key, rectangle in pixels). The tap works in points (top left origin).
 /// false = the tap cannot be had yet (no permission).
+static CENTER_NUMS: Mutex<Vec<(isize, isize, isize)>> = Mutex::new(Vec::new());        // the window of each control center: (center, handle, the number the system has for it)
+/// The window of a control center (told by the page of the center): the wheel is not taken where a window of another program stands over it. The number is asked for once for a window (the main thread
+/// is asked: not from the tap).
+pub fn set_center_hwnd(center: isize, hwnd: isize) {
+    if CENTER_NUMS.lock().map(|l| l.iter().any(|e| e.0 == center && e.1 == hwnd)).unwrap_or(false) { return; }
+    let number: isize = on_main(|| unsafe { let n: isize = msg_send![obj(hwnd), windowNumber]; n });
+    if let Ok(mut l) = CENTER_NUMS.lock() { l.retain(|e| e.0 != center); l.push((center, hwnd, number)); }
+}
+
+/// A window that does not count as covering: a window of this program, of the layers of the screen saver and the pointer, an empty one, and a cover of the whole screen above the ordinary windows (the Dock has an
+/// invisible one of the size of the screen at layer 20: it lets the mouse through to what is under it, but the list of windows does not say so).
+fn not_a_cover(w: &SysWin, me: i32, screen: (f64, f64)) -> bool {
+    w.pid == me || w.layer >= 100 || w.w < 1.0 || w.h < 1.0 || (w.layer > 0 && w.w >= screen.0 - 1.0 && w.h >= screen.1 - 1.0)
+}
+fn main_screen_size() -> (f64, f64) { let b = CGDisplay::main().bounds(); (b.size.width, b.size.height) }
+
+/// (only for the detailed log "mouse") What the check of `covered_by_other` sees: where the center is in the list of windows, and the first window that covers the point above it.
+fn diag_cover(center: isize, x: f64, y: f64) -> String {
+    let number = CENTER_NUMS.try_lock().ok().and_then(|l| l.iter().find(|e| e.0 == center).map(|e| e.2)).unwrap_or(0);
+    let me = std::process::id() as i32;
+    let screen = main_screen_size();
+    let list = windows();
+    let pos = list.iter().position(|w| w.number as isize == number);
+    let mut over = String::from("nothing");
+    for w in list.iter() {
+        if w.number as isize == number { break; }
+        if not_a_cover(w, me, screen) { continue; }
+        if x >= w.x && x < w.x + w.w && y >= w.y && y < w.y + w.h { over = format!("{} (layer {}, {}x{} at {},{}, number {})", w.owner, w.layer, w.w as i32, w.h as i32, w.x as i32, w.y as i32, w.number); break; }
+    }
+    format!("number {number}, found at {pos:?} of {} windows, covered by: {over}", list.len())
+}
+static WHEEL_LOG_AT: Mutex<Option<Instant>> = Mutex::new(None);
+/// (only for the detailed log "mouse", at most twice a second) A turn of the wheel the tap saw: where, which zones hold the point, what stands over each center there, and what was decided.
+fn wheel_log(x: f64, y: f64, target: Option<isize>) {
+    if let Ok(mut t) = WHEEL_LOG_AT.try_lock() {
+        if let Some(at) = *t { if at.elapsed() < Duration::from_millis(500) { return; } }
+        *t = Some(Instant::now());
+    } else { return; }
+    let zones: Vec<(isize, [f64; 4])> = ZONES.try_lock().map(|z| z.iter().map(|e| (e.0, e.2)).collect()).unwrap_or_default();
+    let mut text = format!("the wheel at ({:.0}, {:.0}): {} zones", x, y, zones.len());
+    for (h, r) in zones.iter() {
+        if x >= r[0] && x < r[2] && y >= r[1] && y < r[3] { let c = (-h) / 100000 - 1; text += &format!("; in the zone {h} of center {c}: {}", diag_cover(c, x, y)); }
+    }
+    text += &format!("; taken for {:?}", target);
+    crate::debug_log("mouse", &text);
+}
+
+/// Does a window of another program stand over the window of this center at this point (points, top left origin)? The windows on the screen from the front to the back (windows(): the system's own order) are
+/// looked at until the center is reached: the first one of another program, in the layers of the windows and the bars of the menu and the dock (not the layers of the screen saver and the pointer), that has the
+/// point inside is it. The windows of this program are not counted (the centers go through the mouse; the other windows of ours stand under the mouse of the wheel as they did).
+fn covered_by_other(center: isize, x: f64, y: f64) -> bool {
+    let number = CENTER_NUMS.try_lock().ok().and_then(|l| l.iter().find(|e| e.0 == center).map(|e| e.2)).unwrap_or(0);
+    if number <= 0 { return false; }
+    let me = std::process::id() as i32;
+    let screen = main_screen_size();
+    for w in windows() {
+        if w.number as isize == number { return false; }                             // (the center itself: nothing above it covers)
+        if not_a_cover(&w, me, screen) { continue; }
+        if x >= w.x && x < w.x + w.w && y >= w.y && y < w.y + w.h { return true; }
+    }
+    false
+}
+
 pub fn set_pane_zones(center: isize, zones: Vec<(isize, [f64; 4])>) -> bool {
     let owner = |k: isize| (-k) / 100000 - 1 == center;
     if zones.is_empty() {

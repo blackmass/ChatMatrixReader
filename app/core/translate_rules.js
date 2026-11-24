@@ -89,11 +89,57 @@ export function routeFor(cfg, channel) {
   return ROUTES.includes(r) && r !== ROUTE_DEFAULT ? r : null;
 }
 
-export function applyRoute(cfg, route) {
-  if (route === ROUTE_GOOGLE_FREE) return { ...cfg, translator: 'google', google_free: true, google_api_key: '' };
-  if (route === ROUTE_GOOGLE) return { ...cfg, translator: 'google', google_free: false };
-  if (Object.hasOwn(ROUTE_MODE, route)) return { ...cfg, translator: ROUTE_MODE[route] };
-  return cfg;
+// What a translation method may have of its own (3.2.1): the glossary and the prompt. `by_method` = { google | openai | custom: { <key>: value } }; a method that is not in it (or has no such key) follows the
+// settings of the translation (the ones every method shares). The two Google routes are one method here.
+export const METHODS = ['google', 'openai', 'custom'];
+export const OWN_KEYS = ['glossary_file', 'glossary_google', 'glossary_mode', 'glossary_style', 'extra_prompt', 'prompt'];
+export function withMethod(cfg) {
+  const own = cfg && cfg.by_method && typeof cfg.by_method === 'object' ? cfg.by_method[cfg.translator] : null;
+  if (!own || typeof own !== 'object') return cfg;
+  const out = { ...cfg };
+  for (const k of OWN_KEYS) if (Object.hasOwn(own, k)) out[k] = own[k];
+  return out;
+}
+// Is the glossary that is set the one the prompt has? null = yes, or it does not matter (with "list" / "mixed" the entries travel with the line, the prompt only has a hint). Else { names }: the
+// files the prompt does have ({{File.txt}}; {{extra_prompt}} is not a file): empty = the prompt has no place for a glossary. The translation works either way: this is for the options to say so.
+export function glossaryInPrompt(prompt, file, mode = 'full', dflt = 'Glossary.txt') {
+  if (mode && mode !== 'full') return null;
+  const want = ((file || '').trim() || dflt).toLowerCase();
+  const names = [...new Set([...String(prompt || '').matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(m => m[1].trim()).filter(n => n.toLowerCase() !== 'extra_prompt'))];
+  return names.some(n => n.toLowerCase() === want) ? null : { names };
+}
+// the file names of every glossary that is used (the shared one and the ones of the methods): they are made, watched and read again together
+export function glossaryFiles(cfg, dflt = 'Glossary.txt') {
+  const names = [(cfg.glossary_file || '').trim() || dflt];
+  for (const m of METHODS) { const n = cfg.by_method && cfg.by_method[m] && typeof cfg.by_method[m].glossary_file === 'string' ? cfg.by_method[m].glossary_file.trim() : ''; if (n) names.push(n); }
+  return [...new Set(names)];
+}
+// the saved `by_method`, cleaned: only the three methods, only the keys above with a value of the right kind (anything else is dropped; a method with nothing left is dropped)
+export function cleanByMethod(v) {
+  const out = {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  for (const m of METHODS) {
+    const o = v[m];
+    if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+    const c = {};
+    if (typeof o.glossary_file === 'string' && o.glossary_file.trim() && o.glossary_file.length <= 200) c.glossary_file = o.glossary_file.trim();
+    if (typeof o.glossary_google === 'boolean') c.glossary_google = o.glossary_google;
+    if (['full', 'list', 'mixed'].includes(o.glossary_mode)) c.glossary_mode = o.glossary_mode;
+    if (['paren', 'replace'].includes(o.glossary_style)) c.glossary_style = o.glossary_style;
+    if (typeof o.extra_prompt === 'string' && o.extra_prompt.length <= 20000) c.extra_prompt = o.extra_prompt;
+    if (typeof o.prompt === 'string' && o.prompt.length <= 60000) c.prompt = o.prompt;
+    if (Object.keys(c).length) out[m] = c;
+  }
+  return out;
+}
+
+// `sending`: the sending direction has its own prompt and no glossary: what a method has of its own does not apply to it
+export function applyRoute(cfg, route, sending = false) {
+  let out = cfg;
+  if (route === ROUTE_GOOGLE_FREE) out = { ...cfg, translator: 'google', google_free: true, google_api_key: '' };
+  else if (route === ROUTE_GOOGLE) out = { ...cfg, translator: 'google', google_free: false };
+  else if (Object.hasOwn(ROUTE_MODE, route)) out = { ...cfg, translator: ROUTE_MODE[route] };
+  return sending ? out : withMethod(out);
 }
 
 export function sendRoute(cfg) {

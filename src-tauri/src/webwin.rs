@@ -140,12 +140,14 @@ const PAGE: &str = r#"(() => {
   window.addEventListener('message', e => { if (e.data === '__cmr_rclick__') go('rclick'); });
   // A link the USER opens in a new place (ctrl / shift click, middle click, a link that says target=_blank, window.open right after a click or a key) goes to the user's own browser.
   // Nothing opens by itself: a window.open without a recent action of the user (navigator.userActivation) and every other new window is refused by the program.
+  window.__cmrThrough = __THROUGH__;                            // (the window is click-through: the program tells it when the option changes, see web_through. It is the interact keys that make the window usable then: a click with
+                                                                // Shift / Ctrl / Cmd is a plain click and never "open in my browser". A click with the wheel button and a link that says target=_blank still are)
   const external = u => { try { const a = new URL(u, location.href); if (a.protocol === 'https:') go('open?u=' + encodeURIComponent(a.href)); } catch (e) {} };
   const linkOf = e => (e.target && e.target.closest ? e.target.closest('a[href]') : null);
   document.addEventListener('click', e => {
     if (!e.isTrusted) return;
     const a = linkOf(e);
-    if (a && (e.ctrlKey || e.metaKey || e.shiftKey || a.target === '_blank')) { e.preventDefault(); e.stopPropagation(); external(a.href); }
+    if (a && (((e.ctrlKey || e.metaKey || e.shiftKey) && !window.__cmrThrough) || a.target === '_blank')) { e.preventDefault(); e.stopPropagation(); external(a.href); }
   }, true);
   document.addEventListener('auxclick', e => {
     if (!e.isTrusted || e.button !== 1) return;
@@ -155,6 +157,15 @@ const PAGE: &str = r#"(() => {
   try {
     window.open = (u) => { if (u && navigator.userActivation && navigator.userActivation.isActive) external(String(u)); return null; };
   } catch (e) {}
+  // A turn of the wheel the program took from the game for a window that the mouse goes through (web_wheel): the thing under that point that scrolls, or the page. (A frame of another site cannot be
+  // looked into: the page around it scrolls.) 120 = one notch; a notch scrolls about what a browser does.
+  window.__cmrWheel = (px, py, delta) => {
+    const r = window.devicePixelRatio || 1;
+    let t = document.elementFromPoint(px / r, py / r);
+    while (t && t !== document.documentElement && t !== document.body && !(t.scrollHeight > t.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(t).overflowY))) t = t.parentElement;
+    const el = t && t !== document.documentElement && t !== document.body ? t : (document.scrollingElement || document.documentElement);
+    el.scrollBy(0, -delta * 100 / 120);
+  };
   // Typing into a page. The window never takes the keyboard of the game (it is "no activate"), so a click on a text box gives nothing to type into. When the MOUSE COMES OVER a text box the program
   // lifts that for the window ("prep": nothing moves, the game keeps the keyboard); a click on the box then activates the window like any window, by the system, and the keys go to the page.
   // When the mouse leaves a box that was not used the program puts it back ("unprep"); a window that was used keeps the keyboard until the user clicks the game (the window then loses it: "unprep" again).
@@ -164,6 +175,7 @@ const PAGE: &str = r#"(() => {
   let leaveT = 0;
   const later = (fn, ms) => { clearTimeout(leaveT); leaveT = setTimeout(fn, ms); };
   document.addEventListener('mouseover', e => { if (editable(e.target)) { clearTimeout(leaveT); go('prep'); } }, true);
+  document.addEventListener('mousedown', e => { if (e.isTrusted && e.button >= 3) diag('mouse?b=' + e.button + '&edit=' + (editable(e.target) ? 1 : 0) + '&prevented=' + (e.defaultPrevented ? 1 : 0)); }, true);      // (the detailed log "mouse": a side button: the log says where it went)
   document.addEventListener('mousedown', e => { if (e.button === 0 && editable(e.target)) go('inputclick'); }, true);      // (macOS: asked to make sure the program is active, see the program)
   document.addEventListener('mouseout', e => { if (editable(e.target)) later(() => go('unprep'), 300); }, true);      // (the program does nothing when the window is the active one: the user is typing, and it is the click on the game that ends it)
   window.addEventListener('blur', () => later(() => go('unprep'), 400));      // (the user went to the game or another window; a moment later: a click on a text box moves the focus inside the window for a moment)
@@ -244,6 +256,7 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
             let allow = OPEN_ALLOW.lock().ok().and_then(|m| m.get(label).cloned()).unwrap_or_default();
             if let Some(url) = url { let _ = crate::plugin_open_url(url, allow); }       // (a refused address: nothing happens)
         }
+        "mouse" => crate::debug_log("mouse", &format!("{label}: the page saw a press of a button ({})", query.unwrap_or(""))),
         "hello" => diag(format!("{label}: the script of the page ran ({})", query.unwrap_or(""))),
         "zseen" => diag(format!("{label}: the page saw a zoom input ({})", query.unwrap_or(""))),
         "copy" => {                                     // the user's right button with a text selected on the page: the text goes to the clipboard (the center puts it there and says so)
@@ -270,19 +283,36 @@ fn command(app: &AppHandle, label: &str, cmd: &str, query: Option<&str>) {
             if let (Some(p), Some(sz)) = (n("p"), n("s")) { if p.is_finite() && sz.is_finite() { let _ = app.emit("web-scroll", json!({ "label": label, "p": p.clamp(0.0, 1.0), "s": sz.clamp(0.0, 1.0) })); } }
         }
         "prep" => {                                   // the mouse is over a text box: a click may activate the window now (the system does it)
-            if let Ok(h) = hwnd_of(&win) {
-                win::allow_key(h, true);
-                win::set_noactivate_light(h, false);
+            // (Windows: nothing. A window that may be activated is activated by ANY press of the mouse over it, a side button (back, forward) included, and takes the keyboard from the game. The window
+            // stays "no activate"; the click on the text box activates it, see "inputclick")
+            if cfg!(target_os = "macos") {
+                if let Ok(h) = hwnd_of(&win) {
+                    win::allow_key(h, true);
+                    win::set_noactivate_light(h, false);
+                }
             }
         }
-        "inputclick" => {                              // macOS: a click on a text box must make the program active; when the system has not done it a moment later, it is asked to
-            if cfg!(target_os = "macos") {
+        "inputclick" => {                              // the left button goes down on a text box: the window must be the active one now (the user types into it)
+            if cfg!(target_os = "macos") {                 // macOS: made active by the system; when it has not done it a moment later, it is asked to
                 if let Ok(h) = hwnd_of(&win) {
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(150));
                         let before = win::has_keyboard(h);                  // (this window, not the program: another window of ours may have the keyboard: the bar of the center)
                         if !before { win::allow_key(h, true); let _ = win::grab_focus(h); }
                         event(format!("input click: the window {} the keyboard 0.15 s later{}", if before { "had" } else { "did NOT have" }, if before { "" } else { ": asked for it" }));
+                    });
+                }
+            } else if let Ok(h) = hwnd_of(&win) {
+                // Windows: the window is "no activate" until now (a press of a side button over a text box must not take the keyboard from the game), so the program does what the system would do
+                // for a click: the window may be activated, and it is. "unprep" puts it back when the user goes to the game.
+                if win::foreground() != h {
+                    let w2 = win.clone();
+                    let _ = win.run_on_main_thread(move || {
+                        if let Ok(h) = hwnd_of(&w2) {
+                            win::set_noactivate_light(h, false);
+                            let ok = win::grab_focus(h);
+                            crate::debug_log("mouse", &format!("{}: a click on a text box: the window is activated: {}", w2.label(), if ok { "done" } else { "NOT done" }));
+                        }
                     });
                 }
             }
@@ -408,9 +438,9 @@ pub async fn web_open(app: AppHandle, args: Value) -> Result<(), String> {
     if let Ok(mut m) = TOKENS.lock() { m.insert(label.clone(), token.clone()); }
     // what the user chose for this window (the scripts are made for it: a change is for the next time the window is opened)
     let flag = |k: &str, d: bool| args.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
-    let (ctrl_zoom, shift_scroll, rclick_copy) = (flag("ctrl_zoom", true), flag("shift_scroll", false), flag("rclick_copy", true));
+    let (ctrl_zoom, shift_scroll, rclick_copy, through) = (flag("ctrl_zoom", true), flag("shift_scroll", false), flag("rclick_copy", true), flag("through", false));
     let keys = KEYS.replace("__SHIFTSCROLL__", &shift_scroll.to_string()).replace("__CTRLZOOM__", &ctrl_zoom.to_string());
-    let b = b.initialization_script(PAGE.replace("__TOKEN__", &token).replace("__CTRLZOOM__", &ctrl_zoom.to_string()).replace("__RCOPY__", &rclick_copy.to_string())).initialization_script(keys.clone()).initialization_script_for_all_frames(keys);
+    let b = b.initialization_script(PAGE.replace("__TOKEN__", &token).replace("__CTRLZOOM__", &ctrl_zoom.to_string()).replace("__RCOPY__", &rclick_copy.to_string()).replace("__THROUGH__", &through.to_string())).initialization_script(keys.clone()).initialization_script_for_all_frames(keys);
     let mut b = b
         .title("CMR Web")
         .decorations(false)
@@ -583,6 +613,29 @@ pub async fn web_alpha(app: AppHandle, label: String, alpha: f64, ms: Option<u64
     if !is_free(&label) { return Err("not a window of the mini browser".into()); }
     let hwnd = hwnd_of(&get(&app, &label)?)?;
     fade(&app, &label, hwnd, alpha.clamp(0.2, 1.0), ms.unwrap_or(0).min(3000));
+    Ok(())
+}
+
+/// A window of the web that the mouse goes through (click-through): what the center says when the user chose it for the window and the interact keys are not held. `on` false: it takes the mouse again.
+/// `enabled`: whether the user chose click-through for the window at all (what the page needs to know: see `__cmrThrough`).
+#[tauri::command]
+pub async fn web_through(app: AppHandle, label: String, on: bool, enabled: Option<bool>) -> Result<(), String> {
+    if is_closing(&label) { return Ok(()); }
+    let w = get(&app, &label)?;
+    let hwnd = hwnd_of(&w)?;
+    win::set_clickthrough(hwnd, on);
+    // `enabled`: the user chose click-through for this window (it goes through only while the interact keys are not held): the page is told, it has no other way to know (PAGE: __cmrThrough)
+    if let Some(e) = enabled { let _ = w.eval(&format!("window.__cmrThrough={e}")); }
+    Ok(())
+}
+
+/// A turn of the wheel over a window of the web that the mouse goes through (the exe took it from the game: win.rs wheel_proc): the page scrolls. `x`, `y`: where the pointer is in the page, in
+/// pixels of the screen from the upper left corner of the page; `delta`: the turn (120 = one notch up). The scrolling is done by the page (PAGE: `__cmrWheel`): what is under the point, or the page.
+#[tauri::command]
+pub async fn web_wheel(app: AppHandle, label: String, x: f64, y: f64, delta: f64) -> Result<(), String> {
+    if is_closing(&label) || !x.is_finite() || !y.is_finite() || !delta.is_finite() { return Ok(()); }
+    let w = get(&app, &label)?;
+    let _ = w.eval(&format!("window.__cmrWheel&&window.__cmrWheel({},{},{})", x.round() as i64, y.round() as i64, delta.round().clamp(-12000.0, 12000.0) as i64));
     Ok(())
 }
 

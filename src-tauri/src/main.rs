@@ -14,6 +14,8 @@ mod capture;
 #[path = "capture_mac.rs"]
 mod capture;
 mod capturelib;
+#[cfg(windows)]
+mod wgc;
 mod ext;
 mod extlib;
 mod files;
@@ -333,6 +335,8 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
             .always_on_top(true)
             .skip_taskbar(true)
             .resizable(false)
+            .maximizable(false)                // (a key of the system, Win + Up, made the box as big as the screen)
+            .minimizable(false)
             .visible(false)
             .inner_size(520.0, 46.0),
         // the address box of the mini browser (address.js): one small window for all the windows of it, put over the address of the one that is used
@@ -341,6 +345,14 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
         // the blur of a pane (center.rs): an empty transparent window under its center, the system blurs what is behind it
         "blur" => b.title("CMR Blur").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).inner_size(100.0, 100.0),
         "center" => b.title("CMR Center").visible(false).transparent(true).decorations(false).shadow(false).skip_taskbar(true).resizable(false).focusable(false).accept_first_mouse(true).inner_size(400.0, 300.0),
+        // a window of the system with its own frame, title bar, task bar button (the test of 3.2.1: the window shows one translation window with the page of the center, see center.js `native`): the system does the
+        // moving, the sizing, the snapping, the maximizing; it takes the keyboard like any window
+        // 3.2.1 test: no frame of the system, no title bar: the page draws all of it (its bar is the title bar, center.js `native`); the system still moves, sizes, snaps and maximizes the window
+        // (start_dragging, the edges: tauri's undecorated resizing). macOS: the title bar is laid over the page (the three round buttons of the system stay, in the corner of our bar)
+        #[cfg(not(target_os = "macos"))]
+        "native" => b.title("ChatMatrix").visible(false).transparent(true).decorations(false).shadow(true).inner_size(520.0, 420.0).min_inner_size(240.0, 160.0),
+        #[cfg(target_os = "macos")]
+        "native" => b.title("ChatMatrix").visible(false).title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true).inner_size(520.0, 420.0).min_inner_size(240.0, 160.0),
         "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),
         // the control window is the program's brain, not something to look at: it is never shown. An empty file "show_control" next to app/
@@ -438,6 +450,86 @@ fn capture(x: i32, y: i32, w: i32, h: i32) -> Result<tauri::ipc::Response, Strin
     win::capture(x, y, w, h).map(|bytes| tauri::ipc::Response::new(bytes))
 }
 
+/// The same as `capture`, but of the window of the game only (Windows Graphics Capture, wgc.rs): what stands over the window on the screen is not in the picture. Rectangle in SCREEN pixels, as `capture`.
+/// An error says why it cannot (the page then reads the screen as before).
+#[tauri::command(async)]
+fn capture_game(hwnd: i64, x: i32, y: i32, w: i32, h: i32) -> Result<tauri::ipc::Response, String> {
+    #[cfg(windows)]
+    { wgc::capture(hwnd as isize, x, y, w, h).map(tauri::ipc::Response::new) }
+    #[cfg(not(windows))]
+    { let _ = (hwnd, x, y, w, h); Err("the capture of the game window is not made for this system yet".into()) }
+}
+
+/// Does this Windows have the switch for the yellow frame of the capture (Windows 11), and what happened to the frame at the last start: { switch, border }.
+#[tauri::command(async)]
+fn capture_game_info() -> Value {
+    #[cfg(windows)]
+    { json!({ "switch": wgc::can_hide_border(), "border": wgc::border_status() }) }
+    #[cfg(not(windows))]
+    { json!({ "switch": false, "border": "" }) }
+}
+
+/// Ends the capture of the game window (the option is off).
+#[tauri::command(async)]
+fn capture_game_stop() {
+    #[cfg(windows)]
+    wgc::stop();
+}
+
+/// A bitmap file (32 bits, top row first) of a picture as `capture` gives it (8 bytes header + BGRA), to look at.
+fn write_bmp(path: &std::path::Path, picture: &[u8], crop: (i32, i32, i32, i32)) -> std::io::Result<()> {
+    let (pw, ph) = (u32::from_le_bytes(picture[0..4].try_into().unwrap()) as i32, u32::from_le_bytes(picture[4..8].try_into().unwrap()) as i32);
+    let (cx, cy, cw, ch) = (crop.0.clamp(0, pw), crop.1.clamp(0, ph), crop.2.min(pw - crop.0.clamp(0, pw)).max(0), crop.3.min(ph - crop.1.clamp(0, ph)).max(0));
+    let mut data = Vec::with_capacity(54 + (cw * ch * 4) as usize);
+    data.extend_from_slice(b"BM");
+    data.extend_from_slice(&((54 + cw * ch * 4) as u32).to_le_bytes());
+    data.extend_from_slice(&[0, 0, 0, 0]);
+    data.extend_from_slice(&54u32.to_le_bytes());
+    data.extend_from_slice(&40u32.to_le_bytes());
+    data.extend_from_slice(&cw.to_le_bytes());
+    data.extend_from_slice(&(-ch).to_le_bytes());
+    data.extend_from_slice(&1u16.to_le_bytes());
+    data.extend_from_slice(&32u16.to_le_bytes());
+    data.extend_from_slice(&[0u8; 24]);
+    for row in 0..ch {
+        let at = 8 + (((cy + row) * pw + cx) * 4) as usize;
+        for px in picture[at..at + (cw * 4) as usize].chunks_exact(4) { data.extend_from_slice(&[px[0], px[1], px[2], 255]); }
+    }
+    std::fs::write(path, data)
+}
+
+/// The test of the capture of the game window: the rectangle is taken both ways (the game window, the screen) and compared: the time each took, how many pixels differ and by how much, whether the picture of the window is
+/// black. The pictures (the lower left corner of the rectangle, up to 640x360) are written to logs/capture_window.bmp and logs/capture_screen.bmp. A translation window that stands over the rectangle differs, of course.
+#[tauri::command(async)]
+fn capture_compare(hwnd: i64, x: i32, y: i32, w: i32, h: i32) -> Result<Value, String> {
+    #[cfg(not(windows))]
+    { let _ = (hwnd, x, y, w, h); return Err("the capture of the game window is not made for this system yet".into()); }
+    #[cfg(windows)]
+    {
+        let t0 = std::time::Instant::now();
+        let window = wgc::capture(hwnd as isize, x, y, w, h);
+        let window_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let t1 = std::time::Instant::now();
+        let screen = win::capture(x, y, w, h)?;
+        let screen_ms = t1.elapsed().as_secs_f64() * 1000.0;
+        let border = wgc::border_status();
+        let window = match window { Ok(p) => p, Err(e) => return Ok(json!({ "ok": false, "error": e, "screen_ms": screen_ms.round(), "border": border })) };
+        let (mut different, mut max, mut sum, mut lit) = (0u64, 0u32, 0u64, 0u64);
+        for (a, b) in window[8..].chunks_exact(4).zip(screen[8..].chunks_exact(4)) {
+            let d = (0..3).map(|i| (a[i] as i32 - b[i] as i32).unsigned_abs()).max().unwrap_or(0);
+            if d > 0 { different += 1; sum += d as u64; max = max.max(d); }
+            if a[0] | a[1] | a[2] != 0 { lit += 1; }
+        }
+        let total = (w as u64) * (h as u64);
+        let dir = base_dir().join("logs");
+        let _ = std::fs::create_dir_all(&dir);
+        let crop = (0, (h - 360).max(0), 640, 360);
+        let wrote = write_bmp(&dir.join("capture_window.bmp"), &window, crop).is_ok() & write_bmp(&dir.join("capture_screen.bmp"), &screen, crop).is_ok();
+        Ok(json!({ "ok": true, "size": [w, h], "window_ms": window_ms.round(), "screen_ms": screen_ms.round(), "different": different, "total": total, "max": max,
+            "mean": if different > 0 { sum as f64 / different as f64 } else { 0.0 }, "black": lit == 0, "files": wrote, "border": border }))
+    }
+}
+
 /// The usable area (without the taskbar) and the scale of the monitor that has the point; nothing known = a huge area (nothing is moved).
 fn monitor_at(win: &WebviewWindow, x: i32, y: i32) -> (placement::Area, f64) {
     let m = win.monitor_from_point(x as f64, y as f64).ok().flatten().or_else(|| win.primary_monitor().ok().flatten());
@@ -485,21 +577,183 @@ async fn open_options(app: AppHandle) -> Result<(), String> {
     make_window(&app, "options", "options.html", "options").map(|_| ()).map_err(|e| e.to_string())
 }
 
+// ---- the translation windows that are windows of the system (neither on top nor above the game: winconf.windowMode 0). Their page is the page of the center in a mode that shows that one window and fills
+// its window (center.js `native`); the frame, the task bar button, the snapping are the system's. The hub (winmanager.js) decides which exist; they tell it when they are moved (their place is the saved
+// geometry of the window: the TEXT AREA, the same as a pane of a center, so a window that changes its kind stays where it is: the bar is the first NATIVE_BAR of the window of the system, the text below it).
+const NATIVE_BAR: f64 = 22.0;                                  // (css pixels: the bar of a translation window in a center, center.js BAR_H)
+const NATIVE_TITLE: f64 = 28.0;                                // (css pixels: the bar of a window of the system, it is its title bar: pane.js NATIVE_BAR_H)
+
+fn native_label(id: i64) -> String { format!("native{id}") }
+/// The label of the window of the system of a translation window ("main", "win3"), if it has one.
+fn native_label_of(label: &str) -> String { if label == "main" { "native1".into() } else { label.strip_prefix("win").map(|n| format!("native{n}")).unwrap_or_default() } }
+fn native_id_of(label: &str) -> Option<i64> { label.strip_prefix("native")?.parse().ok() }
+
+/// "WxH+X+Y" (the geometry the program keeps: pixels of the screen) -> (x, y, w, h)
+fn parse_geometry(g: &str) -> Option<(i32, i32, u32, u32)> {
+    let (wh, rest) = g.trim().split_once('+')?;
+    let (w, h) = wh.split_once('x')?;
+    let (x, y) = rest.split_once('+')?;
+    Some((x.parse().ok()?, y.parse().ok()?, w.parse().ok()?, h.parse().ok()?))
+}
+/// Is most of this rectangle on a screen that exists now (a window of a monitor that is gone is not put there)?
+fn on_a_screen(app: &AppHandle, x: i32, y: i32, w: u32, h: u32) -> bool {
+    app.available_monitors().unwrap_or_default().iter().any(|m| {
+        let (p, s) = (m.position(), m.size());
+        let ow = (x + w as i32).min(p.x + s.width as i32) - x.max(p.x);
+        let oh = (y + h as i32).min(p.y + s.height as i32) - y.max(p.y);
+        ow >= 100 && oh >= 40
+    })
+}
+/// The inside of the window (what the page fills) goes to this rectangle of the screen.
+fn place_inner(w: &WebviewWindow, x: i32, y: i32, iw: u32, ih: u32) {
+    #[cfg(windows)]
+    if let Ok(h) = hwnd_of(w) { if win::set_client_rect(h, x, y, iw as i32, ih as i32) { return; } }
+    let _ = w.set_size(tauri::PhysicalSize::new(iw, ih));
+    if let (Ok(o), Ok(i)) = (w.outer_position(), w.inner_position()) { let _ = w.set_position(tauri::PhysicalPosition::new(x - (i.x - o.x), y - (i.y - o.y))); }
+}
+/// The geometry (text area) of a window of the system now, for the settings. None: not worth keeping (it is minimized, maximized, full screen, or too small).
+fn native_geometry(window: &tauri::Window) -> Option<String> {
+    if window.is_minimized().unwrap_or(false) || window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) { return None; }
+    let (p, s) = (window.inner_position().ok()?, window.inner_size().ok()?);
+    if p.x < -30000 || s.width < 100 || s.height < 60 { return None; }
+    let bar = (NATIVE_TITLE * window.scale_factor().unwrap_or(1.0)).round() as i32;
+    Some(format!("{}x{}+{}+{}", s.width, (s.height as i32 - bar).max(1), p.x, p.y + bar))
+}
+
+/// The window of the system of translation window `id`: made once (a second call shows the one that is there). `geometry`: the text area it had ("WxH+X+Y"); no place, or one that is on no screen:
+/// the middle of the screen. `title`: what the title bar says.
+#[tauri::command]
+async fn native_open(app: AppHandle, id: i64, title: Option<String>, geometry: Option<String>) -> Result<(), String> {
+    let label = native_label(id);
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        return w.set_focus().map_err(|e| e.to_string());
+    }
+    let w = make_window(&app, &label, &format!("center.html?native={id}"), "native").map_err(|e| e.to_string())?;
+    if let Some(t) = title.filter(|t| !t.trim().is_empty()) { let _ = w.set_title(&t.chars().take(80).collect::<String>()); }
+    let bar = (NATIVE_TITLE * w.scale_factor().unwrap_or(1.0)).round() as i32;
+    match geometry.as_deref().and_then(parse_geometry).filter(|&(x, y, gw, gh)| gw >= 100 && gh >= 40 && on_a_screen(&app, x, y - bar, gw, gh + bar as u32)) {
+        Some((x, y, gw, gh)) => place_inner(&w, x, y - bar, gw, gh + bar as u32),
+        None => { let _ = w.center(); }
+    }
+    w.show().map_err(|e| e.to_string())
+}
+
+/// The program closes the window of the system of translation window `id` (it is not open any more, or it has become a pane of a center). Not the X of the frame: that is asked of the hub (native-close).
+#[tauri::command]
+async fn native_close(app: AppHandle, id: i64) -> Result<(), String> {
+    let label = native_label(id);
+    if let Some(w) = app.get_webview_window(&label) { w.destroy().map_err(|e| e.to_string())?; }
+    Ok(())
+}
+
+/// What the bar of a window of the system asks for: "drag" (the system moves the window from here: snapping, the full-screen gesture of the mac work as for any window), "min", "max" (maximize / restore).
+#[tauri::command]
+fn native_action(window: tauri::WebviewWindow, action: String) -> Result<(), String> {
+    let e = |e: tauri::Error| e.to_string();
+    match action.as_str() {
+        "drag" => window.start_dragging().map_err(e),
+        "min" => window.minimize().map_err(e),
+        // the double click on a title bar: on the mac the system does it as it does for every window (the setting of the user: zoom or minimize; zoom also gives back a window that was laid on a half of the screen)
+        "max" => {
+            #[cfg(target_os = "macos")]
+            {
+                win::title_double_click(hwnd_of(&window)?);
+                Ok(())
+            }
+            #[cfg(not(target_os = "macos"))]
+            if window.is_maximized().unwrap_or(false) { window.unmaximize().map_err(e) } else { window.maximize().map_err(e) }
+        }
+        _ => Err(format!("unknown action {action}")),
+    }
+}
+
+/// The lines of a menu (core/menuspec.js toSpec: kind item | check | sep | sub, id, text, enabled, checked, items) as the items of a menu of the system. The id of an item carries the window it is for:
+/// "ctx:<label>:<number>" (the number is what the page gave).
+fn menu_items(app: &AppHandle, label: &str, specs: &[serde_json::Value], depth: u32) -> tauri::Result<Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>>> {
+    use tauri::menu::{CheckMenuItem, IsMenuItem, MenuItem, PredefinedMenuItem, Submenu};
+    let mut out: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = Vec::new();
+    for s in specs {
+        let kind = s["kind"].as_str().unwrap_or("item");
+        let text = s["text"].as_str().unwrap_or("");
+        // (on Windows an & in a menu text marks the letter of a key: the program wants the sign itself, as in an address)
+        let text = if cfg!(windows) { text.replace('&', "&&") } else { text.to_string() };
+        let enabled = s["enabled"].as_bool().unwrap_or(false);
+        let id = format!("ctx:{label}:{}", s["id"].as_u64().unwrap_or(0));
+        match kind {
+            "sep" => out.push(Box::new(PredefinedMenuItem::separator(app)?)),
+            "sub" if depth < 4 => {
+                let inner = menu_items(app, label, s["items"].as_array().map(|a| a.as_slice()).unwrap_or(&[]), depth + 1)?;
+                let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = inner.iter().map(|b| b.as_ref()).collect();
+                out.push(Box::new(Submenu::with_items(app, &text, enabled, &refs)?));
+            }
+            "check" => out.push(Box::new(CheckMenuItem::with_id(app, id, &text, enabled, s["checked"].as_bool().unwrap_or(false), None::<&str>)?)),
+            _ => out.push(Box::new(MenuItem::with_id(app, id, &text, enabled, None::<&str>)?)),
+        }
+    }
+    Ok(out)
+}
+
+/// The right-click menu of a window of the system, drawn by the system at the mouse (center.js openNativeMenu). The line that is chosen comes back as the event "native-menu-pick" { id } to the page.
+#[tauri::command]
+async fn native_menu(window: WebviewWindow, items: Vec<serde_json::Value>) -> Result<(), String> {
+    use tauri::menu::{IsMenuItem, Menu};
+    let e = |e: tauri::Error| e.to_string();
+    let boxed = menu_items(window.app_handle(), window.label(), &items, 0).map_err(e)?;
+    let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = boxed.iter().map(|b| b.as_ref()).collect();
+    let menu = Menu::with_items(window.app_handle(), &refs).map_err(e)?;
+    window.popup_menu(&menu).map_err(e)
+}
+
+/// Where the page of a window of the system starts on the screen (its inner area, in pixels of the screen) and the scale of the screen it is on: the page works from it (center.js: native).
+#[tauri::command]
+async fn native_origin(app: AppHandle, label: String) -> Result<serde_json::Value, String> {
+    let w = app.get_webview_window(&label).ok_or("no such window")?;
+    let p = w.inner_position().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "x": p.x, "y": p.y, "scale": w.scale_factor().unwrap_or(1.0) }))
+}
+
 /// Shows the send box next to the window `label` (same width) and gives it the keyboard. `place`: "auto" (or nothing) = under the window, above it when under it
 /// the box would be cut off (it sits at the bottom of the screen, over the taskbar); "below" / "above" = always there (placement.rs send_box). In the monitor the window is on.
 #[tauri::command]
 fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<(), String> {
-    let w = app.get_webview_window("input").ok_or("no input window")?;
-    let e = |e: tauri::Error| e.to_string();
+    let r = show_input_inner(&app, label, place);
+    if let Err(e) = &r { debug_log("input", &format!("the send box could not be shown: {e}")); }
+    r
+}
+
+fn show_input_inner(app: &AppHandle, label: String, place: Option<String>) -> Result<(), String> {
     let place = place.unwrap_or_else(|| "auto".into());
-    place_input(&app, &label, &place)?;
+    let e = |e: tauri::Error| e.to_string();
+    // A translation window that is a window of the system has the send box as the last row of its own page (sendrow.js): its window comes to the front and has the keyboard, the page does the rest
+    // ('input-open' was said to every page before this call). No window of the box then.
+    if let Some(nw) = app.get_webview_window(&native_label_of(&label)).filter(|w| w.is_visible().unwrap_or(false)) {
+        debug_log("input", &format!("{label}: a window of the system: the box is a row of its page"));
+        if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = None; }
+        if let Some(b) = app.get_webview_window("input") { if b.is_visible().unwrap_or(false) { let _ = b.hide(); } }
+        let hwnd = hwnd_of(&nw)?;
+        let _ = nw.unminimize();
+        win::grab_focus(hwnd);
+        nw.set_focus().map_err(e)?;
+        keyboard_check(app, nw.label().to_string(), hwnd);
+        return Ok(());
+    }
+    let w = app.get_webview_window("input").ok_or("no input window")?;
+    debug_log("input", &format!("{label}: a window of the box, place {place}"));
+    place_input(app, &label, &place)?;
     if let Ok(mut a) = INPUT_ANCHOR.lock() { *a = Some((label, place)); }       // (from now on the box follows its window: see on_window_event)
     w.show().map_err(e)?;
     let hwnd = hwnd_of(&w)?;
     win::grab_focus(hwnd);          // this program to the front (on a Mac this takes a moment)
     w.set_focus().map_err(e)?;      // moves the keyboard into the page inside the window
-    // Whether the box gets the keyboard is NOT decided here: it may take a second or more (macOS). The box is "open" at once; a thread asks again every 0.2 s until
-    // it is the key window and tells how long it took ('input-focus', for the log). If it never gets it, the send box (sendbox.js) notices and gives the keyboard back.
+    keyboard_check(app, "input".to_string(), hwnd);
+    Ok(())
+}
+
+/// Whether the window `label` gets the keyboard is NOT decided at once: it may take a second or more (macOS). A thread asks again every 0.2 s until it is the key window and tells how long it took ('input-focus',
+/// for the log). If it never gets it, the send box (sendbox.js) notices and gives the keyboard back.
+fn keyboard_check(app: &AppHandle, label: String, hwnd: isize) {
     let app2 = app.clone();
     std::thread::spawn(move || {
         use tauri::Emitter;
@@ -508,15 +762,15 @@ fn show_input(app: AppHandle, label: String, place: Option<String>) -> Result<()
         for _ in 0..15 {
             if ok { break; }
             std::thread::sleep(Duration::from_millis(200));
-            let Some(w) = app2.get_webview_window("input") else { return };
+            let Some(w) = app2.get_webview_window(&label) else { return };
             if !w.is_visible().unwrap_or(false) { return; }        // (closed meanwhile)
             win::ask_keyboard(hwnd);
             let _ = w.set_focus();
             ok = win::has_keyboard(hwnd);
         }
+        debug_log("input", &format!("{label}: the keyboard {} after {} ms", if ok { "was had" } else { "was NOT had" }, t0.elapsed().as_millis()));
         let _ = app2.emit("input-focus", json!({ "ok": ok, "ms": t0.elapsed().as_millis() as u64, "front": win::self_front() }));
     });
-    Ok(())
 }
 
 /// Where the address box has to be (screen pixels) and since when: for a moment after it was shown, whatever the system does to the window (a move to a screen of another scale makes it change the size
@@ -579,7 +833,6 @@ fn address_hide(app: AppHandle) {
 
 /// The window the open send box follows (its label) and where it goes ("auto" | "below" | "above"); None while there is no box.
 static INPUT_ANCHOR: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
-
 /// Puts the send box next to the window `label`: its width, its height of 46 points (46 pixels times the scale of the monitor: a Retina screen has twice the pixels),
 /// its place by placement::send_box inside the monitor the window is on.
 fn place_input(app: &AppHandle, label: &str, place: &str) -> Result<(), String> {
@@ -592,10 +845,11 @@ fn place_input(app: &AppHandle, label: &str, place: &str) -> Result<(), String> 
     };
     let pos = tauri::PhysicalPosition::new(px, py);
     let size = tauri::PhysicalSize::new(sw, sh);
-    let (area, scale) = monitor_at(&w, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
+    let (home, scale) = monitor_at(&w, pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
     let box_w = size.width.max(200);
     let box_h = ((46.0 * scale).round() as u32).max(46);
-    let (bx, by) = placement::send_box(area, place, pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2);
+    let bar = center::pane_bar(label).unwrap_or_else(|| (NATIVE_BAR * scale).round() as i32);          // (the bar of the window the box is next to: it depends on the look of the bar)
+    let (bx, by) = placement::send_box(home, place, pos.x, pos.y, pos.y + size.height as i32, box_w as i32, box_h as i32, 2, bar);
     w.set_position(tauri::PhysicalPosition::new(bx, by)).map_err(e)?;
     w.set_size(tauri::PhysicalSize::new(box_w, box_h)).map_err(e)?;
     Ok(())
@@ -1105,13 +1359,14 @@ fn main() {
             center::center_ready,
             center::center_title,
             center::center_zoom,
-            center::center_raise,
             webwin::web_open,
             webwin::web_close,
             webwin::web_cmd,
             webwin::web_ua,
             webwin::web_data_list,
             webwin::web_alpha,
+            webwin::web_through,
+            webwin::web_wheel,
             webwin::web_forget,
             webwin::web_allow,
             webwin::web_info,
@@ -1126,7 +1381,16 @@ fn main() {
             screen_rect,
             find_game,
             capture,
+            capture_game,
+            capture_game_stop,
+            capture_game_info,
+            capture_compare,
             open_options,
+            native_open,
+            native_close,
+            native_origin,
+            native_action,
+            native_menu,
             open_url,
             open_chat_url,
             set_window_rect,
@@ -1163,6 +1427,13 @@ fn main() {
             set_tray_text,
             raise_self
         ])
+        // a line of a menu of the system (native_menu) was chosen: the window it was made for is told
+        .on_menu_event(|app, event| {
+            if let Some((label, id)) = event.id().as_ref().strip_prefix("ctx:").and_then(|r| r.rsplit_once(':')) {
+                use tauri::Emitter;
+                let _ = app.emit_to(label, "native-menu-pick", json!({ "id": id.parse::<u32>().unwrap_or(0) }));
+            }
+        })
         .on_window_event(|window, event| {
             // the window the send box belongs to was moved or got another size: the box (if it is open) goes with it
             if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
@@ -1174,12 +1445,25 @@ fn main() {
                     }
                 }
             }
+            // a window of the system (a translation window that is neither on top nor above the game): its place goes to the hub at every step (the hub writes it when it stands still)
+            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }) {
+                if let (Some(id), Some(g)) = (native_id_of(window.label()), native_geometry(window)) {
+                    use tauri::Emitter;
+                    let _ = window.app_handle().emit("native-geometry", json!({ "id": id, "geometry": g }));
+                }
+            }
             if window.label() == "address" && matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }) { address_refit(window.app_handle()); }
             if let tauri::WindowEvent::CloseRequested { .. } = event { webwin::on_close_requested(window.label()); }          // (a web window: nothing may touch it while it closes)
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {
                     // closing the control window or the main translation window ends the program (the other translation windows only close themselves)
                     "control" | "main" => { api.prevent_close(); request_quit(window.app_handle()); }
+                    // the X of the frame of a window of the system: the hub decides (the main window ends the program, another one closes for now)
+                    l if native_id_of(l).is_some() => {
+                        use tauri::Emitter;
+                        api.prevent_close();
+                        let _ = window.app_handle().emit("native-close", json!({ "id": native_id_of(l) }));
+                    }
                     // the window of the earlier-version files: closing it is "cancel" = the program ends (nothing else is running yet)
                     "legacy" => window.app_handle().exit(0),
                     // the options window: its place and size are told to the program at the moment it closes (the page only tells them after the window

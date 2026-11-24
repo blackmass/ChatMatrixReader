@@ -28,9 +28,13 @@ const $ = id => document.getElementById(id);
 // own are window 1's (shown with "창 1을 따름").
 const conf = (cfg, wid) => cfg.child_windows.find(c => c.id === wid);
 const topKey = row => MAIN_KEY[row.key] || row.key;
+// A row with `virtual: [keys]` is not a setting of its own: it reads and writes those settings together (the kind of window: topmost + topmost_wow_only). row.vget(values) -> its value, row.vpatch(value) -> the settings.
+const vSource = (cfg, wid, keys) => { const c = wid === 1 ? null : conf(cfg, wid); return c === undefined ? undefined : Object.fromEntries(keys.map(k => [k, wid === 1 ? cfg[MAIN_KEY[k] || k] : (c || {})[k]])); };
+const vPatch = (row, v, wid) => { const p = row.vpatch(v); return wid === 1 ? Object.fromEntries(Object.entries(p).map(([k, x]) => [MAIN_KEY[k] || k, x])) : p; };
 
 function value(row, cfg, wid) {
   if (!row.win) return row.get ? row.get(cfg) : cfg[row.key];
+  if (row.virtual) { const src = vSource(cfg, wid, row.virtual); return src ? row.vget(src) : undefined; }
   if (wid === 1) return row.type === 'channels' ? row.codes.filter(c => !(cfg.win1_off || []).includes(c)) : cfg[topKey(row)];
   const c = conf(cfg, wid);
   if (!c) return undefined;
@@ -40,6 +44,7 @@ function value(row, cfg, wid) {
 }
 function patchFor(row, v, wid, cfg) {
   if (!row.win) return row.patch ? row.patch(cfg, v) : { [row.key]: v };
+  if (row.virtual) return wid === 1 ? vPatch(row, v, 1) : { child_windows: cfg.child_windows.map(c => (c.id === wid ? { ...c, ...vPatch(row, v, wid) } : c)) };
   if (wid === 1) return row.type === 'channels' ? { win1_off: row.codes.filter(c => !v.includes(c)) } : { [topKey(row)]: v };
   return { child_windows: cfg.child_windows.map(c => {
     if (c.id !== wid) return c;
@@ -61,6 +66,7 @@ const ctxFor = wid => ({
   set: patch => settings.request(patch),
   put: (row, v) => settings.request(patchFor(row, v, wid, settings.cfg())),
   def: row => (!row.win ? (row.def ?? DEFAULTS[row.key])
+    : row.virtual ? row.def
     : row.type === 'channels' ? [...row.codes]
     : wid === 1 ? (row.def ?? DEFAULTS[topKey(row)]) : (row.key in KEYS ? KEYS[row.key] : DEFAULTS[row.key])),
   canFollow: row => !!row.win && wid !== 1 && FOLLOW.has(row.key),
@@ -99,6 +105,13 @@ const ctxNow = () => ctxFor(selected);
 const cardTitle = (t, c, wid) => `${t.title} › ${c.title || ''}${wid ? ' · ' + winName(wid) : ''}`;
 
 // ---------------------------------------------------------------- the views
+// who the test box translates with: the method of the translation tab, or (the glossary tab) the page that is open
+let testTab = null;
+const methodName = (cfg, m) => (m === 'google' ? (cfg.google_free || !(cfg.google_api_key || '').trim() ? tr('구글 (무료)') : tr('구글 (API 키)')) : m === 'openai' ? tr('AI 서버') : m === 'custom' ? tr('직접 설정한 서버') : tr('번역 안 함'));
+function updateWho() {
+  const cfg = settings.cfg(), m = testTab && testTab.testMethod ? testTab.testMethod() : null;
+  $('testWho').textContent = m === 'shared' ? tr('기본 방식 · {name}', { name: methodName(cfg, cfg.translator) }) : methodName(cfg, m || cfg.translator);
+}
 function show() {
   const body = $('body'), head = $('head');
   body.textContent = ''; built = [];
@@ -132,13 +145,16 @@ function show() {
     built.push(...buildCards(tab.visibleCards ? tab.visibleCards() : tab.cards, ctxNow(), body, { fold: true }));
   }
   $('sub').textContent = view.mode === 'tab' ? tab.subtitle || '' : '';
+  testTab = view.mode === 'tab' ? tab : null;
   $('tester').hidden = !(view.mode === 'tab' && tab.test);
+  updateWho();
   $('testOut').hidden = $('tester').hidden || !$('testOut').textContent;
   refresh();
 }
 
 function refresh() {
   for (const b of built) b.refresh();
+  updateWho();
   const list = changedList();
   $('changed').hidden = list.length === 0;
   $('changedCount').textContent = list.length;
@@ -173,7 +189,8 @@ $('revertAll').onclick = () => {
   const before = settings.cfg(), work = structuredClone(before);
   for (const it of changedList()) {
     const x = ctxFor(it.wid), v = structuredClone(x.get(it.row, snapshot));
-    if (it.row.win && it.wid !== 1) {                                 // the entry as it was (also "no own value")
+    if (it.row.virtual) Object.assign(it.wid === 1 ? work : conf(work, it.wid), vPatch(it.row, v, it.wid));
+    else if (it.row.win && it.wid !== 1) {                                 // the entry as it was (also "no own value")
       const c = conf(snapshot, it.wid), mine = conf(work, it.wid);
       if (FOLLOW.has(it.row.key) && (c[it.row.key] === undefined || c[it.row.key] === null)) delete mine[it.row.key]; else mine[it.row.key] = v;
     } else Object.assign(work, patchFor(it.row, v, it.wid, work));
@@ -244,7 +261,7 @@ $('restartBtn').onclick = () => window.__TAURI__.event.emit('restart-request', {
     if (!text) return;
     try { localStorage.setItem(KEY, text); } catch { /* not kept */ }
     testId++; out.hidden = false; out.className = 'wait'; out.textContent = tr('번역 중…'); out.title = '';
-    emit('rpc-test', { id: testId, text });
+    emit('rpc-test', { id: testId, text, method: testTab && testTab.testMethod ? testTab.testMethod() : null });
   };
   $('testBtn').onclick = run;
   input.onkeydown = e => { if (e.key === 'Enter') run(); };

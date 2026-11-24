@@ -9,6 +9,7 @@ import * as B from './core/browsers.js';
 export function menuList({ cfg, pane, ev, open, browsersOpen = new Set() }) {
   const list = [], add = (text, fn, cls = '') => list.push({ text, fn, cls });
   if (pane.kind === 'browser') return browserMenu(cfg, pane, add, list);
+  if (pane.kind === 'web') return webMenu(cfg, pane, add, list);
   // the tab that was clicked with the right button (its name, without being shown first); anywhere else: the tab that is shown
   const tabEl = ev.target.closest && ev.target.closest('.ptab');
   const target = pane.chats.get(tabEl ? Number(tabEl.dataset.chat) : pane.active) || pane.chats.get(pane.id);
@@ -69,6 +70,16 @@ function browserMenu(cfg, pane, add, list) {
   add(tr('현재 페이지를 내 브라우저에서 열기'), () => invoke('web_cmd', { label: pane.label, cmd: 'external' }).catch(() => {}), B.isWebUrl(pane.url) ? '' : 'off');
   add(tr('이 창의 설정…'), () => {
     try { localStorage.setItem('cmr-browser-sel', 'b' + pane.win); localStorage.setItem('cmr-options-tab', 'browser'); } catch { /* the options open as they were */ }
+    invoke('open_options').catch(() => {});
+  });
+  return list;
+}
+
+// the menu of a web window of a plugin (a page of the web the plugin opened: the addresses are the plugin's)
+function webMenu(cfg, pane, add, list) {
+  add(tr('현재 페이지를 내 브라우저에서 열기'), () => invoke('web_cmd', { label: pane.label, cmd: 'external' }).catch(() => {}), B.isWebUrl(pane.url) ? '' : 'off');
+  add(tr('이 창의 설정…'), () => {
+    try { localStorage.setItem('cmr-browser-sel', 'w' + pane.win); localStorage.setItem('cmr-options-tab', 'browser'); } catch { /* the options open as they were */ }
     invoke('open_options').catch(() => {});
   });
   return list;

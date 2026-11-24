@@ -4,12 +4,15 @@ import { tr } from '../core/i18n.js';
 import * as B from '../core/browsers.js';
 import { nameFor } from '../winname.js';
 import * as settings from '../settings.js';
-import { without } from '../core/winconf.js';
+import { without, windowKind, kindPatch } from '../core/winconf.js';
 import { goneOwner, onGoneChange, goneNote } from './orphans.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const btn = (text, cls = '') => el('button', cls, text);
 const textBox = () => { const i = el('input'); i.type = 'text'; i.spellcheck = false; i.autocomplete = 'off'; return i; };          // (the style sheet of the options styles `input[type=text]`: a box without the type is not styled)
+
+// what each kind of a web window means (it is never an ordinary window: the program keeps its pages above the game, see winconf.windowMode)
+const KIND_HINTS = { top: '게임 위에 항상 떠 있습니다.', wow: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다.' };
 
 // the window the rows show: 'b<number>' = a browser window, 'w<number>' = a web window of a plugin (its entry in the list of windows); `page`: 'settings' or 'bookmarks'
 let current = 'b' + B.DEFAULT_ID, page = 'settings';
@@ -58,15 +61,16 @@ const browserCard =
       { type: 'button', label: '로그인 정보', button: '로그인 정보 지우기', keywords: '쿠키 로그인 지우기 삭제 세션 초기화',
         note: '이 창이 보관한 로그인 정보(쿠키)를 지웁니다. 창이 열려 있으면 그 창의 것을 지우고, 닫혀 있으면 보관 폴더를 지웁니다.',
         action: () => emit('browser-command', { cmd: 'clear', id: curNum() }) },
-      { key: 'browser_topmost', type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시', show: hasWindow, def: true,
-        get: cfg => cur(cfg).topmost, patch: (cfg, v) => ({ browser_windows: list(cfg).map(b => (b.id === cur(cfg).id ? { ...b, topmost: v, topmost_wow_only: v ? false : b.topmost_wow_only } : b)) }) },
-      { key: 'browser_topmost_wow_only', type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤', show: hasWindow, def: false,
-        note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.',
-        get: cfg => cur(cfg).topmost_wow_only, patch: (cfg, v) => ({ browser_windows: list(cfg).map(b => (b.id === cur(cfg).id ? { ...b, topmost_wow_only: v, topmost: v ? false : b.topmost } : b)) }) },
+      { key: 'browser_kind', type: 'select', label: '창 종류', def: 'top', keywords: '항상 위 맨 위에 와우 위에만 최상위 topmost', show: hasWindow,
+        options: [['top', '항상 위'], ['wow', '와우 위에만']],
+        hints: KIND_HINTS,
+        get: cfg => windowKind(cur(cfg)), patch: (cfg, v) => ({ browser_windows: list(cfg).map(b => (b.id === cur(cfg).id ? { ...b, ...kindPatch(v) } : b)) }) },
       mine('idle_alpha', 1, { type: 'percent', min: 0.2, label: '마우스가 벗어나면 진하기', keywords: '투명도 불투명 흐리게 반투명 마우스 벗어나면 fade', show: hasWindow,
         note: '마우스가 창 위에 있을 때는 늘 선명하고, 벗어나면 잠시 뒤 이 진하기로 흐려집니다. 100%는 흐려지지 않습니다.' }),
       mine('hide_ui', false, { type: 'check', label: '평소에 인터페이스 숨기기', keywords: '바 주소 테두리 프레임 숨김 가리기 인터페이스 hide', show: hasWindow,
         note: '마우스가 창 위에 없을 때는 위쪽 바, 주소 줄, 테두리를 모두 숨기고 웹 페이지만 보입니다. 마우스를 올리면 바로 나타나고, 벗어나면 잠시 뒤 천천히 사라집니다.' }),
+      mine('click_through', false, { type: 'check', label: '클릭 관통', keywords: '마우스 관통 클릭 통과 click through 투명', show: hasWindow,
+        note: ['창이 클릭을 받지 않고 뒤의 게임으로 보냅니다. 번역창과 같은 조작 키(옵션 > 창 > 조작 키)를 누른 채 마우스를 창 위에 두면 이 창을 조작할 수 있습니다. 와우가 없을 때는 관통되지 않고 그대로 보입니다.', '관통 중에는 위쪽 바와 가장자리도 눌리지 않습니다. 평소에 보이지 않게 하려면 "평소에 인터페이스 숨기기"를 쓰세요(미니 브라우저는 "마우스가 벗어나면 진하기"도 됩니다). 휠로 페이지를 넘기려면 옵션 > 창의 "관통 중 휠 스크롤 허용"을 켜세요. 바로 적용됩니다.', '클릭 관통 중에는 Shift나 Ctrl+클릭으로는 내 브라우저에서 열리지 않습니다 (그 키들이 조작 키이기 때문입니다). 링크를 휠 클릭하거나, 위쪽 바를 우클릭해서 "현재 페이지를 내 브라우저에서 열기"를 쓰세요.'] }),
       mine('ctrl_zoom', true, { type: 'check', label: 'Ctrl로 확대·축소', keywords: '컨트롤 줌 확대 축소 휠 단축키 핀치 zoom ctrl', show: hasWindow,
         note: ['Ctrl+휠, Ctrl+더하기/빼기/0, 맥의 핀치로 페이지를 크게 또는 작게 합니다. 끄면 Ctrl+휠은 그냥 스크롤이 되고 확대·축소 키는 아무 일도 하지 않습니다.', '바꾼 뒤 창을 다시 열면 적용됩니다.'] }),
       mine('remember_zoom', false, { type: 'check', label: '확대·축소율 기억', keywords: '줌 배율 기억 저장 확대 축소 100% zoom remember', show: hasWindow,
@@ -87,11 +91,14 @@ const webCard =
       webRow('open_mode', 'never', { type: 'select', label: '열리는 때', keywords: '열기 닫기 항상 플러그인 웹창',
         options: [['always', '프로그램을 켤 때 항상'], ['voice', '음성 인식을 켤 때만'], ['never', '닫아 둠 (직접 열 때만)']],
         hints: { always: '프로그램을 켤 때 열립니다.', voice: '음성인식을 켜면 열리고 끄면 닫힙니다.', never: '플러그인이 열 때만 열립니다.' } }),
-      webRow('topmost', true, { type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시' }, v => ({ topmost: v, ...(v ? { topmost_wow_only: false } : {}) })),
-      webRow('topmost_wow_only', false, { type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
-        note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.' }, v => ({ topmost_wow_only: v, ...(v ? { topmost: false } : {}) })),
+      { key: 'webwin_kind', type: 'select', label: '창 종류', def: 'top', keywords: '항상 위 맨 위에 와우 위에만 최상위 topmost',
+        options: [['top', '항상 위'], ['wow', '와우 위에만']],
+        hints: KIND_HINTS,
+        get: cfg => windowKind(webConf(cfg)), patch: (cfg, v) => ({ child_windows: (cfg.child_windows || []).map(c => (c.id === curNum() ? { ...c, ...kindPatch(v) } : c)) }) },
       webRow('hide_ui', false, { type: 'check', label: '평소에 인터페이스 숨기기', keywords: '바 주소 테두리 프레임 숨김 가리기 인터페이스 hide',
         note: '마우스가 창 위에 없을 때는 제목 바와 테두리를 숨기고 웹 페이지만 보입니다. 마우스를 올리면 바로 나타나고, 벗어나면 잠시 뒤 천천히 사라집니다.' }),
+      webRow('click_through', false, { type: 'check', label: '클릭 관통', keywords: '마우스 관통 클릭 통과 click through 투명',
+        note: ['창이 클릭을 받지 않고 뒤의 게임으로 보냅니다. 번역창과 같은 조작 키(옵션 > 창 > 조작 키)를 누른 채 마우스를 창 위에 두면 이 창을 조작할 수 있습니다. 와우가 없을 때는 관통되지 않고 그대로 보입니다.', '관통 중에는 위쪽 바와 가장자리도 눌리지 않습니다. 평소에 보이지 않게 하려면 "평소에 인터페이스 숨기기"를 쓰세요(미니 브라우저는 "마우스가 벗어나면 진하기"도 됩니다). 휠로 페이지를 넘기려면 옵션 > 창의 "관통 중 휠 스크롤 허용"을 켜세요. 바로 적용됩니다.', '클릭 관통 중에는 Shift나 Ctrl+클릭으로는 내 브라우저에서 열리지 않습니다 (그 키들이 조작 키이기 때문입니다). 링크를 휠 클릭하거나, 위쪽 바를 우클릭해서 "현재 페이지를 내 브라우저에서 열기"를 쓰세요.'] }),
       webRow('shift_scroll', false, { type: 'check', label: 'Shift+휠로 가로 스크롤', keywords: '쉬프트 가로 스크롤 휠 옆으로 shift horizontal',
         note: ['켜면 Shift+휠이 가로 스크롤이 됩니다. 끄면(기본) Shift+휠도 그냥 세로 스크롤입니다.', '바꾼 뒤 창을 다시 열면 적용됩니다.'] }),
       webRow('rclick_copy', true, { type: 'check', label: '우클릭으로 선택한 글 복사', keywords: '오른쪽 클릭 복사 클립보드 선택 드래그 copy',

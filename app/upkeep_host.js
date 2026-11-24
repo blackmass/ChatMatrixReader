@@ -4,7 +4,7 @@
 // use it. Port of the warm_tick / translate_test of app.py.
 import * as upkeep from './core/upkeep.js';
 import { sendCfg, googleKey } from './core/translate.js';
-import { onlySendingUses } from './core/translate_rules.js';
+import { onlySendingUses, withMethod, glossaryFiles } from './core/translate_rules.js';
 import { DEFAULT_PROMPT, DEFAULT_SEND_PROMPT } from './core/prompts.js';
 import { DEFAULT_NAME, safeName } from './core/glossary.js';
 import { log } from './core/log.js';
@@ -21,7 +21,8 @@ export const promptNoticeDue = cfg => {
 export function startUpkeep({ settings, translator, glossary, system }) {
   const cfg0 = settings.cfg();
   const conn = new upkeep.ConnWatch(cfg0), warm = new upkeep.WarmWatch(glossary, cfg0), gloss = new upkeep.GlossWatch(glossary, cfg0);
-  let sampleName = null;                                   // a glossary file name seen once: it gets its sample when it is still the same next round
+  const sampled = new Set();                               // the glossary file names that got their sample (or have a file)
+  let seenNames = new Set();                               // the names of the round before: a name that is the same for two rounds is meant (the options may still be being typed)
 
   // a tiny request with `mode`; says in the window whether it answered. quiet: the in-advance sending (a short note instead of the report)
   async function translateTest(mode, quiet = false) {
@@ -29,6 +30,7 @@ export function startUpkeep({ settings, translator, glossary, system }) {
     if (!mode || mode === 'none') return;
     if (onlySendingUses(cfg, mode)) cfg = sendCfg(cfg);           // nothing else uses it: the check carries the prompt of the sending
     cfg.translator = mode;
+    if (!onlySendingUses(settings.cfg(), mode)) cfg = withMethod(cfg);          // (what the method has of its own: its prompt and glossary)
     const who = mode === 'google' ? 'Google' + (googleKey(cfg) ? ' (API Key)' : '')
       : mode === 'custom' ? (cfg.custom_preset || cfg.custom_url || 'HTTP') : (cfg.api_model || cfg.api_url || 'AI');
     const t0 = performance.now();
@@ -45,11 +47,11 @@ export function startUpkeep({ settings, translator, glossary, system }) {
   async function tick() {
     try {
       const cfg = settings.cfg();
-      const name = (cfg.glossary_file || '').trim() || DEFAULT_NAME;       // a new file name: the sample becomes its first content
-      if (safeName(name) && name !== sampleName) {
-        sampleName = name;
-        await glossary.ensureDefault(name);
+      const names = glossaryFiles(cfg, DEFAULT_NAME);                      // a new file name: the sample becomes its first content (the shared glossary and the ones of the methods)
+      for (const name of names) {
+        if (safeName(name) && !sampled.has(name) && seenNames.has(name)) { sampled.add(name); await glossary.ensureDefault(name); }
       }
+      seenNames = new Set(names);
       const n = await gloss.check(cfg);
       if (n !== null) system('ℹ ' + tr('단어장을 다시 읽었습니다: {n}개 항목', { n }));
       const modes = conn.check(cfg);

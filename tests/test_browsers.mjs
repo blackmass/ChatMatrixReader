@@ -14,6 +14,7 @@ check(b.isWebUrl('https://m.dcinside.com') && b.isWebUrl('http://a.b/c?d=1') && 
   check(l.map(x => x.id).join() === '1,2,3', 'the numbers are unique and in order, window 1 is added: ' + l.map(x => x.id));
   const w3 = l.find(x => x.id === 3), w2 = l.find(x => x.id === 2);
   check(w3.name === 'PC' && w3.mode === 'pc' && w3.start_url === 'https://www.youtube.com', 'a good window is kept (the name is trimmed)');
+  check(b.normalizeBrowsers([{ id: 2, topmost: false, topmost_wow_only: false }, { id: 3, topmost: false, topmost_wow_only: true }, { id: 4 }]).filter(x => x.id > 1).map(x => `${x.topmost}/${x.topmost_wow_only}`).join() === 'true/false,false/true,true/false', 'a mini browser is on top or above the game, one of the two: neither = on top');
   check(b.normalizeBrowsers([{ id: 2, zoom: 1.26 }, { id: 3, zoom: 9 }, { id: 4, zoom: 'x' }, { id: 5, zoom: 0.01 }]).filter(x => x.id > 1).map(x => x.zoom).join() === '1.3,3,1,0.3', 'zoom: a step of 10 %, 30 % .. 300 %, a wrong value is 100 %');
   check(b.normalizeBrowsers([{ id: 2, idle_alpha: 0.5 }, { id: 3, idle_alpha: 0 }, { id: 4, idle_alpha: 'x' }]).filter(x => x.id > 1).map(x => x.idle_alpha).join() === '0.5,0.2,1', 'idle_alpha: 20 % .. 100 %, a wrong value is 100 %');
   check(b.normalizeBrowsers([{ id: 2 }, { id: 3, shift_scroll: true, ctrl_zoom: false, rclick_close: true }, { id: 4, shift_scroll: 'x', ctrl_zoom: 'x', rclick_close: 'x' }]).filter(x => x.id > 1).map(x => [x.shift_scroll, x.ctrl_zoom, x.rclick_close].join()).join('|') === 'false,true,false|true,false,true|false,true,false', 'keys: the sideways wheel and the right button are off, the zoom is on, unless the user said otherwise');
@@ -44,3 +45,9 @@ check(b.isWebUrl('https://m.dcinside.com') && b.isWebUrl('http://a.b/c?d=1') && 
 // the address bar
 check(b.addressFrom('https://a.b/c') === 'https://a.b/c' && b.addressFrom('namu.wiki/w/x') === 'https://namu.wiki/w/x' && b.addressFrom(' m.dcinside.com ') === 'https://m.dcinside.com' && b.addressFrom('localhost:3000/x') === 'https://localhost:3000/x', 'addressFrom: an address as it is, a site gets https://');
 check(b.addressFrom('wow 레이드 공략') === 'https://www.google.com/search?q=' + encodeURIComponent('wow 레이드 공략') && b.addressFrom('hello') === 'https://www.google.com/search?q=hello' && b.addressFrom('') === '' && b.addressFrom('javascript:alert(1)').startsWith('https://www.google.com/search'), 'addressFrom: anything else is a search (also what looks like a script)');
+
+// click-through (3.2.1): off by default, a yes is kept, anything else is no
+{
+  const l = b.normalizeBrowsers([{ id: 1 }, { id: 2, click_through: true }, { id: 3, click_through: 'yes' }, { id: 4, click_through: false }]);
+  check(l.find(x => x.id === 1).click_through === false && l.find(x => x.id === 2).click_through === true && l.find(x => x.id === 4).click_through === false, 'browsers: click_through is off by default and a yes is kept');
+}

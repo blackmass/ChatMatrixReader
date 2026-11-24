@@ -12,6 +12,7 @@ import { normalizeWidgets } from '../widgets/registry.js';
 import { DEFAULT_PROMPT, DEFAULT_EXTRA_PROMPT, DEFAULT_SEND_EXTRA_PROMPT, DEFAULT_SEND_PROMPT } from './prompts.js';
 import { LEGACY_DEFAULT_PROMPTS } from './prompts_legacy.js';
 import { DEFAULT_REASONING_OFF } from './translate.js';
+import { cleanByMethod } from './translate_rules.js';
 
 export const PATH = 'config.json';
 export const VERSION = 3;                      // the format of config.json; a file without it comes from 1.x. 2 -> 3: line_height (see carryLineHeight)
@@ -40,6 +41,7 @@ export const DEFAULTS = {
     glossary_google: true,   // also apply the glossary to Google translation
     glossary_mode: 'full',   // AI: full = the whole glossary in the prompt | list = the entries that occur in the line, before it | mixed = single meanings in parentheses, the rest listed
     glossary_style: 'paren',   // paren: LFM(구인) | replace: 구인
+    by_method: {},   // 3.2.1: what a translation method has of its own: { google | openai | custom: { glossary_file, glossary_google, glossary_mode, glossary_style, extra_prompt, prompt } }. A method that is not here follows the settings above (translate_rules.js withMethod)
     disable_reasoning: true,
     reasoning_off_body: DEFAULT_REASONING_OFF,
     temperature: 0.2,
@@ -150,7 +152,9 @@ export const DEFAULTS = {
     center_scale: 0,                       // 3.2: the size of the translation windows' contents: 0 = as the main screen has it, else a percent (100 ... 200)
     through_tips: true,                    // click-through windows: the tip of a link (item, quest ...) under the mouse is shown (the page cannot see the mouse: the window loop does)
     debug_log: debuglog.defaults(),         // 3.2: the areas of the detailed log that are on (Options > 기록 > 상세 기록; all off)
+    bar_style: 'tabs',                     // 3.2.1: the bar of the translation windows over the game: 'tabs' (floating tabs, the look of 3.1.1) | 'full' (one band across the window, like a window of the system)
     chat_links: true,                      // 3.2: a web address in the chat is a link: [discord.gg/abc] (a click asks where to open it). Off: it stays plain text
+    capture_mode: 'screen',                // 3.2.1: how the screen is read for the matrix: 'screen' (the picture of the screen) | 'window' (the window of the game only: the task bar or another window over it does not matter; Windows 10 shows a yellow frame on the game, Windows 11 hides it)
     read_matrix: true,                     // 3.2: the screen is read for the chat matrix (off: only the overlay is used; read once at the start)
     auto_copy: false,                      // the text selected in a window is copied when the mouse leaves the window
     tuning: {},                            // options tab 고급: { NAME: value } of the timers in core/timings.js (missing = the default)
@@ -196,7 +200,10 @@ export function normalize(saved) {
   cfg.through_tips = cfg.through_tips !== false;
   cfg.auto_copy = cfg.auto_copy === true;
   cfg.read_matrix = cfg.read_matrix !== false;
+  cfg.capture_mode = cfg.capture_mode === 'window' ? 'window' : 'screen';
   cfg.chat_links = cfg.chat_links !== false;
+  cfg.bar_style = cfg.bar_style === 'full' ? 'full' : 'tabs';
+  cfg.by_method = cleanByMethod(cfg.by_method);
   if (typeof cfg.bg_opacity === 'number' && cfg.bg_opacity > winconf.MAX_BG_OPACITY) cfg.bg_opacity = winconf.MAX_BG_OPACITY;          // (window 1: see MAX_BG_OPACITY)
   cfg.debug_log = debuglog.normalize(cfg.debug_log);
   const gi = cfg.glossary_inline; delete cfg.glossary_inline;
