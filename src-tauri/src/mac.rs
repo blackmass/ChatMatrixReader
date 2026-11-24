@@ -850,6 +850,9 @@ pub fn start_wheel_hook() {}
 
 /// The panes of a control center that want the wheel (in place of the earlier ones of that center): (key, rectangle in pixels). The tap works in points (top left origin).
 /// false = the tap cannot be had yet (no permission).
+/// (Windows: the window of a control center, for the check of what stands over it: not done on a Mac yet)
+pub fn set_center_hwnd(_center: isize, _hwnd: isize) {}
+
 pub fn set_pane_zones(center: isize, zones: Vec<(isize, [f64; 4])>) -> bool {
     let owner = |k: isize| (-k) / 100000 - 1 == center;
     if zones.is_empty() {

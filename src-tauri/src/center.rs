@@ -156,6 +156,7 @@ pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Op
         let id: isize = v.get("id").and_then(|x| x.as_str())?.parse().ok()?;
         Some((wheel_key(idx, id), [f(v, "x") + ox, f(v, "y") + oy, f(v, "x") + ox + f(v, "w"), f(v, "y") + oy + f(v, "h")]))
     }).collect()).unwrap_or_default();
+    if let Some(w) = app.get_webview_window(&label) { if let Ok(h) = hwnd_of(&w) { win::set_center_hwnd(idx, h); } }          // (the wheel is not taken where a window of another program stands over the center)
     Ok(win::set_pane_zones(idx, zones))
 }
 

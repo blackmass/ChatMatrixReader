@@ -184,19 +184,28 @@ let lastKey = '', copyPrev = false, webLmb = false;
     }
     webLmb = lmbNow;
     if (changed) report();
-    // the turns of the wheel the exe took for the windows (Windows: asked for here; a Mac tells them one by one, see below)
-    if (hadWheel && !isMac) {
-      try {
-        const w = await invoke('center_wheel', { label, seq: Math.max(0, wheelSeq) });
-        const first = wheelSeq < 0; wheelSeq = w.seq;
-        if (!first) for (const t of w.turns) { const p = panes.get(Number(t.id)) || webByWheel(t.id); if (p && p.inside) p.wheelScrolled(t.delta); }
-      } catch { /* the next round */ }
-    }
     lastOs = s;
     const copyKey = !!(s.keys && s.keys[1] && s.keys[2]);
     if (copyKey && !copyPrev) { const picked = getSelection().toString(); if (picked) { try { window.__TAURI__.clipboardManager.writeText(picked); } catch { /* no clipboard */ } } }
     copyPrev = copyKey;
     perfAdd('OVERLAY_POLL_MS', performance.now() - t0);
+  }
+})();
+// The turns of the wheel the exe took for the windows (Windows: asked for here; a Mac tells them one by one, see above). Asked for much more often than the rest of the loop above: the loop is
+// every 0.1 s, and the turns that came in that time were all given to the window at once: the lines of a window the mouse goes through moved in jumps, ten times a second, not turn by turn
+// as the wheel of a window that takes the mouse does. Only while a window has a wheel zone (the rest of the time the page waits a little longer).
+const WHEEL_POLL_MS = 16;
+let hadWheel = false, wheelSeq = 0, wheelWarned = false;         // (before the loop: it looks at them at once)
+let wheelWake = null;                                          // (a wheel zone has just appeared: the loop looks at once, to know the number the turns after it start from)
+(async function wheelLoop() {
+  for (;;) {
+    await new Promise(r => { wheelWake = r; setTimeout(r, hadWheel && !isMac ? WHEEL_POLL_MS : 100); });
+    if (!hadWheel || isMac) continue;
+    try {
+      const w = await invoke('center_wheel', { label, seq: Math.max(0, wheelSeq) });
+      const first = wheelSeq < 0; wheelSeq = w.seq;
+      if (!first) for (const t of w.turns) { const p = panes.get(Number(t.id)) || webByWheel(t.id); if (p && p.inside) p.wheelScrolled(t.delta); }
+    } catch { /* the next round */ }
   }
 })();
 // A web window's page is a window of the system UNDER this page, so what is drawn here (its bar, its frame) would show over the page of a window in front of it. Where a window in front covers it, what it
@@ -218,11 +227,11 @@ function report() {
   lastKey = key;
   if (wheel.length && !hadWheel) wheelSeq = -1;                              // (the turns from before are not wanted: the loop takes the newest number)
   hadWheel = wheel.length > 0;
+  if (wheel.length && wheelSeq < 0 && wheelWake) wheelWake();
   invoke('center_rects', { label, panes: list, wheel }).then(ok => {
     if (ok === false) { lastKey = ''; if (!wheelWarned) { wheelWarned = true; emit('hub-log', { level: 'warn', msg: `${label}: the wheel over a click-through window is not available (the permission is missing?)` }); } }
   }).catch(e => { lastKey = ''; if (!wheelWarned) { wheelWarned = true; emit('hub-log', { level: 'warn', msg: `${label}: ${e}` }); } });
 }
-let hadWheel = false, wheelSeq = 0, wheelWarned = false;
 
 // The page is not a browser page (the same as plainPage of a window of 3.1.1): no middle-click scrolling, no dragging of text/links, no zoom. Shift/Ctrl/Alt + wheel would zoom or scroll
 // sideways in a browser: it scrolls the lines instead. The wheel is the page's own: the pane under the pointer scrolls its shown chat.
