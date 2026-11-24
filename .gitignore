@@ -23,7 +23,7 @@ tests/browser/out/
 config.json
 config.1x.json
 usage.json
-Glossary.txt
+Glossary*.txt
 logs/
 chatmatrix.log*
 webview-data/
