@@ -11,6 +11,7 @@ import { firstPlace } from './core/winlayout.js';
 import { WebPane } from './webpane.js';
 import { linkHandler } from './chatview.js';
 import { menuList } from './ctxmenu.js';
+import { toSpec } from './core/menuspec.js';
 import { T } from './core/timings.js';
 import { add as perfAdd, report as perfReport } from './core/perf.js';
 import { isMac } from './platform.js';
@@ -117,15 +118,26 @@ let menuPane = null;
 function hideMenu() { if (menuEl.hidden) return; menuPane = null; menuEl.hidden = true; lastKey = ''; report(); }
 function showMenu(ev, pane) { openMenu(menuList({ cfg, pane, ev, open, browsersOpen: new Set(webBy.browser.map(w => w.win)) }), ev, pane); }
 // An item can have `sub` (a list): a click shows that list in the place of this one, with a way back as its first line (two levels, no more); the menu stays open.
-function openMenu(list, ev, pane, parent = null) {
+// The ONE way into a menu (a pane's right click, a link): a window of the system gets the menu the system draws (the exe: native_menu; a menu of the page would be cut off by a small window), the
+// centers draw their own. What lines there are is only in ctxmenu.js (and the link menu below): both kinds are made from the same list (core/menuspec.js).
+function openMenu(list, ev, pane) { return nativeId ? openNativeMenu(list, ev, pane) : openDomMenu(list, ev, pane); }
+let nativeHandlers = new Map();
+async function openNativeMenu(list, ev, pane) {
+  const handlers = new Map(), items = toSpec(list, handlers);
+  if (!items.length) return;
+  nativeHandlers = handlers;
+  try { await invoke('native_menu', { items }); } catch { nativeHandlers = new Map(); openDomMenu(list, ev, pane); }          // (the system could not show it: ours)
+}
+if (nativeId) await listen('native-menu-pick', e => { const f = nativeHandlers.get(Number((e.payload || {}).id)); nativeHandlers = new Map(); if (f) f(); });
+function openDomMenu(list, ev, pane, parent = null) {
   menuEl.replaceChildren();
   for (const e of parent ? [{ text: '‹ ' + tr('뒤로'), back: true }, { cls: 'sep' }, ...list] : list) {
     const d = document.createElement('div'); d.className = e.cls || '';
     if (e.cls !== 'sep') {
       const off = (e.cls || '').includes('off');
       d.textContent = e.text + (e.sub ? '  ▸' : '');
-      if (e.back) d.onclick = () => openMenu(parent, ev, pane);
-      else if (e.sub && !off) d.onclick = () => openMenu(e.sub, ev, pane, list);
+      if (e.back) d.onclick = () => openDomMenu(parent, ev, pane);
+      else if (e.sub && !off) d.onclick = () => openDomMenu(e.sub, ev, pane, list);
       else if (e.fn && !off) d.onclick = () => { hideMenu(); e.fn(); };
     }
     menuEl.append(d);
@@ -151,7 +163,7 @@ addEventListener('mousedown', ev => { if (!menuEl.contains(ev.target)) hideMenu(
 // (the menu of the web view - back, reload, print ... - never shows over a center: a right click anywhere else, with our menu open or not, only closes ours; only a text box keeps its own cut / paste)
 addEventListener('contextmenu', ev => { if (!(ev.target.closest && ev.target.closest('input, textarea'))) ev.preventDefault(); }, true);
 addEventListener('keydown', ev => { if (ev.key === 'Escape') hideMenu(); });
-addEventListener('wheel', hideMenu, { passive: true });
+addEventListener('wheel', ev => { if (!menuEl.contains(ev.target)) hideMenu(); }, { passive: true });          // (a wheel over the menu scrolls the menu: it is as long as the window allows, see #ctx)
 
 const tipEl = document.createElement('div'); tipEl.className = 'cv-tip'; tipEl.dataset.notr = ''; tipEl.style.display = 'none'; tipEl.style.zIndex = '2147482000'; document.body.append(tipEl);
 function drawTip(p) {

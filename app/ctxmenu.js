@@ -9,7 +9,7 @@ import { TILES } from './core/tiling.js';
 
 // "전체 화면" (only with the option "위쪽 바 더블클릭으로 전체 화면"): the second level lists where the window goes on its monitor. A window that is locked has it grey.
 function tileMenu(cfg, pane, list) {
-  if (!cfg.bar_fullscreen) return;
+  if (!cfg.bar_fullscreen || pane.center.native) return;                  // (a window of the system is laid out by the system)
   const names = { full: tr('꽉 채우기'), top: tr('위쪽 절반'), bottom: tr('아래쪽 절반'), left: tr('왼쪽 절반'), right: tr('오른쪽 절반'), tl: tr('왼쪽 위'), tr: tr('오른쪽 위'), bl: tr('왼쪽 아래'), br: tr('오른쪽 아래') };
   const sub = [];
   if (pane.tiled) sub.push({ text: tr('원래 크기로'), fn: () => pane.untile() }, { cls: 'sep' });

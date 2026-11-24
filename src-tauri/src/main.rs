@@ -587,6 +587,43 @@ fn native_action(window: tauri::WebviewWindow, action: String) -> Result<(), Str
     }
 }
 
+/// The lines of a menu (core/menuspec.js toSpec: kind item | check | sep | sub, id, text, enabled, checked, items) as the items of a menu of the system. The id of an item carries the window it is for:
+/// "ctx:<label>:<number>" (the number is what the page gave).
+fn menu_items(app: &AppHandle, label: &str, specs: &[serde_json::Value], depth: u32) -> tauri::Result<Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>>> {
+    use tauri::menu::{CheckMenuItem, IsMenuItem, MenuItem, PredefinedMenuItem, Submenu};
+    let mut out: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = Vec::new();
+    for s in specs {
+        let kind = s["kind"].as_str().unwrap_or("item");
+        let text = s["text"].as_str().unwrap_or("");
+        // (on Windows an & in a menu text marks the letter of a key: the program wants the sign itself, as in an address)
+        let text = if cfg!(windows) { text.replace('&', "&&") } else { text.to_string() };
+        let enabled = s["enabled"].as_bool().unwrap_or(false);
+        let id = format!("ctx:{label}:{}", s["id"].as_u64().unwrap_or(0));
+        match kind {
+            "sep" => out.push(Box::new(PredefinedMenuItem::separator(app)?)),
+            "sub" if depth < 4 => {
+                let inner = menu_items(app, label, s["items"].as_array().map(|a| a.as_slice()).unwrap_or(&[]), depth + 1)?;
+                let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = inner.iter().map(|b| b.as_ref()).collect();
+                out.push(Box::new(Submenu::with_items(app, &text, enabled, &refs)?));
+            }
+            "check" => out.push(Box::new(CheckMenuItem::with_id(app, id, &text, enabled, s["checked"].as_bool().unwrap_or(false), None::<&str>)?)),
+            _ => out.push(Box::new(MenuItem::with_id(app, id, &text, enabled, None::<&str>)?)),
+        }
+    }
+    Ok(out)
+}
+
+/// The right-click menu of a window of the system, drawn by the system at the mouse (center.js openNativeMenu). The line that is chosen comes back as the event "native-menu-pick" { id } to the page.
+#[tauri::command]
+async fn native_menu(window: WebviewWindow, items: Vec<serde_json::Value>) -> Result<(), String> {
+    use tauri::menu::{IsMenuItem, Menu};
+    let e = |e: tauri::Error| e.to_string();
+    let boxed = menu_items(window.app_handle(), window.label(), &items, 0).map_err(e)?;
+    let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = boxed.iter().map(|b| b.as_ref()).collect();
+    let menu = Menu::with_items(window.app_handle(), &refs).map_err(e)?;
+    window.popup_menu(&menu).map_err(e)
+}
+
 /// Where the page of a window of the system starts on the screen (its inner area, in pixels of the screen) and the scale of the screen it is on: the page works from it (center.js: native).
 #[tauri::command]
 async fn native_origin(app: AppHandle, label: String) -> Result<serde_json::Value, String> {
@@ -1268,6 +1305,7 @@ fn main() {
             native_close,
             native_origin,
             native_action,
+            native_menu,
             open_url,
             open_chat_url,
             set_window_rect,
@@ -1304,6 +1342,13 @@ fn main() {
             set_tray_text,
             raise_self
         ])
+        // a line of a menu of the system (native_menu) was chosen: the window it was made for is told
+        .on_menu_event(|app, event| {
+            if let Some((label, id)) = event.id().as_ref().strip_prefix("ctx:").and_then(|r| r.rsplit_once(':')) {
+                use tauri::Emitter;
+                let _ = app.emit_to(label, "native-menu-pick", json!({ "id": id.parse::<u32>().unwrap_or(0) }));
+            }
+        })
         .on_window_event(|window, event| {
             // the window the send box belongs to was moved or got another size: the box (if it is open) goes with it
             if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {

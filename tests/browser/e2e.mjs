@@ -87,6 +87,7 @@ async function invoke(cmd, a = {}) {
     case 'native_origin': return { x: 300, y: 200, scale: 1 };
     case 'native_open': webCalls.push(['native_open', a.id, a.title, a.geometry]); return null;
     case 'native_close': webCalls.push(['native_close', a.id]); return null;
+    case 'native_menu': webCalls.push(['native_menu', a.items]); return null;
     case 'web_through': webCalls.push(['through', a.label, a.on, a.enabled]); return null;
     case 'web_wheel': webCalls.push(['wheel', a.label, a.x, a.y, a.delta]); return null;
     case 'web_ua': webCalls.push(['ua', a.label, a.ua, a.hints]); return null;
@@ -1219,6 +1220,7 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
       const h0 = (await np.locator('.pane').first().boundingBox()).height;
       ok(Math.abs(h0 - (620 - 46)) < 2, 'native/send: the window keeps the row\'s height below its text area (the lines get shorter): ' + h0);
       ok((await np.locator('#sr-lang').textContent()) === 'English', 'native/send: it says the language');
+      await until(() => np.evaluate(() => document.activeElement && document.activeElement.id === 'sr-text'), 'native/send: the keyboard starts in the sentence field', 4000);          // (the page puts it there a moment after the row opens)
       await np.locator('#sr-text').fill('hello there'); await np.locator('#sr-cmd').fill('/w Bob');
       await np.locator('#sr-text').press('Enter');
       await until(() => control.evaluate(() => window.__subs.length > 0), 'native/send: Enter reports the sentence', 4000);
@@ -1228,6 +1230,16 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
       await control.evaluate(() => window.__TAURI__.event.emit('input-close', {}));
       await until(async () => await np.locator('#sendrow').isHidden(), 'native/send: the row is taken away when the hub says input-close', 4000);
       await fill(900, 620, 'native/send: and the window has its whole height again');
+      // the right-click menu of a window of the system is the system's: the page gives the exe the lines (and draws nothing); the line that is chosen comes back by its number
+      await np.locator('.pbar').click({ button: 'right', position: { x: 300, y: 10 } });
+      await until(() => webCalls.some(c => c[0] === 'native_menu'), 'native/menu: the right click asks the exe for a menu of the system', 4000);
+      const nm = webCalls.filter(c => c[0] === 'native_menu').at(-1)[1];
+      ok(nm.length >= 5 && nm[0].kind === 'item' && nm[0].id === 1 && nm.some(l => l.kind === 'sep') && !nm.some(l => l.kind === 'sub' && /전체 화면|Full screen/.test(l.text)), 'native/menu: lines with numbers, a line between groups, no "full screen" of ours: ' + nm.map(l => l.text || l.kind).join('|'));
+      ok(await np.evaluate(() => document.getElementById('ctx').hidden), 'native/menu: the page draws no menu of its own');
+      const before = (await control.evaluate(() => 0), calls.filter(c => c === 'open_options').length);
+      await control.evaluate(() => window.__TAURI__.event.emit('native-menu-pick', { id: 1 }));
+      await until(() => calls.filter(c => c === 'open_options').length > before, 'native/menu: the line that was chosen is done (the options open)', 4000);
+      await np.screenshot({ path: path.join(OUT, 'native_window.png') });
       await np.close();
     }
     // the order of the web windows: the center draws their frames by `z` and tells the program, which puts their pages in the same order; every translation window is above them all
