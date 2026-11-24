@@ -154,7 +154,7 @@ export const DEFAULTS = {
     debug_log: debuglog.defaults(),         // 3.2: the areas of the detailed log that are on (Options > 기록 > 상세 기록; all off)
     bar_style: 'tabs',                     // 3.2.1: the bar of the translation windows over the game: 'tabs' (floating tabs, the look of 3.1.1) | 'full' (one band across the window, like a window of the system)
     chat_links: true,                      // 3.2: a web address in the chat is a link: [discord.gg/abc] (a click asks where to open it). Off: it stays plain text
-    capture_mode: 'screen',                // 3.2.1 (test): how the screen is read: 'screen' (the picture of the screen) | 'window' (the window of the game only: it is not covered by the task bar or other windows). NOT KEPT yet: always 'screen' at the start (see normalize)
+    capture_mode: 'screen',                // 3.2.1: how the screen is read for the matrix: 'screen' (the picture of the screen) | 'window' (the window of the game only: the task bar or another window over it does not matter; Windows 10 shows a yellow frame on the game, Windows 11 hides it)
     read_matrix: true,                     // 3.2: the screen is read for the chat matrix (off: only the overlay is used; read once at the start)
     auto_copy: false,                      // the text selected in a window is copied when the mouse leaves the window
     tuning: {},                            // options tab 고급: { NAME: value } of the timers in core/timings.js (missing = the default)
@@ -200,7 +200,7 @@ export function normalize(saved) {
   cfg.through_tips = cfg.through_tips !== false;
   cfg.auto_copy = cfg.auto_copy === true;
   cfg.read_matrix = cfg.read_matrix !== false;
-  cfg.capture_mode = 'screen';               // (the test of the capture of the game window: the choice is not kept, the user chooses it at every start. To keep it: `cfg.capture_mode === 'window' ? 'window' : 'screen'`)
+  cfg.capture_mode = cfg.capture_mode === 'window' ? 'window' : 'screen';
   cfg.chat_links = cfg.chat_links !== false;
   cfg.bar_style = cfg.bar_style === 'full' ? 'full' : 'tabs';
   cfg.by_method = cleanByMethod(cfg.by_method);

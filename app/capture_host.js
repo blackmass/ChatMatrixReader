@@ -6,6 +6,7 @@ import { LostHint } from './core/upkeep.js';
 import { log } from './core/log.js';
 import { tr } from './core/i18n.js';
 import { every } from './core/timings.js';
+import { isMac } from './platform.js';
 
 const invoke = window.__TAURI__.core.invoke;
 // The wait between two looks. On macOS the timers of a page that is not in front are slowed down by the system (seconds instead of 33 ms), so the exe
@@ -64,7 +65,7 @@ export function startCapture({ settings, publish, pipeline }) {
   // while and the reason is in the log; the time of both ways is told now and then.
   const way = { mode: 'screen', started: false, backoffUntil: 0, lastWhy: '', n: { window: 0, screen: 0, failed: 0 }, ms: { window: 0, screen: 0 }, at: nowSec() };
   io.grab = async (x, y, w, h) => {
-    const want = settings.cfg().capture_mode === 'window' && game.hwnd;
+    const want = settings.cfg().capture_mode === 'window' && game.hwnd && !isMac;                // (not made for the Mac yet: a setting that came from a Windows computer is read as "screen" here)
     if (!want && (way.mode === 'window' || way.started)) { if (way.mode === 'window') log.info('캡처: 화면 읽기 방식: 화면'); way.mode = 'screen'; way.started = false; invoke('capture_game_stop').catch(() => {}); }          // (the option is off: the exe lets the window go)
     if (want && nowSec() >= way.backoffUntil) {
       const t0 = performance.now();

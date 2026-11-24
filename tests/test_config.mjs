@@ -103,5 +103,5 @@ eq(normalize({ tuning: 5 }).tuning, {}, 'a broken tuning entry becomes {}');
 eq([normalize({}).chat_links, normalize({ chat_links: false }).chat_links, normalize({ chat_links: 0 }).chat_links], [true, false, true], 'chat_links: on unless it is exactly false');
 
 eq([normalize({ bg_opacity: 1 }).bg_opacity, normalize({ bg_opacity: 0.17 }).bg_opacity, normalize({}).bg_opacity], [0.99, 0.17, 0.99], 'bg_opacity (window 1): at most 99 %, a lower value stays, the default is 99 %');
-// the way the screen is read (a test): the choice is never kept
-eq(normalize({ capture_mode: 'window' }).capture_mode, 'screen', 'capture_mode: "window" in the file is "screen" when it is read: the choice is not kept yet');
+// the way the screen is read: a choice that is kept; anything else is the screen
+eq([normalize({ capture_mode: 'window' }).capture_mode, normalize({ capture_mode: 'x' }).capture_mode, normalize({}).capture_mode], ['window', 'screen', 'screen'], 'capture_mode: "window" is kept, anything else (and nothing) is "screen"');

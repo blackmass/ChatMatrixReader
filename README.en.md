@@ -25,12 +25,14 @@ The WoW addon **ChatMatrix** draws the chat as a small block of colored cells (t
 # Features
 - Detects only the chat and translates it live. Shows original and translation together, can swap their order, and sets the translation method per channel.
 - Several translation windows. Channels, font, size, opacity, background blur and text outline are set per window.
-- **Always on top**, or **on top of WoW only** (so the window does not cover your other work when you leave the game).
+- Each window is **always on top**, **on top of WoW only**, or an **ordinary window**. "On top of WoW only" keeps the window from covering your other work when you leave the game. An ordinary window is a normal window in the task bar: the system does the resizing, maximizing and snapping (good for another monitor). The top bar of the first two can be "floating tabs" or a "full bar".
 - **Click-through**: title bar and border disappear, only the translation is visible, and the game is not disturbed. Hold Shift and move the mouse over the window to use it.
 - Transparent background, text size, line spacing, font and shadow can be tuned so that it blends into the WoW screen.
-- **Glossary**: add terms on the fly. Defaults are set for both Google and the AI prompt.
+- **Mini browser**: a small browser window over the game (mobile or PC view, bookmarks, keeping logins, click-through). You can read a guide or a link without the game losing your controls. A web address in the chat can be clicked to open in the mini browser or in your own browser.
+- **Glossary**: add terms on the fly. Defaults are set for both Google and the AI prompt, and each translation method (Google, AI server, custom server) can have its own glossary and prompt.
 - String rules (regex): drop a message from translation, or hide it from the window, when it contains certain text (e.g. exclude anything with Korean characters).
 - **Send**: press `Shift+Enter` in game, type in your language, and the English translation goes to the clipboard (optional auto-paste; the final Enter is yours).
+- **Reading the game window** (Windows, Options → General → Reading): instead of reading the screen, only the WoW window is read, so the matrix is still read when the task bar or another window covers it. Windows 10 shows a yellow frame on the game window and cannot turn it off (Windows 11 does). So the default is "Screen", and WoW must be in windowed or windowed fullscreen mode.
 - Multilingual: it works on text, not images, so every language Google detects can be translated. The interface is Korean and English; to add another language, put a text file in the `locale` folder.
 - Voice recognition (STT): turns the voice of Discord, WoW or other programs into text and translates it (Windows).
 - Options apply the moment you change them. Open them with the ⚙ on the window, the tray icon, or `Ctrl+Alt+O`.
@@ -49,7 +51,7 @@ You need both the addon and the program.
 4. Run WoW in **windowed or windowed fullscreen** mode (in exclusive fullscreen other windows cannot be shown on top).
 
 **The program: Mac (experimental)**
-- For Apple Silicon (M1 and later), and it needs **macOS 13 or later**. Translation windows, always on top, on top of WoW only, click-through, matrix reading and voice recognition work. On macOS 12 and earlier only the voice recognition is turned off; everything else works as usual.
+- For Apple Silicon (M1 and later), and it needs **macOS 13 or later**. Translation windows, always on top, on top of WoW only, ordinary windows, the mini browser, click-through, matrix reading and voice recognition work. Reading the game window is not there yet. On macOS 12 and earlier only the voice recognition is turned off; everything else works as usual.
 - I did not register as an Apple developer, so a security warning appears on first run (right-click → Open). If needed, remove the quarantine with `xattr -dr com.apple.quarantine <folder path>` in the Terminal.
 - You must allow the **Screen & System Audio Recording** permission yourself. Run WoW in windowed (fullscreen window) mode.
 - Tested only on my own MacBook, so expect some rough edges.
