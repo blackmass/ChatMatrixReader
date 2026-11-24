@@ -127,11 +127,11 @@ const tab = {
         note: '마우스로 창을 옮기거나 크기를 바꿀 수 없게 합니다. 탭을 누르다가 창이 밀리는 일을 막습니다.' },
       { type: 'notice', label: '', show: (c, x) => isNative(c, x), text: '"항상 맨 위에"와 "와우 위에만"이 둘 다 꺼져 있어서, 이 창은 작업 표시줄(맥은 독)에 나오는 일반 창입니다. 제목 표시줄과 테두리는 운영체제의 것이고, 옮기기, 크기 바꾸기, 최대화, 가장자리에 붙이기(스냅)도 운영체제 기능을 그대로 씁니다. 이 창에서는 항상 위, 클릭 관통, 배경 흐림은 쓰이지 않습니다.' },
       { win: true, key: 'topmost', type: 'check', label: '항상 맨 위에', keywords: '최상위 topmost 위에 표시',
-        note: '게임 위에 항상 떠 있습니다. 둘 다 끄면 일반 창이 됩니다 (작업 표시줄에 나오고, 윈도우의 창 배치 기능을 쓸 수 있습니다).',
-        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost' }, v); if (v) ctx.put({ win: true, key: 'topmost_wow_only' }, false); } },
+        note: '게임 위에 항상 떠 있습니다. 번역창은 둘 다 끄면 일반 창이 됩니다 (작업 표시줄에 나오고, 윈도우의 창 배치 기능을 쓸 수 있습니다). 웹창은 둘 중 하나가 늘 켜져 있습니다.',
+        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost' }, v); if (v) ctx.put({ win: true, key: 'topmost_wow_only' }, false); else if (webKind(ctx)) ctx.put({ win: true, key: 'topmost_wow_only' }, true); } },
       { win: true, key: 'topmost_wow_only', type: 'check', label: '와우 위에만', keywords: '게임 위 topmost 다른 창 뒤',
         note: '와우 바로 위에만 놓이고, 다른 프로그램 창이 와우를 덮으면 이 창도 같이 가려집니다. 켜면 "항상 맨 위에"는 꺼집니다.',
-        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost_wow_only' }, v); if (v) ctx.put({ win: true, key: 'topmost' }, false); } },
+        apply: (ctx, v) => { ctx.put({ win: true, key: 'topmost_wow_only' }, v); if (v) ctx.put({ win: true, key: 'topmost' }, false); else if (webKind(ctx)) ctx.put({ win: true, key: 'topmost' }, true); } },
     ] },
     { title: '배경과 조작', rows: [
       { win: true, key: 'blur', type: 'select', label: '배경 흐림', options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴', show: (c, x) => !isNative(c, x),
@@ -220,7 +220,8 @@ const anyWebThrough = c => (c.browser_windows || []).some(b => b.click_through) 
 
 // The windows of a plugin show only the basic settings (the order of the windows, the background, the mouse, the lock ...): what is inside the window is the plugin's
 // is the chosen window a window of the system? (neither on top nor above the game: winconf.windowMode 0)
-const isNative = (c, x) => !x.get({ win: true, key: 'topmost' }, c) && !x.get({ win: true, key: 'topmost_wow_only' }, c);
+const webKind = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.kind === 'web'); };          // (a web window of a plugin: never a window of the system)
+const isNative = (c, x) => !webKind(x) && !x.get({ win: true, key: 'topmost' }, c) && !x.get({ win: true, key: 'topmost_wow_only' }, c);
 const PLUGIN_ROWS = new Set(['name', 'open_mode', 'topmost', 'topmost_wow_only', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
 const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
 const goneWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner && c.kind !== 'web' && goneOwner(c.owner)); };          // (the window of a plugin that is not there: only a note and the way to delete it)

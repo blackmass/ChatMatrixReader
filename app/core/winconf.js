@@ -109,6 +109,7 @@ export function normalize(items) {
     d.kind = d.kind === 'page' && d.owner && d.page ? 'page' : d.kind === 'web' && d.owner ? 'web' : '';          // (a page window needs its plugin and its page; a web window its plugin: the page is the plugin's to open)
     if (d.kind === 'web') { d.page = ''; d.click_through = truthy(it.click_through); d.cookies = truthy(it.cookies); d.hide_ui = truthy(it.hide_ui); d.shift_scroll = truthy(it.shift_scroll); d.rclick_close = truthy(it.rclick_close); d.rclick_copy = 'rclick_copy' in it ? truthy(it.rclick_copy) : true; }          // (a web window is used with the mouse: it is not click-through; `cookies`: the login of the window is kept)
     else { delete d.cookies; delete d.hide_ui; delete d.shift_scroll; delete d.rclick_close; delete d.rclick_copy; }
+    if (d.kind === 'web' && !d.topmost && !d.topmost_wow_only) d.topmost = true;          // (earlier versions let a web window be neither: it is always on top now)
     if (!d.kind) { d.owner = ''; d.owner_win = ''; d.page = ''; }
     if (d.dock_to === d.id) d.dock_to = 0;
     out.push(d);
@@ -154,11 +155,12 @@ export function opt(conf, cfg, key, dflt = null) {
 }
 
 // The kind of order a translation window has (window 1: the settings of the top level; an extra window: its entry): 0 neither on top nor above the game = a window of the system (its own frame, the task bar, the
-// snapping: center.js `native`), 1 always on top, 2 above the game only (the two kinds the controls centers draw). The same rule is used by the hub (winmanager.js: which windows the system has) and the centers.
+// snapping: center.js `native`), 1 always on top, 2 above the game only (the two kinds the controls centers draw; a web window of a plugin is never 0). The same rule is used by the hub (winmanager.js: which windows the system has) and the centers.
 export function windowMode(cfg, id) {
   const conf = id === 1 ? null : (cfg.child_windows || []).find(c => c.id === id) || {};
   const get = (key, d) => (id === 1 ? (cfg[MAIN_KEY[key] || key] ?? d) : opt(conf, cfg, key, d));
-  return get('topmost_wow_only', false) ? 2 : get('topmost', true) ? 1 : 0;
+  const m = get('topmost_wow_only', false) ? 2 : get('topmost', true) ? 1 : 0;
+  return m === 0 && conf && conf.kind === 'web' ? 1 : m;                           // (a web window is never a window of the system: it is always on top or above the game)
 }
 
 export function headMode(conf, cfg = null) {

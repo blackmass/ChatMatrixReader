@@ -1,7 +1,7 @@
-//! The control centers (3.2): THREE transparent windows over all the screens, one for each kind of order of the translation windows (0 ordinary, 1 always on top, 2 above the game
+//! The control centers (3.2): TWO transparent windows over all the screens, one for each kind of order of the translation windows and the web windows (1 always on top, 2 above the game
 //! only: treated like always on top while the game or a window of ours is in front, else right above the game), each drawing the translation windows that belong to it (panes) in its
 //! page (center.html). A center takes the mouse only while the pointer is over one of its panes (read here, 60 times a second, from the system); the rest of it lets the mouse go
-//! through to the game. The translation windows are only panes of these centers: there is no window of the system for each of them.
+//! through to the game. The translation windows that are neither on top nor above the game are windows of the system (main.rs native_open), not panes of these.
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -17,7 +17,7 @@ pub struct Pane { id: String, x: f64, y: f64, w: f64, h: f64, bar: f64, below: b
 static RECTS: LazyLock<Mutex<HashMap<String, Vec<Pane>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static LOCK: Mutex<Option<String>> = Mutex::new(None);                    // the center that holds the mouse while a button is down
 
-const MODES: [(&str, u32); 3] = [("center0", 0), ("center1", 1), ("center2", 2)];
+const MODES: [(&str, u32); 2] = [("center1", 1), ("center2", 2)];
 
 /// The screens now: (each one as [x, y, w, h] in pixels, the main screen first) and the rectangle of all together [l, t, r, b]. None: not known.
 fn screens(app: &AppHandle) -> Option<(Vec<[i32; 4]>, [i32; 4])> {
@@ -66,7 +66,7 @@ pub async fn center_zoom(app: AppHandle, label: String, scale: f64) -> Result<f6
     Ok(want)
 }
 
-/// The centers whose page has said that it is ready (center_ready): its settings are read, it is zoomed, it has drawn its windows. A center is shown only when all three are (see start).
+/// The centers whose page has said that it is ready (center_ready): its settings are read, it is zoomed, it has drawn its windows. A center is shown only when both are (see start).
 static READY: LazyLock<Mutex<std::collections::HashSet<String>>> = LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
 #[tauri::command]
 pub async fn center_ready(label: String) -> Result<(), String> {
@@ -74,8 +74,8 @@ pub async fn center_ready(label: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Makes the three centers (a few seconds after the start) and runs the loop that serves them. The centers are made HIDDEN: a transparent window over all the screens that is shown before its page
-/// has drawn anything (or while its order and its style are still being set) shows a frame or two of the default background / a redraw over every screen. They are shown together when all three pages
+/// Makes the two centers (a few seconds after the start) and runs the loop that serves them. The centers are made HIDDEN: a transparent window over all the screens that is shown before its page
+/// has drawn anything (or while its order and its style are still being set) shows a frame or two of the default background / a redraw over every screen. They are shown together when both pages
 /// are ready and the loop has set their order (a little time more), or after FALLBACK at the latest (a page that never says it is ready must not leave the program without its windows).
 /// (macOS: shown at once as before: a page of a hidden window is slowed down there, and nothing has been seen of this problem.)
 pub fn start(app: AppHandle) {
@@ -101,7 +101,7 @@ pub fn start(app: AppHandle) {
         let app2 = app.clone();
         std::thread::spawn(move || run(app2));
         if cfg!(target_os = "macos") { return; }
-        // wait for the three pages (the loop works on the hidden windows meanwhile: order, style), then show them all
+        // wait for the two pages (the loop works on the hidden windows meanwhile: order, style), then show them all
         const FALLBACK: Duration = Duration::from_millis(6000);
         const SETTLE: Duration = Duration::from_millis(400);
         let t0 = Instant::now();
@@ -293,13 +293,6 @@ pub async fn center_wheel(label: String, seq: u64) -> Result<Value, String> {
     Ok(json!({ "seq": newest, "turns": turns }))
 }
 
-/// A pane of the ordinary center was touched: the center goes to the top of the ordinary windows (what a window of 3.1.1 did when it was touched; ours do not take the focus).
-#[tauri::command]
-pub async fn center_raise(app: AppHandle, label: String) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window(&label) { if let Ok(h) = hwnd_of(&w) { win::raise_top(h); } }
-    Ok(())
-}
-
 /// The text area (the bar left out) of the translation window `label` ("main", "win3") in screen pixels: (x, y, w, h). None: the window is not a pane of a center.
 pub fn pane_rect(label: &str) -> Option<(i32, i32, u32, u32)> {
     let id = if label == "main" { "1".to_string() } else { label.strip_prefix("win")?.to_string() };
@@ -314,8 +307,8 @@ fn inside(panes: &[Pane], x: i32, y: i32, margin: f64) -> bool {
     panes.iter().filter(|p| p.hit).any(|p| (x as f64) >= p.x - margin && (x as f64) < p.x + p.w + margin && (y as f64) >= p.y - margin && (y as f64) < p.y + p.h + margin)
 }
 
-/// The order of the windows of a mode: 0 ordinary, 1 always on top, 2 above the game only (two states: the game or a window of ours in front: topmost; another program in front: right above the game).
-/// The state a mode asks for now: 0 ordinary, 1 on top, and for the mode over the game: 21 the game is in front, 22 another program is, 23 this one is.
+/// The order of the windows of a mode: 1 always on top, 2 above the game only (two states: the game or a window of ours in front: topmost; another program in front: right above the game).
+/// The state a mode asks for now: 1 on top, and for the mode over the game: 21 the game is in front, 22 another program is, 23 this one is.
 fn mode_state(mode: u32, game: isize) -> u32 {
     match mode {
         1 => 1,
@@ -324,7 +317,7 @@ fn mode_state(mode: u32, game: isize) -> u32 {
     }
 }
 
-/// Puts a window in the state its mode wants (0 ordinary, 1 on top, 2 over the game: 21 the game is in front, 22 another program is, 23 this one is). Some((was, now)) when the state changed.
+/// Puts a window in the state its mode wants (1 on top, 2 over the game: 21 the game is in front, 22 another program is, 23 this one is). Some((was, now)) when the state changed.
 #[cfg_attr(windows, allow(dead_code))]
 fn apply_mode(h: isize, mode: u32, game: isize, last: &mut HashMap<isize, u32>) -> Option<(u32, u32)> {
     let want = mode_state(mode, game);

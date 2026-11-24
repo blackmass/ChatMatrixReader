@@ -560,9 +560,9 @@ async fn native_open(app: AppHandle, id: i64, title: Option<String>, geometry: O
     w.show().map_err(|e| e.to_string())
 }
 
-/// macOS: the three round buttons of a window of the system, smaller and in the middle of our bar (mac.rs style_traffic_lights; the numbers are in css pixels = points: the bar is NATIVE_TITLE high).
+/// macOS: the three round buttons of a window of the system, in the middle of our bar (mac.rs style_traffic_lights; the numbers are in css pixels = points: the bar is NATIVE_TITLE high).
 #[cfg(target_os = "macos")]
-fn style_round_buttons(hwnd: isize) { win::style_traffic_lights(hwnd, NATIVE_TITLE, 0.8, 12.0); }
+fn style_round_buttons(hwnd: isize) { win::style_traffic_lights(hwnd, NATIVE_TITLE, 12.0); }
 
 /// The program closes the window of the system of translation window `id` (it is not open any more, or it has become a pane of a center). Not the X of the frame: that is asked of the hub (native-close).
 #[tauri::command]
@@ -1283,7 +1283,6 @@ fn main() {
             center::center_ready,
             center::center_title,
             center::center_zoom,
-            center::center_raise,
             webwin::web_open,
             webwin::web_close,
             webwin::web_cmd,

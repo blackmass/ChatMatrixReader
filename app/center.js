@@ -1,5 +1,5 @@
-// A control center (3.2). The page of one of the three transparent windows over all the screens (center.rs): the translation windows of its kind of order (the page says it: ?mode=0
-// ordinary, 1 always on top, 2 above the game only) are panes in it (pane.js). The data comes from the hub exactly as it comes to a window of 3.1.1 ('feed', 'feed-replay').
+// A control center (3.2). The page of one of the two transparent windows over all the screens (center.rs): the translation windows and the web windows of its kind of order (the page says it: ?mode=1
+// always on top, 2 above the game only) are panes in it (pane.js). The data comes from the hub exactly as it comes to a window of 3.1.1 ('feed', 'feed-replay').
 import * as settings from './settings.js';
 import { startI18n } from './i18n_host.js';
 import { MAIN } from './core/pipeline.js';
@@ -73,12 +73,11 @@ const center = {
   // on top (the same look); the others draw their own
   viewSink: { usable: () => true, show: (html, x, y) => tip({ html, x: ox + x * dpr(), y: oy + y * dpr() }), hide: () => tip({ hide: true }) },
   widgetSink: { usable: () => true, show: (text, r) => { const d = dpr(); return tip({ text, rect: [ox + r.left * d, oy + r.top * d, ox + r.right * d, oy + r.bottom * d] }); }, hide: () => tip({ hide: true }) },
-  // a pane was touched: it goes to the front of the panes of this center (like an ordinary window); the ordinary center also goes up over the other programs' windows
+  // a pane was touched: it goes to the front of the panes of this center (like an ordinary window)
   raise: p => {
     if (p instanceof WebPane) {                                   // (the web windows are one order of their own, below every translation window: their pages are windows of the system under this one)
       if (Number(p.el.style.zIndex) !== webTop) { p.el.style.zIndex = String(nextWebZ()); report(); }
     } else if (Number(p.el.style.zIndex) !== top) p.el.style.zIndex = String(++top);
-    if (mode === 0) invoke('center_raise', { label }).catch(() => {});
   },
   nextWebZ: () => nextWebZ(),                                     // (a web window that is made comes to the front of the web windows)
 };
@@ -93,12 +92,12 @@ function nextWebZ() {
 }
 // the kind of order a window has now (settings: "항상 위", "와우 위에서만")
 const optOf = (id, key, d) => (id === MAIN ? (cfg[winconf.MAIN_KEY[key] || key] ?? d) : winconf.opt(cfg.child_windows.find(c => c.id === id) || null, cfg, key, d));
-const browserMode = id => { const b = (cfg.browser_windows || []).find(x => x.id === id) || {}; return b.topmost_wow_only ? 2 : b.topmost === false ? 0 : 1; };          // (the order of a window of the mini browser)
+const browserMode = id => { const b = (cfg.browser_windows || []).find(x => x.id === id) || {}; return b.topmost_wow_only ? 2 : 1; };          // (the order of a window of the mini browser)
 const modeOf = id => winconf.windowMode(cfg, id);
 
 function sync() {
   const want = nativeId ? new Set(nativeId === MAIN || cfg.child_windows.some(c => c.id === nativeId && c.kind !== 'web') ? [nativeId] : [])
-    : new Set(mode === 0 ? [] : [...open].filter(id => (id === MAIN || cfg.child_windows.some(c => c.id === id && c.kind !== 'web')) && !winconf.dockHost(cfg.child_windows, id) && modeOf(id) === mode));          // (the ordinary center has no translation window any more: they are windows of the system, see `native`. It still has web windows)
+    : new Set([...open].filter(id => (id === MAIN || cfg.child_windows.some(c => c.id === id && c.kind !== 'web')) && !winconf.dockHost(cfg.child_windows, id) && modeOf(id) === mode));          // (a translation window that is neither on top nor above the game is a window of the system: see `native`)
   for (const id of want) if (!panes.has(id)) { const p = new Pane(id, center); panes.set(id, p); if (lampState) p.lamp(lampState.st, lampState.title); p.hello(); }
   for (const [id, p] of [...panes]) if (!want.has(id)) { p.destroy(); panes.delete(id); }
   // the web windows of this order
@@ -182,8 +181,7 @@ function drawTip(p) {
     tipEl.style.top = Math.max(2, t - h - 6 >= 2 ? t - h - 6 : Math.min(innerHeight - h - 2, b + 6)) + 'px';
   }
 }
-const tip = p => { if (mode === 0) emit('center-tip', p); else drawTip(p); return true; };
-if (mode === 1) await listen('center-tip', e => drawTip(e.payload));
+const tip = p => { drawTip(p); return true; };
 
 // macOS: the turns of the wheel the exe took arrive one by one as they happen
 await listen('wheel-turn', e => {

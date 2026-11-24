@@ -982,13 +982,6 @@ await opt.screenshot({ path: path.join(OUT, 'options_windows.png') });
   await cp.mouse.click(pb.x + 400, pb.y + 100);
   await until(() => cp.locator('#ctx').isHidden(), 'the menu closes', 1000);
   ok(await cp.locator('#ctx').isHidden() && !centerRects.at(-1).panes.some(p => p.id === 'menu'), 'center/menu: a click elsewhere closes it and gives the mouse back');
-  // the tips of the ordinary center are drawn by the center of the windows on top
-  await control.evaluate(() => window.__TAURI__.event.emit('center-tip', { text: 'tip-test', rect: [100, 300, 160, 320] }));
-  await until(() => cp.locator('.w-tip', { hasText: 'tip-test' }).isVisible(), 'the tip of the other center is drawn', 1000);
-  ok(await cp.locator('.w-tip', { hasText: 'tip-test' }).isVisible(), 'center/tips: a tip of another center is drawn here');
-  await control.evaluate(() => window.__TAURI__.event.emit('center-tip', { hide: true }));
-  await until(() => cp.locator('.w-tip', { hasText: 'tip-test' }).isHidden(), 'the tip is taken away', 1000);
-  ok(await cp.locator('.w-tip', { hasText: 'tip-test' }).isHidden(), 'center/tips: and taken away');
   // tabs: a window docked to another is a tab of its pane (the active tab shows its lines; a tab of another window takes over when touched)
   const dockSet = d => cp.evaluate(d => import('./settings.js').then(m => m.set({ child_windows: m.cfg().child_windows.map(c => (c.id === 3 ? { ...c, dock_to: d } : c)) })), d);
   await dockSet(1);
