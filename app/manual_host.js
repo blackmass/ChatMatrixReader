@@ -1,5 +1,5 @@
 // The manual capture in the hub (docs/HANDOFF.md 4-0ag): the user starts it (the item "수동 캡처" of the menu of a translation window, the event "capture-manual", or the hotkey of the OCR tab,
-// `ocr_cap_hotkey`, empty = none), the screen of the game as it is AT THAT MOMENT is taken (a tooltip is gone as soon as the mouse moves), the picker (pick.html: a window over the monitor)
+// `ocr_cap_hotkey`, empty = none), the screen of the game as it is AT THAT MOMENT is taken (a tooltip is gone as soon as the mouse moves; with no game window the whole screen is taken: the capture needs no game), the picker (pick.html: a window over the monitor)
 // shows that picture and the user drags the part to read, the part is read as words by the reader of the OCR tab (no switch: only the reader has to be there) and comes into the chat as a line of
 // the OCR channel, which the pipeline marks "[OCR]" and translates like the lines of any channel (the method of the translation tab). Nothing is copied or remembered: the next capture starts again.
 import { sub } from './core/image.js';
@@ -16,8 +16,8 @@ const PICK_WAIT_MS = 70000;           // the picker closes itself after a minute
 export function startManual({ settings, capture, ocr, pipeline, publish, invoke, listen, emit, system, encode = encodeBGRA, tickMs = 40 }) {
   let busy = false;
 
-  // the picker over the game: it asks for the picture when it is there ("pick-ready"), the answer is { x, y, w, h } in pixels of the screen or { cancel: true }
-  async function pick(pic, rect) {
+  // the picker over the monitor that has the point `at`: it asks for the picture when it is there ("pick-ready"), the answer is { x, y, w, h } in pixels of the screen or { cancel: true }
+  async function pick(pic, rect, at) {
     const [gx, gy, gw, gh] = rect;
     let image = null;
     try { const e = encode(pic, { scale: 1, format: 'jpeg' }); image = { src: `data:${e.mime};base64,${e.base64}`, x: gx, y: gy, w: gw, h: gh }; }
@@ -30,7 +30,7 @@ export function startManual({ settings, capture, ocr, pipeline, publish, invoke,
         await emit('pick-active', { on: true });                                          // (the windows of ours step aside: not drawn, no mouse)
         offs.push(await listen('pick-result', ev => end(ev.payload || { cancel: true })));
         offs.push(await listen('pick-ready', () => { if (image) Promise.resolve(emit('pick-image', image)).catch(() => {}); }));
-        await invoke('pick_region_open', { x: Math.round(gx + gw / 2), y: Math.round(gy + gh / 2) });
+        await invoke('pick_region_open', { x: Math.round(at[0]), y: Math.round(at[1]) });
       } catch (e) { log.warn('수동 캡처: 구역 고르기를 열지 못했습니다: ' + String(e && e.message || e)); end({ error: String(e && e.message || e) }); return; }
       timer = setTimeout(() => end({ cancel: true }), PICK_WAIT_MS);
     });
@@ -49,13 +49,21 @@ export function startManual({ settings, capture, ocr, pipeline, publish, invoke,
     if (busy) return { error: 'busy' };
     const problem = ocr.freeProblem();
     if (problem) { system('⚠ ' + problem); return { error: problem }; }
-    const rect = capture.game.rect;                                                    // (the place of the game's window on the screen: [x, y, w, h])
-    if (!capture.game.found || !rect) { const m = tr('게임 창을 찾지 못했습니다 (게임이 켜져 있고 최소화되지 않았는지 확인하세요).'); system('⚠ ' + m); return { error: m }; }
+    // what is taken: the window of the game when it is there, else the whole screen (the manual capture needs no game)
+    const g = capture.game && capture.game.found && capture.game.rect ? capture.game.rect : null;
+    let rect = g, at = g ? [g[0] + g[2] / 2, g[1] + g[3] / 2] : null, grabIt = g ? () => capture.grabClient(0, 0, g[2], g[3]) : null;
+    if (!g) {
+      const sr = capture.screenRect ? await capture.screenRect() : null;
+      if (!Array.isArray(sr) || !(sr[2] > 0 && sr[3] > 0)) { const m = tr('화면을 찾지 못했습니다.'); system('⚠ ' + m); return { error: m }; }
+      rect = sr.map(Number); grabIt = () => capture.grabScreen(rect[0], rect[1], rect[2], rect[3]);
+      const os = await invoke('os_state', { keys: [] }).catch(() => null);                          // (the picker opens on the monitor where the mouse is)
+      at = os && Array.isArray(os.cursor) ? [os.cursor[0], os.cursor[1]] : [rect[0] + rect[2] / 2, rect[1] + rect[3] / 2];
+    }
     busy = true;
     try {
       const t0 = performance.now();
-      const pic = await capture.grabClient(0, 0, rect[2], rect[3]);                      // (the screen of this moment: the tooltip stays in it)
-      const picked = await pick(pic, rect);
+      const pic = await grabIt();                                                        // (the screen of this moment: the tooltip stays in it)
+      const picked = await pick(pic, rect, at);
       if (!picked || picked.cancel) return { cancel: true };
       if (picked.error) { system('⚠ ' + tr('구역을 고르지 못했습니다: {e}', { e: picked.error })); return { error: picked.error }; }
       const region = regionFromScreen(picked, rect);
@@ -79,10 +87,10 @@ export function startManual({ settings, capture, ocr, pipeline, publish, invoke,
     const text = (settings.cfg().ocr_cap_hotkey || '').trim();
     if (!text) { prev = true; return; }
     if (text !== comboText) { comboText = text; try { combo = hotkeys.parse(text); } catch { combo = null; } }
-    if (!combo || busy || !capture.game.found) { prev = true; return; }
+    if (!combo || busy) { prev = true; return; }
     const [mods, vk] = combo;
     const s = await invoke('os_state', { keys: [vk] });
-    if (s.fg !== capture.game.hwnd) { prev = true; return; }                          // (the key must be let go once after the game came to the front)
+    if (capture.game && capture.game.found && s.fg !== capture.game.hwnd) { prev = true; return; }          // (with the game running the key works while the game is in front, and must be let go once after it came; with no game it works anywhere)
     const down = [...mods].every(m => s[m.toLowerCase()] === true) && s.keys[0] === true;
     if (down && !prev) { prev = true; await run(); }
     else if (!down) prev = false;

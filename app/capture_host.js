@@ -140,6 +140,9 @@ export function startCapture({ settings, publish, pipeline }) {
     connected: () => connected,
     // a part of the game window, for the plugins (x, y from the top left of the window, in its own pixels): the same way the screen is read now (the window of the game or the screen, whatever the option says)
     clientSize: () => (game.found && game.rect ? { width: game.rect[2], height: game.rect[3] } : null),
+    // the screen itself, with no game window needed (the manual capture works without the game): the rectangle of all the screens together [x, y, w, h] in pixels, and a part of it
+    screenRect: async () => invoke('screen_rect'),
+    grabScreen: (x, y, w, h) => grab(x, y, w, h),
     async grabClient(x, y, w, h) {
       if (!game.found || !game.rect) throw new Error('the game window is not there (or it is minimized)');
       const [gx, gy, gw, gh] = game.rect;
