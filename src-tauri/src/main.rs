@@ -567,17 +567,25 @@ fn write_bmp(path: &std::path::Path, picture: &[u8], crop: (i32, i32, i32, i32))
 /// black. The pictures (the lower left corner of the rectangle, up to 640x360) are written to logs/capture_window.bmp and logs/capture_screen.bmp. A translation window that stands over the rectangle differs, of course.
 #[tauri::command(async)]
 fn capture_compare(hwnd: i64, x: i32, y: i32, w: i32, h: i32) -> Result<Value, String> {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     { let _ = (hwnd, x, y, w, h); return Err("the capture of the game window is not made for this system yet".into()); }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let t0 = std::time::Instant::now();
+        #[cfg(windows)]
         let window = wgc::capture(hwnd as isize, x, y, w, h);
+        #[cfg(target_os = "macos")]
+        let window = win::screen_access()                                           // (ScreenCaptureKit, macOS 14 or later: wincap_mac.rs)
+            .and_then(|_| win::window_rect_px(hwnd as isize).ok_or_else(|| "the window of the game cannot be seen".to_string()))
+            .and_then(|rect| wincap_mac::capture(hwnd as u32, rect, x, y, w, h));
         let window_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let t1 = std::time::Instant::now();
         let screen = win::capture(x, y, w, h)?;
         let screen_ms = t1.elapsed().as_secs_f64() * 1000.0;
+        #[cfg(windows)]
         let border = wgc::border_status();
+        #[cfg(not(windows))]
+        let border = String::new();                                                 // (no frame on a Mac)
         let window = match window { Ok(p) => p, Err(e) => return Ok(json!({ "ok": false, "error": e, "screen_ms": screen_ms.round(), "border": border })) };
         let (mut different, mut max, mut sum, mut lit) = (0u64, 0u32, 0u64, 0u64);
         for (a, b) in window[8..].chunks_exact(4).zip(screen[8..].chunks_exact(4)) {
