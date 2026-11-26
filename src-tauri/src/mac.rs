@@ -877,6 +877,8 @@ pub fn start_wheel_hook() {}
 static CENTER_NUMS: Mutex<Vec<(isize, isize, isize)>> = Mutex::new(Vec::new());        // the window of each control center: (center, handle, the number the system has for it)
 /// The window of a control center (told by the page of the center): the wheel is not taken where a window of another program stands over it. The number is asked for once for a window (the main thread
 /// is asked: not from the tap).
+/// (Windows only: a window that is cloaked; the screen capture tool of Windows 11 is not here)
+pub fn set_cloak(_hwnd: isize, _on: bool) -> bool { false }
 pub fn set_center_hwnd(center: isize, hwnd: isize) {
     if CENTER_NUMS.lock().map(|l| l.iter().any(|e| e.0 == center && e.1 == hwnd)).unwrap_or(false) { return; }
     let number: isize = on_main(|| unsafe { let n: isize = msg_send![obj(hwnd), windowNumber]; n });

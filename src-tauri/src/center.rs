@@ -3,6 +3,7 @@
 //! page (center.html). A center takes the mouse only while the pointer is over one of its panes (read here, 60 times a second, from the system); the rest of it lets the mouse go
 //! through to the game. The translation windows that are neither on top nor above the game are windows of the system (main.rs native_open), not panes of these.
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -79,7 +80,8 @@ pub async fn center_ready(label: String) -> Result<(), String> {
 /// are ready and the loop has set their order (a little time more), or after FALLBACK at the latest (a page that never says it is ready must not leave the program without its windows).
 /// (macOS: shown at once as before: a page of a hidden window is slowed down there, and nothing has been seen of this problem.)
 pub fn start(app: AppHandle) {
-    { let a = app.clone(); std::thread::spawn(move || focus_watch(a)); }          // (the detailed log "focus": from the start of the program, before the centers are there)
+    { let a = app.clone(); std::thread::spawn(move || focus_watch(a)); }
+    { let a = app.clone(); std::thread::spawn(move || snip_watch(a)); }                          // (the screen capture tool of Windows 11: only looks at anything while the option is on)          // (the detailed log "focus": from the start of the program, before the centers are there)
     tauri::async_runtime::spawn(async move {
         let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(3000))).await;
         // the rectangle of all the screens together (physical pixels)
@@ -134,10 +136,83 @@ pub fn start(app: AppHandle) {
     });
 }
 
+// ---- cloaking (docs/HANDOFF.md 4-0aj). A center is a transparent window as big as the screen. The window mode of the screen capture tool of Windows 11 (Win+Shift+S, Print Screen) takes the window
+// under the mouse from the list of the windows that it makes when the capture begins, so a center was "the window" everywhere and the whole screen was chosen. A cloaked window (DWMWA_CLOAK) is not in
+// that list. Two reasons to cloak a center: it has NOTHING TO DRAW (no pane, no tooltip, no menu: its page says so with `drawn`; always, it costs nothing: the center is an empty transparent window then),
+// and the option "캡처 도구 오버레이 숨기기": while a capture tool is being used the centers are cloaked (see snip_watch), so the translation windows are not seen then and not in the capture.
+static IDLE: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(|| Mutex::new(HashMap::new()));             // label -> the center has nothing to draw
+static CLOAKED: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(|| Mutex::new(HashMap::new()));         // label -> what the system was asked (only a change is asked)
+static SNIP_HIDE: AtomicBool = AtomicBool::new(false);                      // the option
+static SNIP_ON: AtomicBool = AtomicBool::new(false);                        // a capture tool is being used now (snip_watch)
+
+fn sync_cloak(app: &AppHandle) {
+    let snip = SNIP_HIDE.load(Ordering::Relaxed) && SNIP_ON.load(Ordering::Relaxed);
+    let idle = IDLE.lock().map(|i| i.clone()).unwrap_or_default();
+    for (label, _) in MODES {
+        let want = snip || idle.get(label).copied().unwrap_or(false);
+        let Ok(mut last) = CLOAKED.lock() else { return };
+        if last.get(label).copied().unwrap_or(false) == want { continue; }
+        if let Some(h) = app.get_webview_window(label).and_then(|w| hwnd_of(&w).ok()) {
+            if win::set_cloak(h, want) { last.insert(label.to_string(), want); }
+        }
+    }
+}
+
+/// The option "캡처 도구 오버레이 숨기기" (the hub tells it at the start and whenever it changes).
+#[tauri::command]
+pub fn set_snip_hide(app: AppHandle, on: bool) { SNIP_HIDE.store(on, Ordering::Relaxed); sync_cloak(&app); }
+
+/// The programs whose window in front is a screen capture tool (the name of the file, in lower case). More can be added here.
+const SNIP_TOOLS: [&str; 2] = ["snippingtool.exe", "screenclippinghost.exe"];
+/// What starts a capture: a list of key combinations; a combination is a list of groups of keys, and the keys of every group must be down (one of them is enough) at the same time.
+/// Win+Shift+S (the Windows key on the left or the right), Print Screen (Windows 11 opens the capture tool with it).
+const SNIP_COMBOS: [&[&[i32]]; 2] = [&[&[0x5B, 0x5C], &[0x10], &[0x53]], &[&[0x2C]]];
+const SNIP_POLL: Duration = Duration::from_millis(15);          // (the keys are looked at this often, only while the option is on)
+const SNIP_APPEAR: Duration = Duration::from_millis(1200);      // how long to wait for the tool to come to the front after the keys (the tool was in front 0.28 s after them)
+const SNIP_LEAVE: Duration = Duration::from_millis(100);        // how long after the tool has left the front the centers come back
+const SNIP_MAX: Duration = Duration::from_secs(60);             // at the latest: a tool that hangs must not leave the program without its windows
+
+/// While the option is on: the keys of a capture are looked at (the system is asked for them: nothing is hooked). They cloak the centers at once (before the tool makes its list of windows); the centers
+/// come back when the tool has been in front and is not any more, when it did not come to the front in SNIP_APPEAR (it was another use of the keys), or after SNIP_MAX.
+fn snip_watch(app: AppHandle) {
+    if !cfg!(windows) { return; }
+    let mut prev = false;
+    let mut state: Option<(Instant, bool, Option<Instant>)> = None;            // (since when, the tool has been in front, since when it is not in front any more)
+    loop {
+        if !SNIP_HIDE.load(Ordering::Relaxed) {
+            if state.take().is_some() { SNIP_ON.store(false, Ordering::Relaxed); sync_cloak(&app); }
+            prev = false;
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+        std::thread::sleep(SNIP_POLL);
+        let combo = SNIP_COMBOS.iter().any(|c| c.iter().all(|g| g.iter().any(|k| win::key_down(*k))));
+        if combo && !prev && state.is_none() {
+            state = Some((Instant::now(), false, None));
+            SNIP_ON.store(true, Ordering::Relaxed);
+            sync_cloak(&app);
+        }
+        prev = combo;
+        if let Some((since, seen, left)) = state {
+            let front = SNIP_TOOLS.contains(&win::exe_of(win::foreground()).as_str());
+            let mut next = (since, seen, left);
+            let mut done = since.elapsed() > SNIP_MAX;
+            if front { next.1 = true; next.2 = None; }
+            else if seen {
+                let l = left.unwrap_or_else(Instant::now);
+                next.2 = Some(l);
+                if l.elapsed() >= SNIP_LEAVE { done = true; }
+            } else if since.elapsed() > SNIP_APPEAR { done = true; }
+            if done { state = None; SNIP_ON.store(false, Ordering::Relaxed); sync_cloak(&app); } else { state = Some(next); }
+        }
+    }
+}
+
 /// The panes of a center (its page tells them whenever they change). `panes`: [{ id, x, y, w, h }] in pixels inside the window of the center; where the window really is gets added here
 /// (on macOS it may stand lower than asked, under the menu bar).
 #[tauri::command]
-pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Option<Value>) -> Result<bool, String> {
+pub async fn center_rects(app: AppHandle, label: String, panes: Value, wheel: Option<Value>, drawn: Option<bool>) -> Result<bool, String> {
+    if let Some(d) = drawn { if let Ok(mut i) = IDLE.lock() { i.insert(label.clone(), !d); } sync_cloak(&app); }                  // (`drawn`: the page has something on it: a pane, a tooltip, a menu)
     let (ox, oy) = app.get_webview_window(&label).and_then(|w| w.outer_position().ok()).map(|p| (p.x as f64, p.y as f64)).unwrap_or((0.0, 0.0));
     let f = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
     let list: Vec<Pane> = panes.as_array().map(|a| a.iter().map(|v| Pane {

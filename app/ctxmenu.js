@@ -31,6 +31,7 @@ export function menuList({ cfg, pane, ev, open, browsersOpen = new Set() }) {
   const picked = getSelection().toString();
   add(tr('선택한 글 복사'), () => { try { window.__TAURI__.clipboardManager.writeText(picked); } catch { document.execCommand('copy'); } }, picked ? '' : 'off');
   add(tr('창 비우기'), () => target.view.apply(target.feed.clear(), target.feed.model));
+  add(tr('수동 캡처'), () => emit('capture-manual', {}));                  // (the hub takes the screen, the user drags the part to read: manual_host.js)
   // merging: a tab leaves its window; a window (that has no tabs of its own and is not the main one) becomes a tab of another
   {
     const kids = cfg.child_windows, setDock = (id, to) => emit('cfg-patch', { patch: { child_windows: kids.map(c => (c.id === id ? { ...c, dock_to: to } : c)) } });

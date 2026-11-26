@@ -44,25 +44,47 @@ export class ChatModel {
     return line.per_line && Object.hasOwn(chattext.QUALITY_COLORS, line.base) ? `bc${line.base}` : line.style;
   }
 
+  // the blocks of a chat line (see addLine for head, pending, swap, mark)
+  blocksOf(line, head, pending, swap = false, mark = false) {
+    const style = ChatModel.style(line);
+    const body = [...line.pieces];
+    const out = [];
+    if (swap && pending) {
+      this.swap.set(line.id, [[...head], body, style]);
+      out.push(block('line', [...head, piece('…')], style, true, false, line.id));
+      out.push(block('trans', withGuild([piece(line.plain_original)]), 'trans', false, true, line.id));
+    } else if (swap && line.both) {
+      out.push(block('line', [...head, ...line.local], style, true, false, line.id));
+      out.push(block('trans', withGuild([piece(line.plain_original)]), 'trans', false, true, line.id));
+    } else {
+      out.push(block('line', [...head, ...body], style, true, false, line.id));
+      if (line.both) out.push(block('trans', withGuild([piece(line.plain)]), 'trans', false, true, line.id));
+      else if (pending && mark) { const b = block('trans', [piece('…')], 'trans', false, true, line.id); b.placeholder = true; out.push(b); }
+    }
+    return out;
+  }
+
   // a chat line. head: the beginning of the line for this window (pipeline.headPieces). pending: a translation follows.
   // swap: "translation above" - the top block waits for the translation, the original is the block below
   // mark: a translation is on its way: a "…" line is put under the original at once, so the text does not jump when the answer comes
   addLine(line, head, pending, swap = false, mark = false) {
     let ops = this.noteColor(line);
-    const style = ChatModel.style(line);
-    const body = [...line.pieces];
-    if (swap && pending) {
-      this.swap.set(line.id, [[...head], body, style]);
-      ops = ops.concat(this.append(block('line', [...head, piece('…')], style, true, false, line.id)));
-      ops = ops.concat(this.append(block('trans', withGuild([piece(line.plain_original)]), 'trans', false, true, line.id)));
-    } else if (swap && line.both) {
-      ops = ops.concat(this.append(block('line', [...head, ...line.local], style, true, false, line.id)));
-      ops = ops.concat(this.append(block('trans', withGuild([piece(line.plain_original)]), 'trans', false, true, line.id)));
-    } else {
-      ops = ops.concat(this.append(block('line', [...head, ...body], style, true, false, line.id)));
-      if (line.both) ops = ops.concat(this.append(block('trans', withGuild([piece(line.plain)]), 'trans', false, true, line.id)));
-      else if (pending && mark) { const b = block('trans', [piece('…')], 'trans', false, true, line.id); b.placeholder = true; ops = ops.concat(this.append(b)); }
-    }
+    for (const b of this.blocksOf(line, head, pending, swap, mark)) ops = ops.concat(this.append(b));
+    return ops.concat(this.trim());
+  }
+
+  // a line that has a place already (an OCR line that was kept a place for) gets its words: its blocks are replaced where they are, whatever came after them
+  updateLine(line, head, pending, swap = false, mark = false) {
+    const at = this.first(line.id);
+    if (at === null) return [];                       // (the line is gone: older than the limit, or the window was cleared)
+    let n = 0;
+    while (at + n < this.blocks.length && this.blocks[at + n].line_id === line.id) n++;
+    this.swap.delete(line.id);
+    const fresh = this.blocksOf(line, head, pending, swap, mark);
+    let ops = [];
+    for (let k = 0; k < Math.min(n, fresh.length); k++) ops = ops.concat(this.replace(at + k, fresh[k]));
+    if (fresh.length > n) for (let k = n; k < fresh.length; k++) ops = ops.concat(this.insert(at + k, fresh[k]));
+    else if (n > fresh.length) ops = ops.concat(this.delete(at + fresh.length, n - fresh.length));
     return ops.concat(this.trim());
   }
 

@@ -152,7 +152,7 @@ export function cleanLlmOutput(s) {
   return s.trim();
 }
 
-function reasoningExtras(cfg) {
+export function reasoningExtras(cfg) {
   if (!(cfg.disable_reasoning ?? true)) return {};
   const raw = (cfg.reasoning_off_body || DEFAULT_REASONING_OFF).trim();
   let extra;

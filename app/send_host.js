@@ -1,6 +1,7 @@
 // The send box wired to the world (the hub runs it): the keys and the game window come from the exe, the input line is the "input"
 // window, the translation is the hub's translator. Port of SendIO in app.py. The state machine itself is core/sendbox.js.
 import { SendBox } from './core/sendbox.js';
+import { InGameInput } from './core/ingame_input.js';
 import * as outgoing from './core/outgoing.js';
 import * as hotkeys from './core/hotkeys.js';
 import { log } from './core/log.js';
@@ -64,6 +65,7 @@ export function startSend({ settings, translator, capture, system }) {
     },
   };
   const box = new SendBox(io, () => settings.cfg());
+  const ingame = new InGameInput({ getCfg: () => settings.cfg(), io, onHold: on => box.setHold(on) });       // (what was typed in the game's own chat box: the addon's command "@IN", core/ingame_input.js)
   listen('input-focus', ev => {          // (how long the box took to get the keyboard: for the log)
     const p = ev.payload || {}, front = p.front ? 'this' : 'other';
     if (p.ok) log.info('보내기 입력줄: 키보드 받음 ' + p.ms + 'ms'); else log.warn('보내기 입력줄: 키보드 못 받음 ' + p.ms + 'ms (front: ' + front + ')');
@@ -71,5 +73,5 @@ export function startSend({ settings, translator, capture, system }) {
   listen('input-submit', ev => { prefix = ev.payload.prefix || ''; box.submit(ev.payload.text); });
   listen('input-cancel', () => { box.cancel(); });
   const timer = every('SEND_TICK_MS', () => box.tick().catch(e => log.error('보내기 점검: ' + e)));
-  return { box, stop: () => timer.stop() };
+  return { box, ingame, stop: () => timer.stop() };
 }

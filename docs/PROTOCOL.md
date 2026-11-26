@@ -43,7 +43,7 @@ Payload: UTF-8, lines separated by `\n`. Each line has four fields separated by 
 - Built-in text emotes (`CHAT_MSG_TEXT_EMOTE`) use channel `E` with an empty sender; the text already contains the names.
 - `!BI` - Battle.net friend came online / went offline (rebuilt by the addon from `CHAT_MSG_BN_INLINE_TOAST_ALERT`). Empty sender.
 - `!CN` - channel notice ("Changed Channel: [1. General - Stormwind City]", joined, left ...), built by the addon like the game's chat frame does from `CHAT_MSG_CHANNEL_NOTICE`. Empty sender. Filtered like the numbered channels.
-- `!RS` - the chat restriction (boss fights) is over; sent only if unreadable lines (`[restricted]`) were seen during it. Empty sender; the text is ignored, the reader shows its own notice.
+- `@RS` - the chat restriction (boss fights) is over; sent only if unreadable lines (`[restricted]`) were seen during it. Empty sender; the text is ignored, the reader shows its own notice.
 - `!TM` - "appearance added to your collection". The game prints this itself (it is not a chat event); the addon builds it from
   `TRANSMOG_COLLECTION_SOURCE_ADDED`. Empty sender. The reader shows the line yellow and the item name in one colour.
 - Sent whispers use `WT` (character) and `BT` (Battle.net); the sender is the recipient.

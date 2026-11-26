@@ -9,10 +9,14 @@ import * as debuglog from './debuglog.js';
 import { defaultBrowser, normalizeBrowsers, normalizeBookmarks } from './browsers.js';
 import { pyInt, truthy } from './winconf.js';
 import { normalizeWidgets } from '../widgets/registry.js';
-import { DEFAULT_PROMPT, DEFAULT_EXTRA_PROMPT, DEFAULT_SEND_EXTRA_PROMPT, DEFAULT_SEND_PROMPT } from './prompts.js';
+import { isMac } from '../platform.js';
+import * as hotkeys from './hotkeys.js';
+import * as toolbar from './toolbar.js';
+import { DEFAULT_PROMPT, DEFAULT_EXTRA_PROMPT, DEFAULT_SEND_EXTRA_PROMPT, DEFAULT_SEND_PROMPT, DEFAULT_OCR_PROMPT, DEFAULT_CAPTURE_PROMPT } from './prompts.js';
 import { LEGACY_DEFAULT_PROMPTS } from './prompts_legacy.js';
 import { DEFAULT_REASONING_OFF } from './translate.js';
 import { cleanByMethod } from './translate_rules.js';
+import { cleanRegion } from './ocr.js';
 
 export const PATH = 'config.json';
 export const VERSION = 3;                      // the format of config.json; a file without it comes from 1.x. 2 -> 3: line_height (see carryLineHeight)
@@ -95,6 +99,7 @@ export const DEFAULTS = {
     bg_opacity: 0.99,   // background (the dark area; at most 99 %: winconf.js MAX_BG_OPACITY)
     text_opacity: 1.0,   // text, title bar, scrollbar
     topmost: true,   // above every other window
+    snip_hide: false,                      // the centers (the windows that draw the translation windows over the game) are hidden while the screen capture tool of Windows is used (docs/HANDOFF.md 4-0aj)
     exit_with_game: false,   // quit this program 5 s after the game has been closed
     topmost_wow_only: false,   // only just above the game window, behind all other windows
     wow_window_title: 'World of Warcraft',
@@ -144,6 +149,7 @@ export const DEFAULTS = {
     full_scan_sec: 30,   // whole-screen search while the matrix is missing: at most this often (seconds)
     // plugins (docs/PLUGINS.md)
     plugins: {},                           // plugin id -> { enabled: bool, granted: { net: [host], 'chat.inject': bool, storage: bool }, options: { key: value } } (app/plugin_host.js). The login of a web window is a setting of the window (child_windows[].cookies) since 3.2.0
+    tools: null,                           // the function buttons of the bar of the main window: a list of ids (core/toolbar.js); null = the three it always had
     widgets: {},                           // the widgets of the main window: { 'owner:name': { place, anchor, dx, dy, style, show, scale, opacity, opts } } (docs/WIDGETS.md)
     wheel_through: false,                  // click-through windows: the wheel over them may scroll (reading the earlier chat); off = nothing but the tooltip gets through
     browser_windows: [defaultBrowser(1)],  // the windows of the mini browser (core/browsers.js): window 1 is always there
@@ -154,6 +160,16 @@ export const DEFAULTS = {
     debug_log: debuglog.defaults(),         // 3.2: the areas of the detailed log that are on (Options > 기록 > 상세 기록; all off)
     bar_style: 'tabs',                     // 3.2.1: the bar of the translation windows over the game: 'tabs' (floating tabs, the look of 3.1.1) | 'full' (one band across the window, like a window of the system)
     chat_links: true,                      // 3.2: a web address in the chat is a link: [discord.gg/abc] (a click asks where to open it). Off: it stays plain text
+    ocr_enabled: false,                    // 3.3: OCR assist (reads the chat from the screen when the addon cannot give it, and a region the user picks). Off until the user turns it on
+    ocr_when: 'ondemand',                  // ondemand | resident (see core/ocr.js)
+    ocr_read: isMac ? 'vision' : 'windows', // who reads the letters: ai | windows | vision. The system's own engine by default (Windows OCR; on a Mac macOS Vision, which is not ready yet: see core/ocr.js)
+    ocr_win_lang: '',                      // the language Windows OCR reads (a language tag: ko, en-US); empty = the languages of the Windows user (docs/HANDOFF.md 4-0j)
+    ocr_ai_url: '', ocr_ai_model: '', ocr_ai_key: '',   // the AI server that reads: empty = the one of the translation tab
+    ocr_ai_parallel: 1,                    // how many readings go to the AI server at the same time (1..4); 1 unless the server answers side by side
+    ocr_region: null,                      // the region the user picked to read: { x, y, w, h, gw, gh } in pixels of the game window (gw, gh: its size then) | null
+    ocr_cap_hotkey: '',                    // the hotkey of the manual capture ("Ctrl+Q"); empty = none (the menu of a translation window starts it too). The user sets it
+    ocr_prompt: DEFAULT_OCR_PROMPT,        // the instructions of the reading model
+    ocr_cap_prompt: DEFAULT_CAPTURE_PROMPT, // the instructions of the model that reads the picture of the manual capture (only reads; the translation is the translation tab's)
     capture_mode: 'screen',                // 3.2.1: how the screen is read for the matrix: 'screen' (the picture of the screen) | 'window' (the window of the game only: the task bar or another window over it does not matter; Windows 10 shows a yellow frame on the game, Windows 11 hides it)
     read_matrix: true,                     // 3.2: the screen is read for the chat matrix (off: only the overlay is used; read once at the start)
     auto_copy: false,                      // the text selected in a window is copied when the mouse leaves the window
@@ -191,6 +207,7 @@ export function normalize(saved) {
   if (!isObj(cfg.channel_route)) cfg.channel_route = {};
   if (!isObj(cfg.plugins)) cfg.plugins = {};
   cfg.widgets = normalizeWidgets(cfg.widgets);
+  cfg.tools = Array.isArray(cfg.tools) ? toolbar.clean(cfg.tools) : null;
   if (!isObj(cfg.tuning)) cfg.tuning = {};
   cfg.browser_windows = normalizeBrowsers(cfg.browser_windows);
   cfg.bookmarks = normalizeBookmarks(cfg.bookmarks);
@@ -201,6 +218,17 @@ export function normalize(saved) {
   cfg.auto_copy = cfg.auto_copy === true;
   cfg.read_matrix = cfg.read_matrix !== false;
   cfg.capture_mode = cfg.capture_mode === 'window' ? 'window' : 'screen';
+  cfg.ocr_enabled = cfg.ocr_enabled === true;
+  if (!['ondemand', 'resident'].includes(cfg.ocr_when)) cfg.ocr_when = 'ondemand';
+  if (!['ai', 'windows', 'vision'].includes(cfg.ocr_read)) cfg.ocr_read = isMac ? 'vision' : 'windows';
+  delete cfg.ocr_split;                                                   // (an option that was taken out: the lines are always found by the program from the picture)
+  cfg.ocr_win_lang = typeof cfg.ocr_win_lang === 'string' ? cfg.ocr_win_lang.trim().slice(0, 20) : '';
+  cfg.ocr_ai_parallel = Math.min(4, Math.max(1, Math.round(Number(cfg.ocr_ai_parallel) || 1)));
+  cfg.ocr_region = cleanRegion(cfg.ocr_region);
+  cfg.snip_hide = cfg.snip_hide === true;
+  cfg.ocr_cap_hotkey = (() => { const t = String(cfg.ocr_cap_hotkey ?? '').trim(); if (!t) return ''; try { return hotkeys.normalize(t); } catch { return ''; } })();     // (a hotkey that does not parse is no hotkey)
+  if (!(cfg.ocr_prompt || '').trim()) cfg.ocr_prompt = DEFAULT_OCR_PROMPT;
+  if (!(cfg.ocr_cap_prompt || '').trim()) cfg.ocr_cap_prompt = DEFAULT_CAPTURE_PROMPT;
   cfg.chat_links = cfg.chat_links !== false;
   cfg.bar_style = cfg.bar_style === 'full' ? 'full' : 'tabs';
   cfg.by_method = cleanByMethod(cfg.by_method);

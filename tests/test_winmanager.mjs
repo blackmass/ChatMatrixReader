@@ -31,6 +31,14 @@ check(wm.openIds().sort().join() === '2,3,4' && calls.length === 0, 'the voice r
 calls.length = 0; wm.setVoice(true); await settle();
 check(calls.length === 0, 'told again: nothing happens');
 
+// ---- the OCR assist: a window of the mode "ocr" follows it like the voice windows follow the voice recognition
+{
+  const before = wm.openIds().sort().join();
+  wm.setOcr(true); await settle();
+  check(wm.openIds().sort().join() === before, 'the OCR assist is turned on: no window has the mode "ocr" here, nothing opens');
+  wm.setOcr(false); await settle();
+}
+
 // ---- what the user does is only for now and never changes the settings
 wm.closeWindow(2); await settle();
 check(wm.openIds().sort().join() === '3,4' && modes() === modes0, 'the X of a "voice" window closes it for now; the settings are as they were');

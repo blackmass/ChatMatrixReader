@@ -10,7 +10,8 @@ import { Watchdog, PING_MS } from './core/watchdog.js';
 import { PluginBridge, PluginError } from './core/pluginbridge.js';
 import { log } from './core/log.js';
 import { tr } from './core/i18n.js';
-import { LIGHT_BLUE, TIP_SEP } from './core/chattext.js';
+import { LIGHT_BLUE, TIP_SEP, plain as plainText } from './core/chattext.js';
+import { encodeBGRA } from './imgenc.js';
 import { isMac } from './platform.js';
 import { createWebHost } from './web_host.js';
 import { newWindowPlace } from './core/placer.js';
@@ -25,7 +26,7 @@ const withDefaults = headers => { const have = new Set((headers || []).map(([k])
 const restKey = g => JSON.stringify({ ...(g || {}), net: undefined, netAny: undefined });
 const SAVE_DELAY_MS = 400;
 
-export function startPlugins({ settings, files, publish, pipeline, invoke, emit, listen, widgets = null, windows = null, doc = document, win = window }) {
+export function startPlugins({ settings, files, publish, pipeline, invoke, emit, listen, widgets = null, windows = null, capture = null, doc = document, win = window }) {
   const registry = new Map();                  // id -> { id, ok, errors, warnings, manifest }
   const running = new Map();                   // id -> { frame, bridge, token, granted, options }
   const logs = new Map();                      // id -> [text]
@@ -66,7 +67,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     const r = registry.get(id), e = entry(id);
     return { id, ok: !!(r && r.ok), errors: r ? r.errors : [], warnings: r ? r.warnings : [], manifest: r ? r.manifest : null, enabled: !!e.enabled, running: running.has(id),
       missing: r && r.ok ? missingOf(r.manifest, e.granted) : [], granted: e.granted || {}, gone: !registry.has(id), requested: Array.isArray(e.requested) ? e.requested : [], web: { cookies: !!(webEntry(id) || {}).cookies }, webOpen: web.isOpen(id), options: r && r.ok ? optionValues(r.manifest, e.options) : (e.options || {}), lastError: lastError.get(id) || '',
-      review: !!(r && r.ok && e.asked !== permsKey(r.manifest)) };       // review: nobody has decided about what it asks for yet (the options window asks the user, one plugin after the other)
+      review: !!(r && r.ok && e.asked !== permsKey(r.manifest)) };       // review: nobody has decided about what it asks for yet (shown quietly in the plugin tab; the user is asked only when they turn the plugin on)
   }
   const allIds = () => [...new Set([...registry.keys(), ...Object.keys(entries())])].sort();
   const publishState = () => emit('plugin-state', { plugins: allIds().map(summary) });
@@ -89,15 +90,30 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     moveWebCookies();
     await reconcile();
     publishState();
-    // a plugin nobody has decided about yet: the options window is opened once, it asks the user (api.askedOpen: only once in a run of the program)
-    const pending = [...registry.values()].filter(r => r.ok && entry(r.id).asked !== permsKey(r.manifest) && !api.prompted.has(r.id));
-    if (pending.length) { for (const r of pending) api.prompted.add(r.id); invoke('open_options').catch(() => {}); }
   }
 
   // ---- running
   const post = { send: (frame, msg) => { try { frame.contentWindow.postMessage(msg, '*'); } catch { /* the frame is gone */ } } };          // (the tests replace `send`)
   const sendTo = (frame, msg) => post.send(frame, msg);
   const storePath = id => `plugin-data/${id}.json`;
+
+  // ---- the chat for the plugins that may read it (permission chat.read): the lines the program read, the notices that a line could not be read, and that the restriction is over. They are only watched here (the
+  // pipeline goes its own way). What a plugin gets is plain: { kind: 'line', channel, sender, text } | { kind: 'restricted', channel } | { kind: 'over' }; its own lines ("!PLG") and the commands are not told.
+  const recent = [];                                                      // the last lines, for `chat.recent` (a plugin that starts later asks what was said before)
+  const RECENT_KEEP = 100;
+  const chatEvent = line => {
+    if (!line || typeof line.channel !== 'string') return null;
+    if (line.text === '[restricted]') return { kind: 'restricted', channel: line.channel };
+    if (line.channel === '@RS') return { kind: 'over' };
+    if (line.channel.startsWith('!') || line.channel.startsWith('@') || typeof line.text !== 'string') return null;
+    return { kind: 'line', channel: line.channel, sender: String(line.sender || '').slice(0, 40), text: plainText(line.text).slice(0, 500) };
+  };
+  if (pipeline && typeof pipeline.observe === 'function') pipeline.observe(line => {
+    const ev = chatEvent(line);
+    if (!ev) return;
+    if (ev.kind === 'line') { recent.push({ channel: ev.channel, sender: ev.sender, text: ev.text }); if (recent.length > RECENT_KEEP) recent.shift(); }
+    for (const run of running.values()) if (run.bridge.eff['chat.read']) sendTo(run.frame, { cmr: 1, event: 'chat', value: ev });
+  });
 
   function hooksFor(id, manifest) {
     let saveTimer = 0, pending = null;
@@ -120,6 +136,12 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
       },
       fetch: async (r, hosts) => invoke('plugin_fetch', { url: r.url, method: r.method, headers: withDefaults(r.headers), body: r.body, hosts, maxBytes: r.max }),
       log: text => note(id, text),
+      chatRecent: n => recent.slice(-n),
+      captureInfo: async () => (capture ? capture.clientSize() : null),
+      captureGrab: async ({ x, y, w, h, scale, format }) => {          // a part of the game window as a picture file (the way the screen is read now: the window of the game, or the screen)
+        if (!capture) throw new Error('the reading of the screen is not there');
+        return encodeBGRA(await capture.grabClient(x, y, w, h), { scale, format });
+      },
       requestHost: async host => {                                    // (netAny) the plugin asks for a host: it waits in the list of the plugin tab for the user
         const e = entry(id), have = Array.isArray(e.requested) ? e.requested : [];
         if ((e.granted && e.granted.net || []).includes(host)) return 'allowed';
@@ -376,7 +398,7 @@ export function startPlugins({ settings, files, publish, pipeline, invoke, emit,
     if (!run || !run.bridge.widgetIds.has(a.id) || (a.type !== 'click' && a.type !== 'menu')) return;
     sendTo(run.frame, { cmr: 1, event: 'widget', value: { id: a.id.slice(owner.length + 1), type: a.type, ...(a.type === 'menu' ? { item: String(a.item || '').slice(0, 24) } : { button: 'left' }) } });
   };
-  const api = { watch: true, dog, prompted: new Set(), windowAllowed, scan, list: () => allIds().map(summary), registry, running, logs, stop: stopOne, post };
+  const api = { watch: true, dog, windowAllowed, scan, list: () => allIds().map(summary), registry, running, logs, stop: stopOne, post };
   scan();
   return api;
 }

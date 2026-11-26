@@ -3,15 +3,16 @@
 // a list. Window 2 (voice recognition) always exists. A setting an extra window does not have of its own is taken from window 1.
 
 import { normalizeWidgets } from '../widgets/registry.js';
+import { clean as cleanTools } from './toolbar.js';
 
 export const SPEECH_CODES = ['!MS', '!MY', '!ME', '!MW', '!MP', '!BE', '!BW'];
 export const ETC = '!ETC';
 export const KNOWN = ['S', 'Y', 'E', 'P', 'PL', 'R', 'RL', 'RW', 'I', 'IL', 'G', 'O', 'W', 'B', 'WT', 'BT', 'CM',
-  ...Array.from({ length: 10 }, (_, i) => `C${i + 1}`), '!NPC', '!VC', '!PLG'];
+  ...Array.from({ length: 10 }, (_, i) => `C${i + 1}`), '!NPC', '!VC', '!OCR', '!PLG'];
 export const VOICE_ID = 2;
 export const ALIGNS = ['left', 'center', 'right'];
 export const HEADS = ['detail', 'basic', 'nochan', 'body'];
-export const MODES = ['always', 'voice', 'never'];
+export const MODES = ['always', 'voice', 'ocr', 'never'];
 export const KEYS = {
   id: 0, name: '', open_mode: 'never', channels: [], geometry: '', font_family: '', font_size: 0, bg_opacity: 0.99, text_opacity: 1.0, tab_opacity: 1.0,
   topmost: true, topmost_wow_only: false, click_through: false, hover_clear: false, blur: 0, shadow: false, head_mode: 'basic', align: 'left', bottom: false,
@@ -36,7 +37,7 @@ const EMPTY_TEXT = new Set([...OPT_STR, 'font_family']);       // '' is "empty" 
 // switching by itself as the layers of the page change (its layer is whole, so it may use the sub-pixel one). Under 100 % it is always grey. 99 % cannot be told from 100 % by the eye.
 export const MAX_BG_OPACITY = 0.99;
 export const HOST_KEYS = new Set(['geometry', 'topmost', 'topmost_wow_only', 'click_through', 'hover_clear', 'blur', 'bg_opacity', 'text_opacity', 'tab_opacity', 'hide_tools', 'hide_tabs',
-  'hide_frame', 'lock_window', 'widgets', 'open_mode', 'wheel_through', 'through_tips', 'interact_keys', 'auto_copy']);
+  'hide_frame', 'lock_window', 'widgets', 'tools', 'open_mode', 'wheel_through', 'through_tips', 'interact_keys', 'auto_copy']);
 export const MAIN_KEY = { align: 'text_align', bottom: 'bottom_stick', shadow: 'shadow_on', name: 'main_name' };       // (names that differ in the main window's top level)
 
 export const chanKey = code => (SPEECH_CODES.includes(code) ? '!NPC' : KNOWN.includes(code) ? code : ETC);
@@ -45,7 +46,7 @@ export function newConf(wid, channels = []) {
   return { ...structuredClone(KEYS), id: Math.trunc(wid), channels: [...channels] };
 }
 // a window made by the user: everything that can follow window 1 does (the choices are null = follow; text '' and size 0 already are)
-export const followConf = (wid, channels = []) => ({ ...newConf(wid, channels), align: null, head_mode: null, blur: null });
+export const followConf = (wid, channels = []) => ({ ...newConf(wid, channels), align: null, head_mode: null, blur: null, tools: [] });          // (a new window has only the close button)
 
 // Python's int(): numbers truncate, numeric strings parse, everything else is an error
 export function pyInt(v) {
@@ -80,7 +81,7 @@ export function normalize(items) {
     for (const k of Object.keys(KEYS)) if (k in it && k !== 'id') d[k] = it[k];
     const follows = ['align', 'head_mode', 'blur'].filter(k => it[k] === null);       // (3.0: an explicit null = follows window 1)
     if (!('open_mode' in it) && truthy(it.enabled)) d.open_mode = 'always';
-    if (!MODES.includes(d.open_mode)) d.open_mode = 'never';          // ('voice' = only while the voice recognition is on: any extra window can have it; in 2.0 only window 2 could)
+    if (!MODES.includes(d.open_mode)) d.open_mode = 'never';          // ('voice' = only while the voice recognition is on: any extra window can have it; in 2.0 only window 2 could; 'ocr' = only while the OCR assist is on)
     d.channels = Array.isArray(d.channels) ? d.channels.filter(c => typeof c === 'string') : [];
     if ('opacity' in it && !('bg_opacity' in it) && !('text_opacity' in it)) d.bg_opacity = d.text_opacity = it.opacity;
     try {
@@ -99,6 +100,7 @@ export function normalize(items) {
     }
     for (const k of OPT_BOOL) if (k in it) d[k] = truthy(it[k]);
     for (const k of OPT_STR) if (k in it) d[k] = cleanColor(it[k]);
+    if (Array.isArray(it.tools)) d.tools = cleanTools(it.tools);                  // (the function buttons of the bar: only when the window chose; without it the window has the three it always had)
     if ('widgets' in it) d.widgets = normalizeWidgets(it.widgets);               // (3.0: the widgets of this window, only when it has some)
     if (d.topmost_wow_only) d.topmost = false;
     if (typeof d.name !== 'string') d.name = '';

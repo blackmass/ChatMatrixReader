@@ -5,9 +5,9 @@ import { check, eq } from './helpers.mjs';
 
 const ID = 'bridge-test-plugin-0123456789';
 const manifest = parseManifest(JSON.stringify({ id: ID, name: 'T', version: '1.0.0', api: 1,
-  permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, reasons: { net: 'a', 'chat.inject': 'b', storage: 'c', widgets: 'd', windows: 'e', openUrl: 'g' }, windows: [{ id: 'main', page: 'w.html' }],
+  permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, 'chat.read': false, capture: false, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, reasons: { net: 'a', 'chat.inject': 'b', storage: 'c', widgets: 'd', windows: 'e', openUrl: 'g' }, windows: [{ id: 'main', page: 'w.html' }],
   options: [{ key: 'url', type: 'text', default: 'u' }, { key: 'n', type: 'number', default: 3 }] }), ID).manifest;
-const all = { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' };
+const all = { net: ['example.com'], netAny: true, 'chat.inject': true, 'chat.read': false, capture: false, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' };
 let clock = 0;
 const make = (granted = all, extra = {}) => {
   const log = { injected: [], fetched: [], saved: [], logs: [] };
@@ -27,7 +27,7 @@ const code = async p => { try { await p; return 'ok'; } catch (e) { return e ins
   eq(await code(b.call('chat.inject', { text: 'x' })), 'denied', 'bridge: chat.inject is denied without the permission');
   eq(await code(b.call('storage.get', { key: 'a' })), 'denied', 'bridge: storage is denied');
   eq(await code(b.call('net.fetch', { url: 'https://example.com/' })), 'denied', 'bridge: net.fetch is denied');
-  eq((await b.call('meta')).allowed, { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false, openUrl: false, web: "" }, 'bridge: meta tells what is allowed');
+  eq((await b.call('meta')).allowed, { net: [], netAny: false, 'chat.inject': false, 'chat.read': false, capture: false, storage: false, widgets: false, windows: false, openUrl: false, web: "" }, 'bridge: meta tells what is allowed');
   eq(await code(b.call('nothing')), 'args', 'bridge: an unknown call');
 }
 { // chat.inject: the plugin may call as often as it likes; the lines go out one by one, spaced (a queue), and what does not fit is dropped and told
@@ -92,7 +92,7 @@ const code = async p => { try { await p; return 'ok'; } catch (e) { return e ins
   eq(await code(b.call('net.fetch', { url: 'https://example.com/more' })), 'limit', 'bridge: when too many wait for one host, the next is refused');
 }
 { // net.fetch: a host the manifest does not name is not used even if the user's list has it
-  const { b } = make({ net: ['evil.org', 'example.com'], 'chat.inject': true, storage: true, widgets: true, windows: true });
+  const { b } = make({ net: ['evil.org', 'example.com'], 'chat.inject': true, 'chat.read': false, capture: false, storage: true, widgets: true, windows: true });
   eq(await code(b.call('net.fetch', { url: 'https://evil.org/' })), 'denied', 'bridge: allowed by the user but not asked for: denied');
 }
 { // a failing request, options, log
@@ -197,4 +197,40 @@ const code = async p => { try { await p; return 'ok'; } catch (e) { return e ins
   for (const bad of ['http://example.com/', 'https://evil.org/', 'https://user:pw@example.com/', 'javascript:1']) eq(await code(b.call('chat.inject', { text: 'x', link: { url: bad } })), 'denied', 'bridge: a link to ' + bad + ' is refused');
   eq(await code(b.call('chat.inject', { text: 'x', link: { url: 'https://example.com/', target: 'browser' } })), 'ok', 'bridge: a link for the browser to an allowed site');
   eq(await code(make({ ...all, web: '' }).b.call('chat.inject', { text: 'x', link: { url: 'https://example.com/' } })), 'denied', 'bridge: no web permission: no link to the web window');
+}
+
+{ // pictures of the game and the lines read: the permissions, the checks on what is asked, one picture at a time, and the limit
+  const man = parseManifest(JSON.stringify({ id: ID, name: 'T', version: '1.0.0', api: 1, permissions: { capture: true, 'chat.read': true }, reasons: { capture: 'a', 'chat.read': 'b' } }), ID).manifest;
+  const grant = { capture: true, 'chat.read': true };
+  let open = 0, maxOpen = 0; const asks = [];
+  const mk = (granted = grant) => {
+    open = 0; maxOpen = 0; asks.length = 0;
+    const hooks = { log: () => {}, captureInfo: async () => ({ width: 1920, height: 1080 }),
+      captureGrab: async r => { asks.push(r); open++; maxOpen = Math.max(maxOpen, open); await new Promise(res => setTimeout(res, 5)); open--; return { width: r.w * r.scale, height: r.h * r.scale, mime: 'image/png', base64: 'AAAA' }; },
+      chatRecent: n => [{ channel: 'G', sender: 'a', text: 'hello' }].slice(0, n) };
+    return new PluginBridge({ manifest: man, granted, hooks, now: () => clock });
+  };
+  clock = 0;
+  const none = mk({});
+  for (const m of ['capture.info', 'chat.recent']) eq(await code(none.call(m, {})), 'denied', `bridge: ${m} is denied without the permission`);
+  eq(await code(none.call('capture.grab', { x: 0, y: 0, w: 100, h: 100 })), 'denied', 'bridge: a picture is denied without the permission');
+  const b = mk();
+  eq(await b.call('capture.info'), { width: 1920, height: 1080 }, 'bridge: the size of the game window');
+  eq((await b.call('capture.grab', { x: 10, y: 20, w: 200, h: 60 })).width, 200, 'bridge: a part of the game window comes as a picture');
+  eq(asks[0], { x: 10, y: 20, w: 200, h: 60, scale: 1, format: 'png' }, 'bridge: what the host is asked for (the defaults are filled in)');
+  eq((await b.call('capture.grab', { x: 0, y: 0, w: 100, h: 50, scale: 2, format: 'jpeg' })).width, 200, 'bridge: a larger picture (scale)');
+  for (const bad of [{ x: -1, y: 0, w: 100, h: 100 }, { x: 0, y: 0, w: 4, h: 100 }, { x: 0.5, y: 0, w: 100, h: 100 }, { x: 0, y: 0, w: 100, h: 100, scale: 0 }, { x: 0, y: 0, w: 100, h: 100, scale: 9 }, { x: 0, y: 0, w: 100, h: 100, format: 'gif' }, 'x', null])
+    eq(await code(b.call('capture.grab', bad)), 'args', 'bridge: a wrong ask for a picture is refused: ' + JSON.stringify(bad));
+  eq(await code(b.call('capture.grab', { x: 0, y: 0, w: 1920, h: 1080 })), 'ok', 'bridge: the whole 1080p picture is allowed');
+  eq(await code(b.call('capture.grab', { x: 0, y: 0, w: 3840, h: 2160 })), 'limit', 'bridge: a whole 4K screen is too big');
+  eq(await code(b.call('capture.grab', { x: 0, y: 0, w: 1920, h: 1080, scale: 3 })), 'limit', 'bridge: and so is a small part made too large');
+  asks.length = 0;
+  await Promise.all([1, 2, 3, 4].map(i => b.call('capture.grab', { x: i, y: 0, w: 100, h: 100 })));
+  eq([asks.length, maxOpen], [4, 1], 'bridge: the pictures are taken one at a time');
+  clock = 0; const c = mk();
+  let ok = 0; for (let i = 0; i < LIMITS.captureCallsPerMin + 5; i++) { if (await code(c.call('capture.grab', { x: 0, y: 0, w: 100, h: 100 })) === 'ok') ok++; }
+  eq(ok, LIMITS.captureCallsPerMin, 'bridge: a few pictures a second at most (a minute holds the limit)');
+  eq(await b.call('chat.recent', { count: 5 }), [{ channel: 'G', sender: 'a', text: 'hello' }], 'bridge: the last readable lines');
+  eq(await code(mk({ capture: true }).call('chat.recent', {})), 'denied', 'bridge: the lines need chat.read, a picture permission does not give them');
+  eq(await code(mk({ 'chat.read': true }).call('capture.info', {})), 'denied', 'bridge: and the lines do not give a picture');
 }

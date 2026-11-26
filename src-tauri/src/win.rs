@@ -538,6 +538,12 @@ pub fn set_center_hwnd(center: isize, hwnd: isize) {
 
 #[link(name = "dwmapi")]
 extern "system" { fn DwmGetWindowAttribute(hwnd: Handle, attr: u32, value: *mut c_void, size: u32) -> i32; }
+/// A window is cloaked (DWMWA_CLOAK): the system does not draw it and the window lists of other programs leave it out (the window mode of the screen capture tool of Windows 11 chooses its
+/// window among them), but it stays where it is with all its styles. true when the system took it.
+pub fn set_cloak(hwnd: isize, on: bool) -> bool {
+    let v: u32 = if on { 1 } else { 0 };
+    unsafe { DwmSetWindowAttribute(hwnd, 13, &v as *const u32 as *const c_void, 4) == 0 }
+}
 
 /// The window that stands over `hwnd` and covers the point (x, y), if there is one: the windows above it in the order of the screen, the first that is shown, is not a window the mouse goes through
 /// (WS_EX_TRANSPARENT with WS_EX_LAYERED: the overlays of other programs, our own centers), is not hidden by the system (a window of another desktop) and has the point inside its drawn frame.

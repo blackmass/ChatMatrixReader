@@ -18,6 +18,7 @@ export const LIMITS = {
   storageBytes: 1_000_000, storageKeys: 1000, storageKey: 100,
   logPerMin: 120, logText: 500,
   windowCallsPerMin: 20, hostRequestsPerMin: 10, openUrlPerMin: 10, webOpenPerMin: 30,                               // opening / closing the plugin's windows; asking the user for a host                                                       // opening / closing the plugin's windows
+  captureCallsPerMin: 120, captureMaxArea: 2_500_000, captureMaxScale: 3, captureMaxOut: 6_000_000, captureMinSide: 8, chatRecentMax: 100,        // pictures of the game: a part of it only, at most this big, a few a second (one at a time); the lines kept for `chat.recent`
   widgets: 8, widgetGapMs: 100,                                                // widgets a plugin may have; its state is passed on at most every 100 ms (the newest wins)
 };
 
@@ -52,6 +53,8 @@ export class PluginBridge {
     this.hostRequests = new Limiter(LIMITS.hostRequestsPerMin, 60_000, now);
     this.opens = new Limiter(LIMITS.openUrlPerMin, 60_000, now);
     this.webOpens = new Limiter(LIMITS.webOpenPerMin, 60_000, now);
+    this.captures = new Limiter(LIMITS.captureCallsPerMin, 60_000, now);
+    this.grabChain = Promise.resolve();                                 // the pictures are taken one at a time (a picture costs the game's screen a copy)
     this.data = null;                                   // the storage, read at the first use
     this.widgetIds = new Set();                         // the full ids of the widgets this plugin registered
     this.widgetLast = {}; this.widgetPending = {};     // full id -> when its state went out last / a state that waits for its time
@@ -105,6 +108,36 @@ export class PluginBridge {
         this.injectQ.push({ text: args.text.trim().slice(0, LIMITS.injectText), sender, ...(link ? { link } : {}) });
         this.pump();
         return null;
+      }
+      case 'chat.recent': {                                              // the last readable lines (to know what was already seen: a line that was read from the screen can be left out when it is among them)
+        this.need('chat.read');
+        const n = isObj(args) && Number.isInteger(args.count) ? Math.max(1, Math.min(LIMITS.chatRecentMax, args.count)) : 30;
+        return this.hooks.chatRecent(n);
+      }
+      case 'capture.info': {                                             // how big the game's picture is (css pixels do not apply: the pixels of the game window)
+        this.need('capture');
+        const i = await this.hooks.captureInfo();
+        return i ? { width: i.width, height: i.height } : null;
+      }
+      case 'capture.grab': {
+        this.need('capture');
+        if (!isObj(args)) throw new PluginError('args', '{ x, y, w, h } of a part of the game window is needed');
+        const [x, y, w, h] = ['x', 'y', 'w', 'h'].map(k => args[k]);
+        if (![x, y, w, h].every(Number.isInteger)) throw new PluginError('args', 'x, y, w, h: whole numbers (pixels of the game window, from its top left)');
+        if (x < 0 || y < 0 || w < LIMITS.captureMinSide || h < LIMITS.captureMinSide) throw new PluginError('args', `x, y are not below 0, w and h are at least ${LIMITS.captureMinSide}`);
+        if (w * h > LIMITS.captureMaxArea) throw new PluginError('limit', `the part is too big: at most ${LIMITS.captureMaxArea} pixels (a chat window, not the screen)`);
+        const scale = args.scale === undefined ? 1 : args.scale;
+        if (!Number.isInteger(scale) || scale < 1 || scale > LIMITS.captureMaxScale) throw new PluginError('args', `scale: 1 to ${LIMITS.captureMaxScale}`);
+        if (w * h * scale * scale > LIMITS.captureMaxOut) throw new PluginError('limit', `the picture would be too big (${LIMITS.captureMaxOut} pixels)`);
+        const format = args.format === undefined ? 'png' : args.format;
+        if (format !== 'png' && format !== 'jpeg') throw new PluginError('args', 'format: "png" or "jpeg"');
+        if (!this.captures.take()) throw new PluginError('limit', `at most ${LIMITS.captureCallsPerMin} pictures a minute`);
+        const run = this.grabChain.then(async () => {
+          try { return await this.hooks.captureGrab({ x, y, w, h, scale, format }); }
+          catch (e) { throw new PluginError('failed', String((e && e.message) || e).slice(0, 200)); }
+        });
+        this.grabChain = run.catch(() => null);
+        return run;
       }
       case 'storage.get': { this.need('storage'); const d = await this.store(); this.key(args.key); return d[args.key] === undefined ? null : structuredClone(d[args.key]); }
       case 'storage.keys': { this.need('storage'); return Object.keys(await this.store()); }

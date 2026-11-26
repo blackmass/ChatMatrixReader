@@ -133,13 +133,15 @@ export function buildRow(row, ctx) {
     const KEYLIST = ['Enter', 'Space', 'Tab', 'Backspace', 'Insert', 'Delete', 'Home', 'End', 'PageUp', 'PageDown', 'Left', 'Up', 'Right', 'Down', '`',
       ...Array.from({ length: 12 }, (_, i) => 'F' + (i + 1)), ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'];
     input = el('select', 'hotkeykey');
+    if (row.blank) { const o = el('option', '', row.blank); o.value = ''; input.append(o); }          // (row.blank: the text of "no hotkey": the key is empty then)
     for (const k of KEYLIST) { const o = el('option', '', k); o.value = k; input.append(o); }
     ctl.append(input);
     const parts = () => ({ mods: boxes.filter(b => b.checked).map(b => b.value), key: input.value });
-    read = () => { const { mods, key } = parts(); return [...mods, key].join('+'); };
-    write = v => { const have = String(v || '').split('+'); for (const b of boxes) b.checked = have.includes(b.value); input.value = have[have.length - 1] in Object.fromEntries(KEYLIST.map(k => [k, 1])) ? have[have.length - 1] : 'Enter'; };
+    read = () => { const { mods, key } = parts(); return key === '' ? '' : [...mods, key].join('+'); };
+    write = v => { const have = String(v || '').split('+'); for (const b of boxes) b.checked = have.includes(b.value); input.value = have[have.length - 1] in Object.fromEntries(KEYLIST.map(k => [k, 1])) ? have[have.length - 1] : (row.blank ? '' : 'Enter'); };
     const change = () => {
       const { mods, key } = parts();
+      if (key === '') { for (const b of boxes) b.checked = false; commit(''); return; }          // (no hotkey)
       if (!mods.length && !/^F\d+$/.test(key) && !['Insert', 'Delete', 'Home', 'End', 'PageUp', 'PageDown'].includes(key)) {
         err.textContent = '글자·숫자·Enter 같은 키는 Ctrl, Alt, Shift 중 하나와 함께 써야 합니다 (그냥 누르면 채팅이 막힙니다)'; root.classList.add('bad'); return;
       }

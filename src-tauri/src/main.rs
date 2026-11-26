@@ -18,6 +18,9 @@ mod capturelib;
 mod wgc;
 mod ext;
 mod extlib;
+mod ocr_win;
+#[cfg(target_os = "macos")]
+mod ocr_mac;
 mod files;
 mod placement;
 mod pluginlib;
@@ -353,6 +356,8 @@ fn make_window(app: &AppHandle, label: &str, page: &str, kind: &str) -> tauri::R
         "native" => b.title("ChatMatrix").visible(false).transparent(true).decorations(false).shadow(true).inner_size(520.0, 420.0).min_inner_size(240.0, 160.0),
         #[cfg(target_os = "macos")]
         "native" => b.title("ChatMatrix").visible(false).title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true).inner_size(520.0, 420.0).min_inner_size(240.0, 160.0),
+        // the region picker (OCR): a transparent window over one monitor, the user drags a rectangle on it (pick.js); it is put on its monitor by pick_region_open
+        "pick" => b.title("CMR Pick").visible(false).transparent(true).decorations(false).shadow(false).always_on_top(true).skip_taskbar(true).resizable(false).inner_size(100.0, 100.0),
         "legacy" => b.title("ChatMatrixReader").inner_size(600.0, 560.0).min_inner_size(480.0, 420.0).center().always_on_top(true),
         "options" => b.title("ChatMatrix 옵션").visible(false).inner_size(940.0, 680.0).min_inner_size(720.0, 480.0).center(),
         // the control window is the program's brain, not something to look at: it is never shown. An empty file "show_control" next to app/
@@ -469,6 +474,58 @@ fn capture_game_info() -> Value {
     { json!({ "switch": false, "border": "" }) }
 }
 
+/// Windows OCR: the letters of a small picture (BGRA bytes in base64, made ready by the web page), docs/HANDOFF.md 4-0j. `lang`: a language tag ("ko", "en-US"), empty = the languages of the user.
+#[tauri::command(async)]
+fn ocr_windows(bgra: String, width: u32, height: u32, lang: String) -> Result<String, String> {
+    #[cfg(windows)]
+    { let bytes = ocr_win::decode_base64(&bgra)?; ocr_win::recognize(&bytes, width, height, &lang) }
+    #[cfg(not(windows))]
+    { let _ = (bgra, width, height, lang); Err("Windows OCR is for Windows only".into()) }
+}
+
+/// macOS Vision OCR: the letters of a picture (a PNG in base64, made ready by the web page), docs/HANDOFF.md 4-0al. `lang`: the languages ("ko, en-US"), empty = Korean and English.
+#[tauri::command(async)]
+fn ocr_vision(image: String, lang: String) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    { let data = ocr_mac::decode_base64(&image)?; ocr_mac::recognize(&data, &lang) }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = (image, lang); Err("macOS Vision is for macOS only".into()) }
+}
+
+/// macOS Vision: the languages it can read now: { available, languages } (or { available: false, error }).
+#[tauri::command(async)]
+fn ocr_vision_info() -> Value {
+    #[cfg(target_os = "macos")]
+    { match ocr_mac::languages() { Ok(languages) => json!({ "available": !languages.is_empty(), "languages": languages }), Err(e) => json!({ "available": false, "error": e }) } }
+    #[cfg(not(target_os = "macos"))]
+    { json!({ "available": false, "error": "macOS Vision is for macOS only" }) }
+}
+
+/// Windows OCR: make the engine ready now (the first reading then does not wait for it); `lang` as in `ocr_windows`.
+#[tauri::command(async)]
+fn ocr_windows_warm(lang: String) -> Result<(), String> {
+    #[cfg(windows)]
+    { ocr_win::warm(&lang) }
+    #[cfg(not(windows))]
+    { let _ = lang; Err("Windows OCR is for Windows only".into()) }
+}
+
+/// Windows OCR: let the engine go (its memory is given back).
+#[tauri::command(async)]
+fn ocr_windows_release() {
+    #[cfg(windows)]
+    ocr_win::release();
+}
+
+/// The languages Windows OCR can read now: { available, languages, current } (or { available: false, error }).
+#[tauri::command(async)]
+fn ocr_windows_info() -> Value {
+    #[cfg(windows)]
+    { match ocr_win::languages() { Ok((languages, current)) => json!({ "available": !languages.is_empty(), "languages": languages, "current": current }), Err(e) => json!({ "available": false, "error": e }) } }
+    #[cfg(not(windows))]
+    { json!({ "available": false, "error": "Windows OCR is for Windows only" }) }
+}
+
 /// Ends the capture of the game window (the option is off).
 #[tauri::command(async)]
 fn capture_game_stop() {
@@ -558,6 +615,24 @@ fn set_window_rect(window: WebviewWindow, x: Option<i32>, y: Option<i32>, w: u32
     };
     window.set_size(tauri::PhysicalSize::new(w.saturating_sub(dx).max(120), h.saturating_sub(dy).max(60))).map_err(e)?;
     if let (Some(x), Some(y)) = (x, y) { window.set_position(tauri::PhysicalPosition::new(x, y)).map_err(e)?; }          // (once more: a size that changed the frame may have moved the corner)
+    Ok(())
+}
+
+/// The region picker (OCR assist): a transparent window over the whole monitor that has the point (x, y) in pixels of the screen (none: the monitor of the mouse). The page (pick.html)
+/// lets the user drag a rectangle and tells the answer by the event "pick-result" ({ x, y, w, h } in pixels of the screen, or { cancel: true }); it closes itself.
+#[tauri::command]
+async fn pick_region_open(app: AppHandle, x: Option<i32>, y: Option<i32>) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("pick") { let _ = w.close(); }
+    let anchor = app.get_webview_window("control").or_else(|| app.get_webview_window("options")).ok_or("no window to ask the monitor")?;
+    let (px, py) = match (x, y) { (Some(x), Some(y)) => (x as f64, y as f64), _ => app.cursor_position().map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0)) };
+    let m = anchor.monitor_from_point(px, py).ok().flatten().or_else(|| anchor.primary_monitor().ok().flatten()).ok_or("no monitor")?;
+    let (pos, size, scale) = (*m.position(), *m.size(), m.scale_factor());
+    let page = format!("pick.html?x={}&y={}&s={}", pos.x, pos.y, scale);
+    let w = make_window(&app, "pick", &page, "pick").map_err(|e| e.to_string())?;
+    w.set_position(tauri::PhysicalPosition::new(pos.x, pos.y)).map_err(|e| e.to_string())?;
+    w.set_size(tauri::PhysicalSize::new(size.width, size.height)).map_err(|e| e.to_string())?;
+    w.show().map_err(|e| e.to_string())?;
+    let _ = w.set_focus();
     Ok(())
 }
 
@@ -1354,6 +1429,7 @@ fn main() {
             plugin_open_url,
             process_stats,
             center::center_rects,
+            center::set_snip_hide,
             center::center_wheel,
             center::center_layout,
             center::center_ready,
@@ -1383,9 +1459,16 @@ fn main() {
             capture,
             capture_game,
             capture_game_stop,
+            ocr_windows,
+            ocr_vision,
+            ocr_vision_info,
+            ocr_windows_info,
+            ocr_windows_warm,
+            ocr_windows_release,
             capture_game_info,
             capture_compare,
             open_options,
+            pick_region_open,
             native_open,
             native_close,
             native_origin,

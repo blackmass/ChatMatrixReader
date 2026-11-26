@@ -37,10 +37,12 @@ export class CaptureWorker {
   }
 
   stop() { this.stopped = true; }
+  pause(on) { on = !!on; if (on === !!this.paused) return; this.paused = on; if (!on) this.wantResearch = true; }          // (it looks again for the matrix when it goes on)
   research() { this.wantResearch = true; }                // forget the matrix position and search again
 
   async run() {
     while (!this.stopped) {
+      if (this.paused) { await this.io.sleep(0.5); continue; }          // (the OCR reads all the time: the screen is not looked at for the matrix, from the moment it is told to the moment it is told not to)
       let wait;
       try { wait = await this.step(); }
       catch (e) { log.error('캡처 오류: ' + (e?.stack || e)); this.out.status({ kind: 'error', text: tr('캡처 오류: {e}', { e: String(e?.message || e) }) }); wait = 1; }

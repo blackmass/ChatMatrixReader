@@ -165,14 +165,21 @@ addEventListener('keydown', ev => { if (ev.key === 'Escape') hideMenu(); });
 addEventListener('wheel', ev => { if (!menuEl.contains(ev.target)) hideMenu(); }, { passive: true });          // (a wheel over the menu scrolls the menu: it is as long as the window allows, see #ctx)
 
 const tipEl = document.createElement('div'); tipEl.className = 'cv-tip'; tipEl.dataset.notr = ''; tipEl.style.display = 'none'; tipEl.style.zIndex = '2147482000'; document.body.append(tipEl);
-function drawTip(p) {
+function drawTip(p) { drawTipNow(p); report(); }          // (a tooltip that is drawn or gone is something the center has to draw or not: the exe is told, see report)
+function drawTipNow(p) {
   const d = dpr();
   if (p.hide) { tipEl.style.display = 'none'; return; }
   tipEl.className = p.html !== undefined ? 'cv-tip' : 'w-tip';
   if (p.html !== undefined) tipEl.innerHTML = p.html; else tipEl.textContent = p.text;
   tipEl.style.display = 'block';
   const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
-  if (p.html !== undefined) {
+  if (p.beside) {                                                    // next to the tooltip of the game ([x, y, w, h] in screen pixels): on the side that has the room, the top at the top of it
+    const [l, t, rw, rh] = [(p.beside[0] - ox) / d, (p.beside[1] - oy) / d, p.beside[2] / d, p.beside[3] / d];
+    const gx = (p.dx ?? 6 * d) / d, gy = (p.dy ?? 0) / d;
+    const right = l + rw + gx, left = l - w - gx;
+    const x = right + w <= innerWidth - 2 ? right : (left >= 2 ? left : Math.max(2, Math.min(innerWidth - w - 2, right)));
+    tipEl.style.left = x + 'px'; tipEl.style.top = Math.max(2, Math.min(innerHeight - h - 2, t + gy)) + 'px';
+  } else if (p.html !== undefined) {
     const x = (p.x - ox) / d, y = (p.y - oy) / d;
     tipEl.style.left = Math.max(0, Math.min(innerWidth - w, x + 12)) + 'px'; tipEl.style.top = Math.max(0, Math.min(innerHeight - h, y + 16)) + 'px';
   } else {
@@ -182,6 +189,11 @@ function drawTip(p) {
   }
 }
 const tip = p => { drawTip(p); return true; };
+// the translation of a tooltip of the game (tip_host.js): drawn by the center that stays above the game (mode 2), next to the tooltip; it never takes the mouse (.cv-tip)
+if (!nativeId && mode === 2) {
+  await listen('tip-show', e => drawTip({ html: e.payload.html, beside: e.payload.rect, dx: e.payload.dx, dy: e.payload.dy }));
+  await listen('tip-hide', () => drawTip({ hide: true }));
+}
 
 // macOS: the turns of the wheel the exe took arrive one by one as they happen
 await listen('wheel-turn', e => {
@@ -192,6 +204,10 @@ const webByWheel = id => [...webs.values()].find(w => w.wheelId === Number(id));
 let lastOs = null;                             // the last state of the system (for the diagnosis)
 let gameFound = true;                          // no game = the windows stay in view: nothing to click through to
 await listen('game-state', e => { gameFound = !!e.payload.found; });
+// While the manual capture chooses a part of the screen (manual_host.js) the picker must have the whole screen and the whole mouse: the panes are not drawn and take no mouse (the windows of a center
+// are over the picker and took its clicks). The state is told by "pick-active" { on }.
+let picking = false;
+await listen('pick-active', e => { picking = !!(e.payload && e.payload.on); document.body.classList.toggle('picking', picking); lastKey = ''; report(); });
 emit('game-hello', {});
 let lastKey = '', copyPrev = false, webLmb = false;
 // runs all the time: the mouse and the keys against the windows (pane.tick), and Ctrl+C (the windows never take the keyboard: the game keeps it)
@@ -248,16 +264,17 @@ function clipWebs() {
 function report() {
   if (nativeId) return;                                              // (no center: the system has the window and the mouse)
   clipWebs();
-  const list = [...panes.values()].map(p => ({ ...p.box(), hit: p.interactive, blur: p.blurLevel() })).concat([...webs.values()].flatMap(p => p.boxes()));          // (a window that is click-through takes no mouse: it goes through; the place is kept for the send box)
-  const wheel = [...panes.values()].filter(p => p.zone).map(p => p.box()).concat([...webs.values()].filter(p => p.zone).map(p => p.wheelBox()));                    // (the wheel over these goes to the window, not to the game)
-  if (!menuEl.hidden) list.push({ id: 'menu', x: 0, y: 0, w: innerWidth * center.dpr(), h: innerHeight * center.dpr(), bar: 0 });          // (while the menu is open, the center takes the whole mouse: a click anywhere else closes it)
-  const key = JSON.stringify([list, wheel]);
+  const list = picking ? [] : [...panes.values()].map(p => ({ ...p.box(), hit: p.interactive, blur: p.blurLevel() })).concat([...webs.values()].flatMap(p => p.boxes()));          // (a window that is click-through takes no mouse: it goes through; the place is kept for the send box)
+  const wheel = picking ? [] : [...panes.values()].filter(p => p.zone).map(p => p.box()).concat([...webs.values()].filter(p => p.zone).map(p => p.wheelBox()));                    // (the wheel over these goes to the window, not to the game)
+  if (!menuEl.hidden && !picking) list.push({ id: 'menu', x: 0, y: 0, w: innerWidth * center.dpr(), h: innerHeight * center.dpr(), bar: 0 });          // (while the menu is open, the center takes the whole mouse: a click anywhere else closes it)
+  const drawn = !picking && (list.length > 0 || tipEl.style.display !== 'none');          // (something on this page: a pane, a menu (it is in the list), a tooltip: else the exe cloaks the window, see center.rs sync_cloak)
+  const key = JSON.stringify([list, wheel, drawn]);
   if (key === lastKey) return;
   lastKey = key;
   if (wheel.length && !hadWheel) wheelSeq = -1;                              // (the turns from before are not wanted: the loop takes the newest number)
   hadWheel = wheel.length > 0;
   if (wheel.length && wheelSeq < 0 && wheelWake) wheelWake();
-  invoke('center_rects', { label, panes: list, wheel }).then(ok => {
+  invoke('center_rects', { label, panes: list, wheel, drawn }).then(ok => {
     if (ok === false) { lastKey = ''; if (!wheelWarned) { wheelWarned = true; emit('hub-log', { level: 'warn', msg: `${label}: the wheel over a click-through window is not available (the permission is missing?)` }); } }
   }).catch(e => { lastKey = ''; if (!wheelWarned) { wheelWarned = true; emit('hub-log', { level: 'warn', msg: `${label}: ${e}` }); } });
 }

@@ -41,7 +41,13 @@ export class SendBox {
     this.comboCache = [null, null];
     this.stepAt = 0; this.step = null; this.paste = false; this.tries = 0; this.t0 = 0;
     this.failed = false; this.inTick = false; this.nudged = false;
+    this.hold = false;                   // the addon's option "translate in the game's chat box" is on: its Shift+Enter is not ours (see setHold)
   }
+
+  // The addon says (command "@IN state") that the game's own chat box translates with Shift+Enter. This hotkey then waits, for this run only (nothing is saved),
+  // but only when it is the same key: another key does not meet the addon's. It is let go by "state,0", by the next start, or by switching "use send" off and on.
+  setHold(on) { this.hold = !!on; }
+  clashes() { const [mods, vk] = this.combo(); return vk === 0x0D && mods.size === 1 && mods.has('Shift'); }
 
   combo() {
     const text = this.getCfg().send_hotkey || hotkeys.DEFAULT;
@@ -71,7 +77,7 @@ export class SendBox {
   async tickInner() {
     const cfg = this.getCfg();
     if (!(cfg.send_enabled ?? true)) {
-      this.prev = true;
+      this.prev = true; this.hold = false;
       if (this.state === OPEN || this.state === BUSY) await this.close(false);
       return;
     }
@@ -80,6 +86,7 @@ export class SendBox {
     else {
       const g = await this.io.game();
       if (!g || !(await this.io.gameIsFront(g))) { this.prev = true; return; }       // the key must be let go once before it can trigger
+      if (this.hold && this.clashes()) { this.prev = true; return; }                 // (the game's chat box takes Shift+Enter: the key must be let go once after the hold ends)
       const down = await this.io.comboDown(this.combo());
       if (down && !this.prev) { this.prev = true; await this.open(g); }
       else if (!down) this.prev = false;

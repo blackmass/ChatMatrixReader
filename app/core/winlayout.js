@@ -49,7 +49,7 @@ export const labelOf = wid => (wid === 1 ? MAIN_LABEL : `win${wid}`);
 export const widOf = label => (label === MAIN_LABEL ? 1 : (/^win(\d+)$/.exec(label) ? parseInt(RegExp.$1, 10) : 0));
 
 // should the window of this conf be open? What the user does with a window (the X, opening it by hand) is only for now and never changes the settings:
-// `manual`: ids the user opened by hand; `voiceOn`: the voice recognition is on (starting or running); `dismissed`: ids the user closed with the X while the
+// `manual`: ids the user opened by hand; `voiceOn`: the voice recognition is on (starting or running); `ocrOn`: the OCR assist is on; `dismissed`: ids the user closed with the X while the
 // setting wants them open ("프로그램을 켤 때 항상" until the program is started again, "음성 인식을 켤 때만" until the voice recognition is turned off or on)
-export const wantedOpen = (conf, manual, voiceOn = false, dismissed = new Set()) =>
-  manual.has(conf.id) || ((conf.open_mode === 'always' || (conf.open_mode === 'voice' && voiceOn)) && !dismissed.has(conf.id));
+export const wantedOpen = (conf, manual, voiceOn = false, dismissed = new Set(), ocrOn = false) =>
+  manual.has(conf.id) || ((conf.open_mode === 'always' || (conf.open_mode === 'voice' && voiceOn) || (conf.open_mode === 'ocr' && ocrOn)) && !dismissed.has(conf.id));
