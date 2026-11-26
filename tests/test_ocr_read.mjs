@@ -84,11 +84,13 @@ eq(['[17:08:44] [받은귓말] [Kal Vados]: hi', '17:08:44 [받은귓말] hi', '
   const calls = [];
   const fake = answer => async (cmd, args) => { calls.push([cmd, args]); if (cmd === 'ocr_windows_info') return { languages: ['ko', 'en-US'], current: 'ko' }; if (answer instanceof Error) throw answer; return typeof answer === 'function' ? answer(args) : answer; };
   const pic = { px: new Uint8Array(40 * 16 * 4).fill(30), width: 40, height: 16 };
-  const w = new r.WindowsReader({ invoke: fake('  [03:12] 살타리온의 외침:\n 불타라!  '), getCfg: () => cfg({ ocr_win_lang: 'ko' }) });
+  const w = new r.WindowsReader({ invoke: fake('  [03:12] 살타리온의 외침:\n 불타라!  '), getCfg: () => cfg({ ocr_win_lang: 'ko', ocr_x2: true }) });
   const text = await w.read(pic, { w: 426, rows: 1, lineH: 14 });
   check(text === '[03:12] 살타리온의 외침: 불타라!', 'the lines are joined and the spaces tidied: ' + text);
   const q = calls.find(c => c[0] === 'ocr_windows')[1];
   check(q.width === 104 && q.height === 56 && q.lang === 'ko' && Buffer.from(q.bgra, 'base64').length === 104 * 56 * 4, 'the call has the size of the made picture, its pixels as base64 and the language of the settings');
+  { const c1 = []; const one = new r.WindowsReader({ invoke: async (cmd, args) => { c1.push([cmd, args]); return cmd === 'ocr_windows_info' ? { languages: [], current: '' } : 'x'; }, getCfg: () => cfg({ ocr_win_lang: 'ko' }) }); await one.read(pic, { w: 40, rows: 1, lineH: 14 });
+    const q1 = c1.find(c => c[0] === 'ocr_windows')[1]; check(q1.width === 64 && q1.height === 40, 'with the option 2x off (the default) the picture is made as it is, with its margin: ' + q1.width + 'x' + q1.height); }
   check(calls.filter(c => c[0] === 'ocr_windows_info').length === 1, 'the languages are asked once');
   await w.read(pic, { w: 40, rows: 1, lineH: 14 });
   check(calls.filter(c => c[0] === 'ocr_windows_info').length === 1, '... and not again');

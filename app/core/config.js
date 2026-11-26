@@ -164,6 +164,7 @@ export const DEFAULTS = {
     ocr_when: 'ondemand',                  // ondemand | resident (see core/ocr.js)
     ocr_read: isMac ? 'vision' : 'windows', // who reads the letters: ai | windows | vision. The system's own engine by default (Windows OCR; on a Mac macOS Vision, which is not ready yet: see core/ocr.js)
     ocr_win_lang: '',                      // the language Windows OCR reads (a language tag: ko, en-US); empty = the languages of the Windows user (docs/HANDOFF.md 4-0j)
+    ocr_x2: false,                  // Windows OCR and macOS Vision: the picture is made 2 times as large before it is read (it can help with small letters). Off by default; not the AI reader (it gets its own picture)
     ocr_ai_url: '', ocr_ai_model: '', ocr_ai_key: '',   // the AI server that reads: empty = the one of the translation tab
     ocr_ai_parallel: 1,                    // how many readings go to the AI server at the same time (1..4); 1 unless the server answers side by side
     ocr_region: null,                      // the region the user picked to read: { x, y, w, h, gw, gh } in pixels of the game window (gw, gh: its size then) | null
@@ -222,6 +223,7 @@ export function normalize(saved) {
   if (!['ondemand', 'resident'].includes(cfg.ocr_when)) cfg.ocr_when = 'ondemand';
   if (!['ai', 'windows', 'vision'].includes(cfg.ocr_read)) cfg.ocr_read = isMac ? 'vision' : 'windows';
   delete cfg.ocr_split;                                                   // (an option that was taken out: the lines are always found by the program from the picture)
+  cfg.ocr_x2 = cfg.ocr_x2 === true;
   cfg.ocr_win_lang = typeof cfg.ocr_win_lang === 'string' ? cfg.ocr_win_lang.trim().slice(0, 20) : '';
   cfg.ocr_ai_parallel = Math.min(4, Math.max(1, Math.round(Number(cfg.ocr_ai_parallel) || 1)));
   cfg.ocr_region = cleanRegion(cfg.ocr_region);

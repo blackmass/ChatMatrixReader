@@ -26,12 +26,13 @@ export function startOcr({ settings, capture, pipeline, publish, http, listen, e
   // macOS Vision (the exe reads: src-tauri/src/ocr_mac.rs): the picture goes as a PNG, made here (the page has a canvas)
   const vis = visReader || (invoke ? new VisionReader({ invoke, getCfg: () => settings.cfg() }) : null);
   const useWin = () => reader(settings.cfg()) === 'windows' && !!win;
+  const visScale = () => settings.cfg().ocr_x2 === true ? 2 : 1;       // (Vision reads the picture as it is unless the user asks for 2x; Windows OCR does the same in WindowsReader)
   const useVis = () => reader(settings.cfg()) === 'vision' && !!vis;
   const readable = cfg => reader(cfg) === 'ai' || (reader(cfg) === 'windows' && !!win) || (reader(cfg) === 'vision' && !!vis);           // (a way that can read now)
   // a picture of BGRA pixels (+ its geometry) -> { text, encMs, last } with the reader the options say (last: the time of the reading)
   const readFull = async (pic, geo) => {
     if (useWin()) { const text = await win.read(pic, geo); return { text, encMs: 0, last: win.last }; }
-    if (useVis()) { const v0 = performance.now(), png = encode(pic, { scale: SCALE, format: 'png' }), encMs = performance.now() - v0; const text = await vis.read(png, geo); return { text, encMs, last: vis.last }; }
+    if (useVis()) { const v0 = performance.now(), png = encode(pic, { scale: visScale(), format: 'png' }), encMs = performance.now() - v0; const text = await vis.read(png, geo); return { text, encMs, last: vis.last }; }
     const e0 = performance.now();
     const image = encode(pic, { scale: SCALE, format: 'png' });
     const encMs = performance.now() - e0, timing = {};
@@ -56,7 +57,7 @@ export function startOcr({ settings, capture, pipeline, publish, http, listen, e
   const readFree = async pic => {
     manualUntil = now() + MANUAL_HOLD;
     if (useWin()) return win.read(pic, {});
-    if (useVis()) return vis.read(encode(pic, { scale: SCALE, format: 'png' }), {});
+    if (useVis()) return vis.read(encode(pic, { scale: visScale(), format: 'png' }), {});
     return ai.read(encode(pic, { scale: SCALE, format: 'png' }), {}, null, { prompt: settings.cfg().ocr_cap_prompt, free: true });
   };
 

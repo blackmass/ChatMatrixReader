@@ -187,7 +187,7 @@ export class WindowsReader {
   // pic: { px, width, height } (BGRA), geometry: { w, rows, lineH } -> the text, '' when nothing could be read. Rejects with the reason when Windows cannot read (no language pack ...).
   async read(pic, geometry = {}) {
     const cfg = this.getCfg(), t0 = performance.now();
-    const p = prepareForOcr(pic), bgra = toBase64(p.bgra);
+    const p = prepareForOcr(pic, { scale: cfg.ocr_x2 === true ? 2 : 1 }), bgra = toBase64(p.bgra);
     const t1 = performance.now();
     if (!this.asked) {                                                   // (once: which languages Windows can read, for the log: a missing language pack is the usual reason for nothing read)
       this.asked = true;

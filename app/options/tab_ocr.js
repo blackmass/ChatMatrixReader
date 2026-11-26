@@ -51,6 +51,8 @@ export default {
         text: 'macOS Vision은 한국어를 읽으려면 macOS 13 이상이어야 합니다. 더 낮은 버전에서는 영어 같은 일부 언어만 읽습니다. 한국어가 읽히지 않으면 "AI 서버"를 고르세요. 로그에 읽을 수 있는 언어 목록이 남습니다.' },
       { key: 'ocr_win_lang', type: 'text', label: 'macOS Vision 언어', show: cfg => reader(cfg) === 'vision', placeholder: '비워 두면 한국어와 영어 (예: ko, en-US, ja)', keywords: 'macos vision 비전 맥 ocr 언어 ko en 한국어 영어',
         note: '읽을 언어를 쉼표로 적습니다 (ko, en-US, ja 처럼). 맥이 읽을 수 있는 언어만 쓰입니다. 기호나 이모지(⚠, ▲ 등)는 읽지 못할 수 있습니다.' },
+      { key: 'ocr_x2', type: 'check', label: '읽을 이미지 2배 확대', show: cfg => reader(cfg) === 'vision' || reader(cfg) === 'windows', keywords: 'windows macos vision 비전 맥 확대 2배 작은 글자 인식',
+        note: '읽기 전에 그림을 2배로 키워서 읽습니다 (Windows OCR, macOS Vision). 글자가 아주 작거나 흐릿할 때 더 잘 읽힐 수 있지만, 그림이 커지는 만큼 읽는 시간이 조금 늘고 오히려 더 나빠지는 경우도 있습니다. 잘 읽힌다면 끈 채로 두세요 (기본: 꺼짐).' },
       { type: 'notice', label: '', show: cfg => !!readerWhy(reader(cfg)), text: '고른 엔진은 아직 만들고 있어서 읽지 못합니다. 지금은 "AI 서버"를 고르세요.' },
     ] },
     { title: 'AI 서버', note: '비워 두면 번역 탭의 AI 서버(주소, 모델, 키)를 그대로 씁니다. 그림을 볼 수 있는 모델이어야 합니다. 단어장도 번역 탭의 것을 씁니다.', rows: [
