@@ -6,6 +6,11 @@
 //   cmr.log('text')                                       a line in the log of the plugin (plugin tab)
 //   await cmr.chat.inject({ text, sender, link })         a line in the chat windows            (permission chat.inject); link: { url, text?, target? } makes `text` (or the part of it that is `link.text`) a link:
 //                                                         a click opens `url` in the plugin's web window (target 'web', needs permission web) or in the browser (target 'browser', needs openUrl)
+//   cmr.chat.onLine(fn) / onRestricted(fn) / onRestrictionOver(fn)     (permission chat.read) fn({ channel, sender, text }) for every line the program reads; fn({ channel }) for every line that the game did not let it read
+//        (the chat restriction: one call per hidden line, `channel` is the channel code of that line); fn() when the restriction is over.  `await cmr.chat.recent(count)` the last readable lines (at most 100)
+//   await cmr.capture.info()                              (permission capture) { width, height } of the game window, or null (not found, minimized)
+//   await cmr.capture.grab({ x, y, w, h, scale?, format? })   a part of the game window (pixels from its top left; at most 2,500,000 pixels) as a picture: { width, height, mime, base64 };
+//        scale 1..3 makes it larger, format 'png' (default) or 'jpeg'; at most 120 pictures a minute, one at a time. A window that stands over the game is not in the picture when the program reads the game window.
 //   await cmr.storage.get(key) / set(key, value) / remove(key) / keys()    the plugin's own data (permission storage)
 //   await cmr.net.fetch({ url, method, headers, body })   -> { status, body, url, type }        (permission net: https, the hosts the user allowed)
 //   await cmr.widgets.register({ id, label, kind, styles, settings, hint }) / update(id, state) / unregister(id)     a small part on the chat windows (permission widgets)
@@ -26,6 +31,7 @@
   const pending = new Map();
   const listeners = [];
   const hostListeners = [];
+  const chatHandlers = { line: [], restricted: [], over: [] };     // fn(e) for the chat events (permission chat.read)
   const widgetHandlers = { click: [], menu: [] };                 // fn(e) for every widget
   const perWidget = new Map();                                    // id -> { click: [fn], menu: [fn] }
   const widgetEvent = e => {
@@ -41,6 +47,7 @@
     if (m.event === 'ping') { parent.postMessage({ cmr: 1, event: 'pong' }, '*'); return; }          // ("are you there?": a page that is stuck in a loop cannot answer; the program starts it again)
     if (m.event === 'hosts') { for (const f of hostListeners) { try { f(m.value); } catch (err) { console.error(err); } } return; }
     if (m.event === 'widget') { widgetEvent(m.value); return; }
+    if (m.event === 'chat') { const v = m.value || {}, list = chatHandlers[v.kind === 'over' ? 'over' : v.kind === 'restricted' ? 'restricted' : 'line']; const { kind, ...rest } = v; for (const f of list) { try { f(rest); } catch (err) { console.error(err); } } return; }
     if (m.event === 'options') { for (const f of listeners) { try { f(m.value); } catch (err) { console.error(err); } } return; }
     const p = pending.get(m.id);
     if (!p) return;
@@ -63,7 +70,8 @@
     openUrl: url => call('openUrl', { url }),
     web: { open: (url, o = {}) => call('web.open', { url, title: o.title, mobile: o.mobile }), close: () => call('web.close', {}) },
     log: text => call('log', { text: String(text) }),
-    chat: { inject: a => call('chat.inject', a) },
+    chat: { inject: a => call('chat.inject', a), recent: count => call('chat.recent', { count }), onLine: fn => { chatHandlers.line.push(fn); }, onRestricted: fn => { chatHandlers.restricted.push(fn); }, onRestrictionOver: fn => { chatHandlers.over.push(fn); } },
+    capture: { info: () => call('capture.info', {}), grab: a => call('capture.grab', a) },
     storage: { get: key => call('storage.get', { key }), set: (key, value) => call('storage.set', { key, value }), remove: key => call('storage.remove', { key }), keys: () => call('storage.keys') },
     net: { fetch: a => call('net.fetch', a), requestHost: host => call('net.requestHost', { host }), hosts: () => call('net.hosts'), onHosts: fn => { hostListeners.push(fn); } },
     windows: { open: id => call('windows.open', { id }), close: id => call('windows.close', { id }) },

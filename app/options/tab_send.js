@@ -8,7 +8,7 @@ const different = cfg => cfg.prompt_update_notice && (cfg.send_prompt || '').tri
 export default {
   id: 'send', title: '보내기', subtitle: '내가 쓴 말을 번역해서 보내기',
   cards: [
-    { title: '보내기', note: '단축키를 누르면 입력칸이 열립니다. 쓴 말을 번역해서 클립보드에 넣고, 채팅창에 붙여 넣으면 됩니다. 입력칸 앞의 작은 칸에는 /w 이름 같은 말 상대를 적을 수 있습니다.', rows: [
+    { title: '보내기', note: '단축키를 누르면 입력칸이 열립니다. 쓴 말을 번역해서 클립보드에 넣고, 채팅창에 붙여 넣으면 됩니다. 입력칸 앞의 작은 칸에는 /w 이름 같은 말 상대를 적을 수 있습니다. ※ 애드온의 "와우 입력창으로 번역하기"(게임의 채팅 입력칸에서 Shift+Enter)와는 둘 중 하나만 쓰세요. 그 옵션이 켜져 있으면 단축키가 Shift+Enter일 때 이 실행 동안 단축키가 멈춥니다(설정은 바뀌지 않습니다). 번역 방식과 보내는 언어, 자동 붙여넣기는 두 방식이 같은 설정을 씁니다.', rows: [
       { key: 'send_enabled', type: 'check', label: '보내기 사용', keywords: '번역 입력 채팅' },
       { key: 'send_hotkey', type: 'hotkey', label: '단축키', keywords: '핫키 hotkey shift enter', note: 'Ctrl, Alt, Shift 중 하나 이상과 키를 고릅니다.' },
       { key: 'send_lang', type: 'combo', list: LANGS, label: '보내는 언어', placeholder: 'Português, ar 처럼', keywords: '영어 상대 언어 번역할 언어 목표',

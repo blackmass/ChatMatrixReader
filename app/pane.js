@@ -4,6 +4,7 @@ import { ChatView, lookFrom } from './chatview.js';
 import { WindowFeed } from './core/windowfeed.js';
 import { MAIN } from './core/pipeline.js';
 import * as winconf from './core/winconf.js';
+import * as toolbar from './core/toolbar.js';
 import * as layout from './core/winlayout.js';
 import { nameFor } from './winname.js';
 import { WidgetLayer } from './widgets/render.js';
@@ -27,7 +28,7 @@ export class Pane {
     this.interactive = true; this.outside = true; this.hover = false; this.wasThrough = null;      // (the state of the mouse: see tick)
     this.chats = new Map(); this.active = id;                         // the chats of the pane: its own window and the windows docked to it as tabs
     this.el = document.createElement('div'); this.el.className = 'pane'; this.el.dataset.id = String(id);
-    this.el.innerHTML = '<div class="pbar"><span class="ptabs"></span><span class="pspace"></span><span class="ptools"><button class="presearch" tabindex="-1" title="매트릭스 다시 찾기">⟳</button><button class="pvoice" tabindex="-1" title="음성인식 켜기" data-state="off"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor"/><path class="waves" d="M11.2 5.4a3.6 3.6 0 0 1 0 5.2M13 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button><button class="poptions" tabindex="-1" title="옵션">⚙</button><button class="pclose" tabindex="-1">✕</button></span></div><div class="pbody"><div class="pbg"></div><div class="pwidgets" data-notr></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div><button class="ptobottom" tabindex="-1" title="이전 대화를 보는 중입니다. 누르면 맨 아래(최신 글)로 돌아갑니다">↓ 맨 아래로</button>';
+    this.el.innerHTML = '<div class="pbar"><span class="ptabs"></span><span class="pspace"></span><span class="ptools"><button class="pclose" tabindex="-1">✕</button></span></div><div class="pbody"><div class="pbg"></div><div class="pwidgets" data-notr></div></div><div class="pgrip"></div><div class="pedge e-l"></div><div class="pedge e-r"></div><div class="pedge e-b"></div><div class="pedge e-bl"></div><button class="ptobottom" tabindex="-1" title="이전 대화를 보는 중입니다. 누르면 맨 아래(최신 글)로 돌아갑니다">↓ 맨 아래로</button>';
     this.tabs = this.el.querySelector('.ptabs');
     this.el.classList.toggle('titled', this.fullBar());
     document.body.append(this.el);
@@ -97,15 +98,36 @@ export class Pane {
   // the buttons of the bar (the same jobs as in a window of 3.1.1)
   tools() {
     const q = c => this.el.querySelector(c);
-    q('.presearch').onclick = () => emit('research', {});
-    q('.pvoice').onclick = () => emit('voice-toggle', {});
-    q('.poptions').onclick = () => {
-      try { localStorage.setItem('cmr-options-win', String(this.id)); } catch { /* the options open on the first window */ }
-      invoke('open_options').catch(() => {});
-    };
+    this.toolSig = null; this.renderTools();
     // the main window ends the program, the others only close themselves (the hub keeps them closed: "직접 열 때만")
     q('.pclose').onclick = async () => { this.save(); if (this.id === MAIN) invoke('quit_request').catch(() => {}); else emit('win-closed', { id: this.id }); };
     q('.pbar').addEventListener('mousedown', e => { if (e.target.tagName === 'BUTTON') e.preventDefault(); });
+  }
+  // The function buttons of the bar: what the setting `tools` of the window says (core/toolbar.js; the close button is always there). Made again only when the list changes.
+  toolList() { const cfg = this.center.cfg(); return toolbar.listOf(this.id === MAIN ? cfg.tools : (this.conf() || {}).tools); }
+  renderTools() {
+    const list = this.toolList(), sig = list.join(',');
+    if (sig === this.toolSig) return;
+    this.toolSig = sig;
+    const tools = this.el.querySelector('.ptools'), actions = {
+      research: () => emit('research', {}),
+      voice: () => emit('voice-toggle', {}),
+      options: () => {
+        try { localStorage.setItem('cmr-options-win', String(this.id)); } catch { /* the options open on the first window */ }
+        invoke('open_options').catch(() => {});
+      },
+      capture: () => emit('capture-manual', {}),
+    };
+    for (const old of tools.querySelectorAll('button[data-tool]')) old.remove();
+    const before = tools.querySelector('.pmin, .pmax, .pclose');                 // (the buttons of a window of the system and the close button stay at the right end)
+    for (const id of list) {
+      const def = toolbar.TOOLS[id], b = document.createElement('button');
+      b.className = def.cls; b.tabIndex = -1; b.dataset.tool = id; b.title = def.title(); b.innerHTML = def.html;
+      if (id === 'voice') b.dataset.state = 'off';
+      b.onclick = actions[id];
+      tools.insertBefore(b, before);
+    }
+    if (this.lampNow) this.lamp(this.lampNow.st, this.lampNow.title);              // (the voice button that was made again shows the state the voice is in)
   }
   // A window of the system without the frame of the system (the 3.2.1 test): our bar is its title bar. The system moves it (mouse down on the bar), a double click maximizes it; on Windows the three buttons
   // are ours (the close one is the old ✕); on the mac the round buttons of the system lie over the left end of the bar (the mac has them in its own place; the bar only leaves it empty).
@@ -124,7 +146,7 @@ export class Pane {
       e.preventDefault(); act(e.detail >= 2 ? 'max' : 'drag');
     });
   }
-  lamp(st, title) { const b = this.el.querySelector('.pvoice'); b.dataset.state = st; b.title = title; }
+  lamp(st, title) { this.lampNow = { st, title }; const b = this.el.querySelector('.pvoice'); if (b) { b.dataset.state = st; b.title = title; } }
 
   // the place: the text area is where the window of 3.1.1 was (its saved geometry is the place and the size of the text area); the bar stands above it
   savedGeometry() { return this.id === MAIN ? this.center.cfg().geometry : (this.conf() || {}).geometry; }
@@ -195,6 +217,7 @@ export class Pane {
   style() {
     const c = this.el.classList, through = !!this.opt('click_through', false);
     c.toggle('through', through); c.toggle('locked', !!this.opt('lock_window', false));
+    this.renderTools();                                                                                    // (the setting of the buttons of the bar may have changed)
     for (const k of ['tools', 'tabs', 'frame']) c.toggle('hide-' + k, !!this.opt('hide_' + k, false));      // ("평소에 인터페이스 숨기기": they show while the mouse is in the window)
     const ta = Math.min(1, Math.max(0.05, Number(this.opt('tab_opacity', 1)) || 1));                          // (the tabs and the icon box: how solid; the one under the mouse is a little more)
     this.el.style.setProperty('--tab-alpha', String(ta)); this.el.style.setProperty('--tab-alpha-hover', String(Math.min(1, ta + 0.3)));

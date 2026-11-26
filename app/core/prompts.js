@@ -48,3 +48,20 @@ Glossary (one "term = meaning" per line; when the player means the meaning, writ
 
 {{extra_prompt}}
 `;
+
+// The instructions of the model for the manual capture (a part of the screen that the user picks: a guild text, a party finder entry ...). It only reads the letters; the translation is another step,
+// done the way the translation tab says.
+export const DEFAULT_CAPTURE_PROMPT = `Read all the text in the picture and write it down exactly as it is shown, from the top to the bottom.
+Do not translate, summarize, explain or correct anything. Keep names, numbers and symbols as they are.
+Text that is cut off or not readable: do not guess it, leave it out.
+Output only the text and nothing else.
+`;
+
+// The instructions of the model that reads a picture of the chat (OCR assist). It only writes down what is there; the translation is another step.
+export const DEFAULT_OCR_PROMPT = `You read a picture of a game chat window. The picture holds some lines of chat text.
+Write down the text of every line exactly as it is shown, one chat line per output line, from the top to the bottom.
+Do not translate, summarize, explain or correct anything. Keep names, numbers, symbols and brackets as they are: do not drop the bracketed tags at the beginning of a line (time, channel, name).
+A chat line that is too long goes on in the next row of the picture, which is indented: write it as one line.
+A line that is too small, cut off or not readable: do not guess it, leave it out.
+Output only the text of the lines and nothing else.
+`;

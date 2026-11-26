@@ -174,3 +174,17 @@ for (const [name, k] of [['v2_L8_c32_plain', 1.125], ['v2_L16_c32_plain', 1.5], 
   const big = w.grabs.filter(g => g[2] * g[3] >= W * H).length;
   check(big >= 2 && big <= 4, `nothing: ${big} whole-screen grabs in 70 s (every 30 s)`);
 }
+
+// the matrix reading can be paused: the screen is not looked at while it is paused, and it looks for the matrix again when it goes on
+{
+  const spin = async (w, n) => { let i = 0; const was = w.worker.io.sleep; w.worker.io.sleep = async s => { await was(s); if (++i >= n) w.worker.stop(); }; w.worker.stopped = false; await w.worker.run(); w.worker.io.sleep = was; };
+  const a = world(); a.worker.pause(true);
+  await spin(a, 6);
+  check(a.grabs.length === 0, 'paused: the screen is not grabbed');
+  const b = world(); await spin(b, 3);
+  check(b.grabs.length > 0, 'not paused: the screen is grabbed');
+  a.worker.pause(false);
+  check(a.worker.paused === false && a.worker.wantResearch === true, 'it looks for the matrix again when the pause ends');
+  a.worker.pause(false);
+  check(a.worker.wantResearch === true, 'telling it again changes nothing');
+}

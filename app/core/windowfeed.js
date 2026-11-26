@@ -20,7 +20,13 @@ export class WindowFeed {
       case 'LineAdded': {
         if (!ev.targets.includes(this.wid)) return [];
         const head = headPieces(ev.line, this.conf(), this.getCfg());
-        return this.model.addLine(ev.line, head, ev.pending, !!this.opt('swap_trans', false) && ev.pending, !!this.opt('pending_mark', true));
+        // ("translation above": a line that is waiting for its translation, and also a line that is shown in both names (a link that has an original name: the local name above, the original below), which has no translation to wait for)
+        return this.model.addLine(ev.line, head, ev.pending, !!this.opt('swap_trans', false) && (ev.pending || ev.line.both), !!this.opt('pending_mark', true));
+      }
+      case 'LineUpdated': {                              // (the words of a line that had its place kept: the OCR lines)
+        if (!ev.targets.includes(this.wid)) return [];
+        const head = headPieces(ev.line, this.conf(), this.getCfg());
+        return this.model.updateLine(ev.line, head, ev.pending, !!this.opt('swap_trans', false) && (ev.pending || ev.line.both), !!this.opt('pending_mark', true));
       }
       case 'Translated':
         return ev.targets.includes(this.wid) ? this.model.addTranslation(ev) : [];

@@ -9,7 +9,8 @@
 export const API_VERSION = 1;                         // the version of the plugin interface this program speaks
 export const MAX_OPTIONS = 50;
 export const MAX_WINDOWS = 3;
-export const PERMISSIONS = ['net', 'netAny', 'chat.inject', 'storage', 'widgets', 'windows', 'openUrl', 'web'];
+// capture: pictures of the game window (a part of it, by the plugin's ask); chat.read: the chat lines the program reads and the notices that some lines could not be read (to follow the chat, not to put lines in it: that is chat.inject)
+export const PERMISSIONS = ['net', 'netAny', 'chat.inject', 'chat.read', 'capture', 'storage', 'widgets', 'windows', 'openUrl', 'web'];
 export const MAX_USER_HOSTS = 30;                    // the hosts the user may allow for one plugin (netAny)
 export const MAX_REQUESTS = 10;                      // requests of hosts that wait for the user's answer      // (a timer is not a permission: a plugin has its own setInterval; what costs is limited where it is called)
 export const OPTION_TYPES = ['text', 'number', 'check', 'select'];
@@ -106,7 +107,7 @@ export function parseManifest(text, folder) {
   }
 
   // permissions: only the known ones, in the exact shape
-  const perms = { net: [], netAny: false, 'chat.inject': false, storage: false, widgets: false, windows: false, openUrl: false, web: '' };
+  const perms = { net: [], netAny: false, 'chat.inject': false, 'chat.read': false, capture: false, storage: false, widgets: false, windows: false, openUrl: false, web: '' };
   const p = m.permissions === undefined ? {} : m.permissions;
   if (!isObj(p)) errors.push('permissions: must be an object');
   else {
@@ -120,7 +121,7 @@ export function parseManifest(text, folder) {
     }
     if (p.web !== undefined) { if (p.web === 'host' || p.web === 'domain') perms.web = p.web; else if (p.web !== false) errors.push('permissions.web: "host" (only the hosts the plugin may use) or "domain" (those hosts and all hosts under their domains)'); }
     if (p.openUrl !== undefined) { if (typeof p.openUrl === 'boolean' || p.openUrl === 'any') perms.openUrl = p.openUrl; else errors.push('permissions.openUrl: true (only the sites the plugin may use), "any" (any https address) or false'); }
-    for (const k of ['netAny', 'chat.inject', 'storage', 'widgets', 'windows']) if (p[k] !== undefined) { if (typeof p[k] !== 'boolean') errors.push(`permissions.${k}: true or false`); else perms[k] = p[k]; }
+    for (const k of ['netAny', 'chat.inject', 'chat.read', 'capture', 'storage', 'widgets', 'windows']) if (p[k] !== undefined) { if (typeof p[k] !== 'boolean') errors.push(`permissions.${k}: true or false`); else perms[k] = p[k]; }
   }
   const reasons = {};
   if (m.reasons !== undefined) {
@@ -143,7 +144,7 @@ export const asked = perms => PERMISSIONS.filter(k => (k === 'net' ? perms.net.l
 const webOf = (asked, g) => (asked && (g === 'host' || g === 'domain') ? (asked === 'host' ? 'host' : g) : '');
 
 // granted: what the user allowed, kept in the settings: { net: [host...], 'chat.inject': bool, storage: bool }
-const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net.filter(validHost).slice(0, MAX_USER_HOSTS + 20) : [], netAny: !!(g && g.netAny), 'chat.inject': !!(g && g['chat.inject']), storage: !!(g && g.storage), widgets: !!(g && g.widgets), windows: !!(g && g.windows), openUrl: g && g.openUrl === 'any' ? 'any' : !!(g && g.openUrl), web: g && (g.web === 'host' || g.web === 'domain') ? g.web : '' });
+const grantedOf = g => ({ net: Array.isArray(g && g.net) ? g.net.filter(validHost).slice(0, MAX_USER_HOSTS + 20) : [], netAny: !!(g && g.netAny), 'chat.inject': !!(g && g['chat.inject']), 'chat.read': !!(g && g['chat.read']), capture: !!(g && g.capture), storage: !!(g && g.storage), widgets: !!(g && g.widgets), windows: !!(g && g.windows), openUrl: g && g.openUrl === 'any' ? 'any' : !!(g && g.openUrl), web: g && (g.web === 'host' || g.web === 'domain') ? g.web : '' });
 
 // what is asked for and not yet allowed: [{ perm, host? }]
 export function missing(manifest, granted) {
@@ -151,6 +152,8 @@ export function missing(manifest, granted) {
   for (const h of p.net) if (!g.net.includes(h)) out.push({ perm: 'net', host: h });
   if (p.netAny && !g.netAny) out.push({ perm: 'netAny' });
   if (p['chat.inject'] && !g['chat.inject']) out.push({ perm: 'chat.inject' });
+  if (p['chat.read'] && !g['chat.read']) out.push({ perm: 'chat.read' });
+  if (p.capture && !g.capture) out.push({ perm: 'capture' });
   if (p.storage && !g.storage) out.push({ perm: 'storage' });
   if (p.widgets && !g.widgets) out.push({ perm: 'widgets' });
   if (p.windows && !g.windows) out.push({ perm: 'windows' });
@@ -164,7 +167,7 @@ export function effective(manifest, granted) {
   const g = grantedOf(granted), p = manifest.permissions;
   // netAny: besides the hosts of the manifest, the hosts the user allowed one by one (they are in granted.net)
   const netAny = !!(p.netAny && g.netAny);
-  return { net: netAny ? g.net.slice(0, MAX_USER_HOSTS + p.net.length) : p.net.filter(h => g.net.includes(h)), netAny, 'chat.inject': p['chat.inject'] && g['chat.inject'], storage: p.storage && g.storage, widgets: p.widgets && g.widgets, windows: p.windows && g.windows, openUrl: p.openUrl ? (p.openUrl === 'any' && g.openUrl === 'any' ? 'any' : !!g.openUrl) : false, web: webOf(p.web, g.web) };
+  return { net: netAny ? g.net.slice(0, MAX_USER_HOSTS + p.net.length) : p.net.filter(h => g.net.includes(h)), netAny, 'chat.inject': p['chat.inject'] && g['chat.inject'], 'chat.read': p['chat.read'] && g['chat.read'], capture: p.capture && g.capture, storage: p.storage && g.storage, widgets: p.widgets && g.widgets, windows: p.windows && g.windows, openUrl: p.openUrl ? (p.openUrl === 'any' && g.openUrl === 'any' ? 'any' : !!g.openUrl) : false, web: webOf(p.web, g.web) };
 }
 
 // is this address one the plugin may fetch? (https only; the host must be one of the allowed ones, exactly)
@@ -175,7 +178,7 @@ export function netAllowed(eff, url) {
 }
 
 // what a plugin asks for, as one text: when it changes (a new permission, a new host), the user is asked again
-export const permsKey = manifest => JSON.stringify([manifest.id, [...manifest.permissions.net].sort(), !!manifest.permissions['chat.inject'], !!manifest.permissions.netAny, !!manifest.permissions.storage, !!manifest.permissions.widgets, !!manifest.permissions.windows, manifest.permissions.openUrl || false, manifest.permissions.web || '', (manifest.windows || []).map(w => w.id).sort()]);
+export const permsKey = manifest => JSON.stringify([manifest.id, [...manifest.permissions.net].sort(), !!manifest.permissions['chat.inject'], !!manifest.permissions['chat.read'], !!manifest.permissions.capture, !!manifest.permissions.netAny, !!manifest.permissions.storage, !!manifest.permissions.widgets, !!manifest.permissions.windows, manifest.permissions.openUrl || false, manifest.permissions.web || '', (manifest.windows || []).map(w => w.id).sort()]);
 
 // a value of an option, made right for its declaration (a wrong one becomes the default)
 export function cleanOptionValue(def, v) {

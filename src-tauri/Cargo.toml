@@ -1,6 +1,6 @@
 [package]
 name = "chatmatrix-reader"
-version = "3.2.1"
+version = "3.2.2"
 edition = "2021"
 
 [build-dependencies]
@@ -32,6 +32,8 @@ features = [
   "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Foundation", "Foundation_Metadata", "Security_Authorization_AppCapabilityAccess",
   "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Dwm",
   "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture",
+  # Windows OCR (ocr_win.rs): the text recognition of Windows
+  "Media_Ocr", "Globalization", "Graphics_Imaging", "Storage_Streams", "Foundation_Collections",
 ]
 
 # macOS: the same jobs as win.rs, written in mac.rs (window level, click-through, screen copy ...). These crates are already part of the Tauri dependency tree.
@@ -49,6 +51,10 @@ objc2-core-media = "0.3"
 objc2-core-audio-types = "0.3"
 dispatch2 = "0.3"
 objc2-core-foundation = "0.3"
+# the picture of one window (wincap_mac.rs): the image that ScreenCaptureKit gives
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider"] }
+# macOS Vision OCR (ocr_mac.rs): only the classes that are used
+objc2-vision = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNObservation", "VNTypes", "VNRequestRevisionProviding", "VNUtils"] }
 
 [profile.release]
 opt-level = "s"      # optimise for size

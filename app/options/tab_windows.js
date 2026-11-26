@@ -8,6 +8,7 @@ import { goneOwner, onGoneChange, goneNote } from './orphans.js';
 import { entries as fontItems } from '../fonts.js';
 import { registry as widgetRegistry } from '../widgets/defaults.js';
 import { widgetsRow } from './widget_row.js';
+import { toolbarRow } from './toolbar_row.js';
 
 const { emit, listen } = window.__TAURI__.event;
 
@@ -45,7 +46,10 @@ const tab = {
         note: ['다른 탭을 보는 동안 이 탭에 새 글이 오면 탭 이름 앞에 주황색 점을 띄웁니다. 그 탭을 누르면 사라집니다.',
           '귓속말처럼 놓치기 싫은 글을 따로 탭에 모아 둘 때 쓰세요. 알림이 붙은 탭은 "평소에 이름 탭 숨기기"와 클릭 관통에 상관없이 보입니다.'] },
       { win: true, key: 'hide_tools', type: 'check', label: '평소에 기능 버튼 숨기기', unsupported: (c, x) => (isNative(c, x) ? '일반 창에서는 항상 보입니다' : ''), keywords: '아이콘 버튼 숨김 가리기 인터페이스 설정 닫기',
-        note: '창 위쪽 오른쪽의 기능 버튼들(번역·음성·설정·닫기)을 마우스가 창 밖에 있을 때 숨깁니다. 마우스를 창 안으로 가져가면 나타납니다.' },
+        note: '창 위쪽 오른쪽의 기능 버튼들을 마우스가 창 밖에 있을 때 숨깁니다. 마우스를 창 안으로 가져가면 나타납니다.' },
+      { type: 'info', label: '기능 버튼', show: (c, x) => child(x) && dockHost(x.cfg().child_windows, x.sel) > 0,
+        text: () => tr('이 창은 다른 창의 탭이라 그 창의 막대를 씁니다. 기능 버튼은 탭이 붙은 창에서 고르세요.') },
+      Object.assign(toolbarRow(), { show: (c, x) => !webKind(x) && !(child(x) && dockHost(x.cfg().child_windows, x.sel) > 0) }),
       { win: true, key: 'hide_tabs', type: 'check', label: '평소에 이름 탭 숨기기', unsupported: (c, x) => (isNative(c, x) ? '일반 창에서는 항상 보입니다' : ''), keywords: '탭 이름 숨김 가리기 인터페이스',
         note: '창 위쪽 왼쪽의 이름 탭을 마우스가 창 밖에 있을 때 숨깁니다. 마우스를 창 안으로 가져가면 나타납니다.' },
       { win: true, key: 'hide_frame', type: 'check', label: '평소에 프레임 숨기기', unsupported: (c, x) => (isNative(c, x) ? '일반 창에는 프레임이 없습니다' : ''), keywords: '테두리 스크롤 크기 조절 숨김 가리기 인터페이스',
@@ -54,7 +58,7 @@ const tab = {
       { win: true, key: 'name', type: 'text', label: '이름', placeholder: '창 이름', keywords: '창 이름 탭 제목 메인',
         note: '창 위쪽의 탭에 이 이름이 보입니다. 비워 두면 기본 이름(메인, 음성인식, 창 번호)을 씁니다.' },
       { win: true, key: 'open_mode', type: 'select', label: '열리는 때', keywords: '열기 닫기 항상', show: (c, x) => child(x),
-        options: x => [['always', '프로그램을 켤 때 항상'], ['voice', '음성 인식을 켤 때만'], ['never', '닫아 둠 (직접 열 때만)']],
+        options: x => [['always', '프로그램을 켤 때 항상'], ['voice', '음성 인식을 켤 때만'], ['ocr', 'OCR 기능을 켤 때만'], ['never', '닫아 둠 (직접 열 때만)']],
         hints: { always: '창의 X로 닫거나 직접 연 것은 그때만 적용되고 이 설정은 바뀌지 않습니다. 프로그램을 다시 켜면 열립니다.', voice: '음성인식을 켜면 열리고 끄면 닫힙니다. 직접 열거나 X로 닫은 것은 그때만 적용되고, 다음에 음성인식을 켜고 끌 때 다시 이 설정을 따릅니다.' } },
       { win: true, key: 'clear_on_open', type: 'check', label: '열 때 비우기', keywords: '지우기 이전 대화 메시지 정리 열릴 때 음성', show: (c, x) => child(x),
         note: ['창이 열릴 때 이전 대화를 가져오지 않고 빈 창으로 시작합니다. 프로그램이 자동으로 열 때도, 직접 열 때도 같습니다.',
@@ -139,7 +143,8 @@ const tab = {
     ] },
     { title: '배경', rows: [
       { win: true, key: 'blur', type: 'select', label: '배경 흐림', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 아직 지원하지 않습니다' : ''), options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴',
-        note: '윈도우의 문제로, 흐림을 켠 창이 여러 개 있으면 컴퓨터 전체가 느려질 수 있습니다. 한두 개 창에서만 쓰는 것을 권합니다.' },
+        note: ['윈도우의 문제로, 흐림을 켠 창이 여러 개 있으면 컴퓨터 전체가 느려질 수 있습니다. 한두 개 창에서만 쓰는 것을 권합니다.',
+          '윈도우 11에서는 "약하게"가 동작하지 않습니다 (흐려지지 않고 단색 배경으로 보입니다). 윈도우 11에서는 "강하게"를 쓰세요. 윈도우 10에서는 둘 다 됩니다.'] },
       { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, max: 0.99, label: '배경 진하기', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 아직 지원하지 않습니다' : ''), keywords: '투명도 불투명',
         note: '99%까지 지정할 수 있습니다. 100%로 두면 웹뷰(엔진)가 글자를 그리는 방식이 수시로 바뀌어 글자 굵기와 밝기가 흔들리는 문제가 있어 제한했습니다. 눈으로는 100%와 구분되지 않습니다.' },
       { win: true, key: 'tab_opacity', type: 'percent', min: 0.05, label: '탭 배경 진하기', unsupported: (c, x) => (isNative(c, x) ? '일반 창의 바는 늘 진하게 보입니다' : ''), keywords: '투명도 불투명 탭 상단 바 아이콘 버튼',
@@ -228,7 +233,7 @@ const anyWebThrough = c => (c.browser_windows || []).some(b => b.click_through) 
 // is the chosen window a window of the system? (neither on top nor above the game: winconf.windowMode 0)
 const webKind = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.kind === 'web'); };          // (a web window of a plugin: never a window of the system)
 const isNative = (c, x) => !webKind(x) && !x.get({ win: true, key: 'topmost' }, c) && !x.get({ win: true, key: 'topmost_wow_only' }, c);
-const PLUGIN_ROWS = new Set(['name', 'open_mode', 'window_kind', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'hide_tabs', 'hide_frame']);
+const PLUGIN_ROWS = new Set(['name', 'open_mode', 'window_kind', 'click_through', 'lock_window', 'bg_opacity', 'blur', 'tab_opacity', 'dock_to', 'hide_tools', 'tools', 'hide_tabs', 'hide_frame']);
 const pluginWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner); };
 const goneWindow = x => { const c = x.cfg().child_windows.find(w => w.id === x.sel); return !!(c && c.owner && c.kind !== 'web' && goneOwner(c.owner)); };          // (the window of a plugin that is not there: only a note and the way to delete it)
 for (const card of tab.cards) for (const row of card.rows) {

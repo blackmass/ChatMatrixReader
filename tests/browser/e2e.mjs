@@ -476,6 +476,50 @@ ok(await control.evaluate(() => window.cmrHub.capture.worker.getCfg().skip_regex
 await opt.locator('#tabs li', { hasText: '일반' }).click();
 await opt.screenshot({ path: path.join(OUT, 'options_general.png') });
 
+// ---- the OCR tab (3.3): off by default, the choices, what is dim
+{
+  const cfgNow = () => control.evaluate(() => import('./settings.js').then(m => m.cfg()));
+  await opt.locator('#tabs li', { hasText: 'OCR' }).click(); await control.waitForTimeout(300);
+  ok((await cfgNow()).ocr_enabled === false && await opt.locator('.row b.label', { hasText: /^OCR 기능 사용$/ }).count() === 1, 'ocr tab: the switch is there and off');
+  ok(await opt.locator('.row b.label', { hasText: /^동작 시점$/ }).count() === 1 && await opt.locator('.row b.label', { hasText: /^읽는 방식$/ }).count() === 1 && await opt.locator('.row b.label', { hasText: /^줄을 찾는 방식$/ }).count() === 0 && await opt.locator('.row:visible b.label', { hasText: /^번역 방식$/ }).count() === 0, 'ocr tab: when / reader rows; the choice of who finds the lines is gone; no translation row (the OCR lines are translated by channel)');
+  ok(await opt.locator('.row:visible b.label', { hasText: /^지금 방식$/ }).count() === 1 && (await opt.locator('.row.warn:visible', { hasText: '채팅창 위에는 아무것도 두지 마세요' }).count()) === 1, 'ocr tab: the capture way is told, and the screen way warns that nothing may cover the chat');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ capture_mode: 'window' }))); await control.waitForTimeout(300);
+  ok((await opt.locator('.row.warn:visible', { hasText: '채팅창 위에는 아무것도 두지 마세요' }).count()) === (await opt.evaluate(() => /Mac/.test(navigator.platform)) ? 1 : 0), 'ocr tab: the game window way: no warning');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ capture_mode: 'screen' })));
+  ok((await cfgNow()).ocr_read === (await opt.evaluate(() => /Mac/.test(navigator.platform)) ? 'vision' : 'windows'), 'ocr tab: the reader is the engine of the system by default (Windows OCR, on a Mac macOS Vision)');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ ocr_read: 'ai' }))); await control.waitForTimeout(400);
+  ok(await opt.locator('.row:visible b.label', { hasText: /^읽기 프롬프트$/ }).count() === 1, 'ocr tab: the reader is the AI: its prompt is shown');
+  // the card "manual capture" (it took the place of the card "region": no saved region, no button to read it): its prompt is shown when the reader is the AI
+  ok(await opt.locator('.row:visible b.label', { hasText: /^수동 캡처 프롬프트$/ }).count() === 1, 'ocr tab: manual capture: the reader is the AI: its prompt is shown');
+  ok(await opt.locator('.row b.label', { hasText: /^(구역 고르기|구역 읽기|구역 지우기|지정한 구역)$/ }).count() === 0, 'ocr tab: no more rows of a saved region');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ ocr_enabled: false })));
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ ocr_read: 'windows' }))); await control.waitForTimeout(400);
+  ok(await opt.locator('.row:visible b.label', { hasText: /^읽기 프롬프트$/ }).count() === 0 && await opt.locator('.row:visible b.label', { hasText: /^수동 캡처 프롬프트$/ }).count() === 0 && await opt.locator('.row.warn:visible', { hasText: '아직 만들고 있어서' }).count() === 0, 'ocr tab: Windows OCR is ready (no warning), and the AI rows go away');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ ocr_read: 'ai', ocr_enabled: true, ocr_when: 'resident' }))); await control.waitForTimeout(400);
+  await opt.locator('#tabs li', { hasText: '일반' }).click(); await control.waitForTimeout(300);
+  ok(await opt.locator('.row.unsupported', { hasText: '매트릭스 읽기' }).count() === 0, 'ocr tab: the matrix row is not dim with the OCR on (there is no mode that replaces the matrix)');
+  await control.evaluate(() => import('./settings.js').then(m => m.set({ ocr_enabled: false, ocr_when: 'ondemand' }))); await control.waitForTimeout(300);
+}
+
+// ---- the region picker page (3.3): a drag gives the rectangle in pixels of the screen (the origin and the scale of the monitor are in its address), Esc cancels, a click is no choice
+{
+  await control.evaluate(() => { window.__picks = []; window.__TAURI__.event.listen('pick-result', ev => window.__picks.push(ev.payload)); });
+  const pk = await open('pick.html?x=1920&y=0&s=1.5', { width: 1000, height: 700 });
+  await pk.waitForSelector('#veil');
+  await pk.mouse.move(100, 100); await pk.mouse.down(); await pk.mouse.move(300, 250, { steps: 4 }); await pk.mouse.move(400, 300, { steps: 4 });
+  ok((await pk.locator('#size').textContent()) === '450 × 300', 'picker: the size is shown in pixels of the screen: ' + await pk.locator('#size').textContent());
+  await pk.mouse.up(); await control.waitForTimeout(300);
+  const picks = () => control.evaluate(() => window.__picks);
+  ok(JSON.stringify((await picks())[0]) === JSON.stringify({ x: 1920 + 150, y: 150, w: 450, h: 300 }), 'picker: a drag gives the rectangle in pixels of the screen (origin of the monitor + css pixels x scale): ' + JSON.stringify((await picks())[0]));
+  const pk2 = await open('pick.html?x=0&y=0&s=1', { width: 600, height: 400 });
+  await pk2.waitForSelector('#veil');
+  await pk2.mouse.move(50, 50); await pk2.mouse.down(); await pk2.mouse.up(); await control.waitForTimeout(200);
+  ok((await picks()).length === 1, 'picker: a click is no choice: nothing is answered, it waits for a drag');
+  await pk2.keyboard.press('Escape'); await control.waitForTimeout(300);
+  ok((await picks()).length === 2 && (await picks())[1].cancel === true, 'picker: Esc answers "cancel"');
+  await pk.close().catch(() => {}); await pk2.close().catch(() => {});
+}
+
 // ---- the 창 tab: one window at a time; the main window's keys, an extra window's entry, "follows window 1"
 await opt.locator('#tabs li', { hasText: '창' }).first().click();
 await opt.waitForSelector('.wintool');
@@ -1802,7 +1846,7 @@ ok(await opt.locator('.row:has(b.label:text-is("표시 언어")) option').count(
 await opt.selectOption('.row:has(b.label:text-is("표시 언어")) select', 'en-US');
 await within(1500, async () => cfgFile().language === 'en-US');
 ok(cfgFile().language === 'en-US', 'language: saved');
-ok((await opt.locator('#tabs li .name').allTextContents()).join('|') === 'General|Window|Mini browser|Translation|Glossary & prompt|Exceptions|Send|Voice recognition|Plugin|Advanced|About|Records' , 'language: the side menu is in English: ' + (await opt.locator('#tabs li .name').allTextContents()).join('|'));
+ok((await opt.locator('#tabs li .name').allTextContents()).join('|') === 'General|Window|Mini browser|Translation|Glossary & prompt|Exceptions|Send|Voice recognition|OCR|Plugin|Advanced|About|Records' , 'language: the side menu is in English: ' + (await opt.locator('#tabs li .name').allTextContents()).join('|'));
 ok(await opt.locator('#head').textContent() === 'General' && (await opt.getAttribute('#q', 'placeholder')) === 'Search options', 'language: header and placeholder');
 ok(await opt.locator('.row b.label', { hasText: 'Display language' }).count() === 1, 'language: option rows');
 await opt.locator('#tabs li', { hasText: 'Window' }).click();
@@ -1891,7 +1935,7 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
 {
   const PID = 'e2e-plugin-0123456789abcdef';
   files.set(`plugins/${PID}/plugin.json`, JSON.stringify({ id: PID, name: '시험 플러그인', version: '1.0.0', api: 1,
-    permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, reasons: { net: 'a', netAny: 'f', 'chat.inject': 'b', storage: 'c', widgets: 'd', windows: 'e', openUrl: 'g', web: 'h' }, options: [{ key: 'n', type: 'number', default: 3 }],
+    permissions: { net: ['example.com'], netAny: true, 'chat.inject': true, 'chat.read': true, capture: true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, reasons: { net: 'a', netAny: 'f', 'chat.inject': 'b', 'chat.read': 'i', capture: 'j', storage: 'c', widgets: 'd', windows: 'e', openUrl: 'g', web: 'h' }, options: [{ key: 'n', type: 'number', default: 3 }],
     windows: [{ id: 'main', title: '플러그인 창', page: 'window.html', width: 300, height: 200 }] }));
   files.set('plugins/broken-one/plugin.json', '{ not json');
   files.set('plugins/not-a-plugin/readme.txt', 'x');
@@ -1899,9 +1943,9 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   const KEY = await control.evaluate(id => import('./core/plugins.js').then(p => p.permsKey(window.cmrHub.plugins.registry.get(id).manifest)), PID);       // (the user has decided about it: no window asks)
   const list = () => control.evaluate(() => window.cmrHub.plugins.list().map(p => ({ id: p.id, ok: p.ok, running: p.running, enabled: p.enabled, missing: p.missing.length, errors: p.errors.length })));
   const l0 = await list();
-  ok(l0.find(p => p.id === PID).ok && l0.find(p => p.id === PID).missing === 8 && !l0.find(p => p.id === PID).running, 'plugins: a good plugin is found; nothing is allowed yet (8 to approve), it is not running: ' + JSON.stringify(l0));
+  ok(l0.find(p => p.id === PID).ok && l0.find(p => p.id === PID).missing === 10 && !l0.find(p => p.id === PID).running, 'plugins: a good plugin is found; nothing is allowed yet (10 to approve), it is not running: ' + JSON.stringify(l0));
   ok(l0.find(p => p.id === 'broken-one').ok === false && l0.find(p => p.id === 'not-a-plugin').errors === 1, 'plugins: a broken plugin.json and a folder without one are found, with errors');
-  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, options: { n: 7 } } } })), [PID, KEY]);
+  await control.evaluate(([id, key]) => import('./settings.js').then(m => m.set({ plugins: { [id]: { asked: key, enabled: true, granted: { net: ['example.com'], netAny: true, 'chat.inject': true, 'chat.read': true, capture: true, storage: true, widgets: true, windows: true, openUrl: true, web: 'domain' }, options: { n: 7 } } } })), [PID, KEY]);
   await control.waitForTimeout(600);
   const fr = await control.evaluate(id => { const f = document.querySelector(`#plugin-frames iframe[data-plugin="${id}"]`); return f ? { sandbox: f.getAttribute('sandbox'), src: f.src } : null; }, PID);
   ok(fr && fr.sandbox === 'allow-scripts' && fr.src === `http://cmrplug.localhost/tok-${PID}/background.html`, 'plugins: enabled: it runs in a sandboxed frame at its own address: ' + JSON.stringify(fr));
@@ -1932,6 +1976,32 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   await opt.evaluate(() => window.__TAURI__.event.emit('plugin-command', { cmd: 'forget', id: 'ghost-plugin' })); await control.waitForTimeout(500);
   const after = await control.evaluate(() => import('./settings.js').then(m => ({ w: m.cfg().child_windows.map(c => c.id), p: Object.keys(m.cfg().plugins) })));
   ok(!after.w.includes(91) && !after.p.includes('ghost-plugin'), 'plugins: "forget" clears the settings and windows of a plugin that is not there: ' + JSON.stringify(after));
+  // the game for the plugins (permission capture) and the chat (permission chat.read)
+  {
+    const info = await asked('capture.info');
+    ok(info.ok && info.value && info.value.width === 1280 && info.value.height === 720, 'plugins/capture: the size of the game window: ' + JSON.stringify(info));
+    const pic = await asked('capture.grab', { x: 10, y: 20, w: 120, h: 40, scale: 2 });
+    const dims = pic.ok ? await control.evaluate(v => new Promise(res => { const im = new Image(); im.onload = () => res([im.naturalWidth, im.naturalHeight]); im.onerror = () => res(null); im.src = `data:${v.mime};base64,${v.base64}`; }), pic.value) : null;
+    ok(pic.ok && pic.value.mime === 'image/png' && dims && dims[0] === 240 && dims[1] === 80, 'plugins/capture: a part of the game window comes as a real PNG file, twice as large: ' + JSON.stringify([pic.ok, dims]));
+    const bad = await asked('capture.grab', { x: 1200, y: 0, w: 200, h: 100 });
+    ok(!bad.ok && bad.error.code === 'failed' && /inside the game window/.test(bad.error.message), 'plugins/capture: a part outside the game window is refused: ' + JSON.stringify(bad));
+    const big = await asked('capture.grab', { x: 0, y: 0, w: 3000, h: 2000 });
+    ok(!big.ok && big.error.code === 'limit', 'plugins/capture: a part that is too big is refused');
+    // the chat: the lines go to the plugin that may read, the hidden ones as notices, and `recent` has them
+    const got = await control.evaluate(([id]) => new Promise(res => {
+      const run = window.cmrHub.plugins.running.get(id), old = window.cmrHub.plugins.post.send, seen = [];
+      window.cmrHub.plugins.post.send = (f, msg) => { if (msg.event === 'chat') seen.push(msg.value); else old(f, msg); };
+      const P = window.cmrHub.pipeline;
+      P.onLine({ channel: 'G', id: 9001, sender: 'Anna', text: 'LF2M tank', cls: '', base: -1 });
+      P.onLine({ channel: 'S', id: 9002, sender: '?', text: '[restricted]', cls: '', base: -1 });
+      P.onLine({ channel: '@RS', id: 9003, sender: '', text: 'chat restriction lifted', cls: '', base: -1 });
+      P.onLine({ channel: '!PLG', id: 9004, sender: 'plugin', text: 'its own line', cls: '', base: -1 });
+      setTimeout(() => { window.cmrHub.plugins.post.send = old; res(seen); }, 100);
+    }), [PID]);
+    ok(JSON.stringify(got) === JSON.stringify([{ kind: 'line', channel: 'G', sender: 'Anna', text: 'LF2M tank' }, { kind: 'restricted', channel: 'S' }, { kind: 'over' }]), 'plugins/chat: the lines, the hidden line (with its channel) and the end of the restriction reach the plugin; its own lines do not: ' + JSON.stringify(got));
+    const rec = await asked('chat.recent', { count: 3 });
+    ok(rec.ok && rec.value.some(l => l.text === 'LF2M tank' && l.sender === 'Anna'), 'plugins/chat: chat.recent has the last lines: ' + JSON.stringify(rec));
+  }
   const r2 = await asked('storage.set', { key: 'last', value: { id: 5 } }); const r3 = await asked('storage.get', { key: 'last' });
   ok(r2.ok && r3.ok && r3.value.id === 5, 'plugins: storage set / get');
   const r4 = await asked('net.fetch', { url: 'https://example.com/list' }); const r5 = await asked('net.fetch', { url: 'https://evil.org/list' });
@@ -2062,7 +2132,7 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
   await control.evaluate(() => import('./settings.js').then(m => m.set({ widgets: {} })));
 }
 
-// ---- plugins: the user is asked about a new plugin (one after the other), and the plugin tab
+// ---- plugins: a new plugin is only marked; the user is asked when turning it on; and the plugin tab
 {
   const A = 'e2e-review-aaaaaaaaaaaa', B = 'e2e-review-bbbbbbbbbbbb';
   for (const k of [...files.keys()]) if (k.startsWith('plugins/')) files.delete(k);
@@ -2070,25 +2140,29 @@ ok(await main.evaluate(() => document.body.classList.contains('review')), 'Shift
     permissions: { net: ['example.com'], ...(id === A ? { netAny: true } : {}), 'chat.inject': true }, reasons: { net: '글 목록을 가져옵니다', netAny: '사이트를 고릅니다', 'chat.inject': '새 글을 알립니다' }, options: [{ key: 'n', type: 'number', label: '횟수', min: 1, max: 9, default: 3 }] }));
   await control.evaluate(() => import('./settings.js').then(m => m.set({ plugins: {} })));
   await control.waitForTimeout(400);
+  const openBefore = calls.filter(c => c === 'open_options').length;
   await control.evaluate(() => window.cmrHub.plugins.scan());
-  await opt.waitForSelector('.pl-modal', { timeout: 4000 });
+  await control.waitForTimeout(800);
+  ok(calls.filter(c => c === 'open_options').length === openBefore && await opt.locator('.pl-modal').count() === 0, 'plugins/quiet: a new plugin opens no window and asks nothing by itself');
+  ok(await opt.locator('#tabs li', { hasText: '플러그인' }).evaluate(e => e.classList.contains('dot')), 'plugins/quiet: the tab shows a dot for the new plugin');
+  await opt.locator('#tabs li', { hasText: '플러그인' }).click(); await control.waitForTimeout(300);
+  ok(await opt.locator('.wl-item', { hasText: '알파' }).locator('.wl-badge', { hasText: '새로 발견됨' }).count() === 1 && !(await control.evaluate(() => window.cmrHub.plugins.list().some(p => p.running))), 'plugins/quiet: the row says "새로 발견됨" and nothing runs');
+  await opt.locator('.wl-item', { hasText: '알파' }).locator('.switch').click(); await control.waitForTimeout(400);
   const title = () => opt.locator('.pl-card h3').textContent();
   await opt.screenshot({ path: path.join(OUT, 'options_plugin_ask.png') });
-  ok((await title()).includes('알파') && (await opt.locator('.pl-card').textContent()).includes('1 / 2') && await opt.locator('.pl-card input[type=checkbox]').count() === 3
-    && (await opt.locator('.pl-card').textContent()).includes('example.com') && (await opt.locator('.pl-card').textContent()).includes('새 글을 알립니다'), 'plugins/review: a new plugin is asked about first: its name, 1 of 2, what it asks for with the reasons: ' + await title());
-  ok(await opt.locator('#tabs li.active .name').textContent() === '플러그인', 'plugins/review: the options window shows the plugin tab');
+  ok((await title()).includes('알파') && await opt.locator('.pl-card input[type=checkbox]').count() === 3
+    && (await opt.locator('.pl-card').textContent()).includes('example.com') && (await opt.locator('.pl-card').textContent()).includes('새 글을 알립니다'), 'plugins/ask: turning it on asks: its name, what it asks for with the reasons: ' + await title());
   await opt.locator('.pl-card input[data-host="example.com"]').uncheck();                  // (the user takes the host away)
   await opt.locator('.pl-card button', { hasText: '허용하고 켜기' }).click(); await control.waitForTimeout(500);
-  const pl = id => control.evaluate(i => (window.__settingsCfg ? window.__settingsCfg() : null) || import('./settings.js').then(m => m.cfg().plugins[i]), id);
   const cfgOf = async id => (await control.evaluate(() => import('./settings.js').then(m => m.cfg().plugins)))[id];
   const ea = await cfgOf(A);
-  ok(ea && ea.enabled === true && ea.granted['chat.inject'] === true && ea.granted.net.length === 0 && typeof ea.asked === 'string', 'plugins/review: "allow and turn on": what was left checked is allowed, the host that was unchecked is not: ' + JSON.stringify(ea));
-  ok((await title()).includes('베타') && (await opt.locator('.pl-card').textContent()).includes('2 / 2'), 'plugins/review: then the next plugin is asked about');
-  await opt.locator('.pl-card button', { hasText: '켜지 않음' }).click(); await control.waitForTimeout(500);
+  ok(ea && ea.enabled === true && ea.granted['chat.inject'] === true && ea.granted.net.length === 0 && typeof ea.asked === 'string', 'plugins/ask: "allow and turn on": what was left checked is allowed, the host that was unchecked is not: ' + JSON.stringify(ea));
+  await opt.locator('.wl-item', { hasText: '베타' }).locator('.switch').click(); await control.waitForTimeout(400);
+  await opt.locator('.pl-card button', { hasText: '취소' }).click(); await control.waitForTimeout(400);
   const eb = await cfgOf(B);
-  ok(await opt.locator('.pl-modal').count() === 0 && eb && eb.enabled === false && typeof eb.asked === 'string' && Object.keys(eb.granted).length === 0, 'plugins/review: "do not turn on" is remembered and nothing is allowed: ' + JSON.stringify(eb));
+  ok(await opt.locator('.pl-modal').count() === 0 && !(eb && eb.enabled) && !(eb && eb.granted && Object.keys(eb.granted).length), 'plugins/ask: "cancel" turns nothing on and allows nothing: ' + JSON.stringify(eb));
   await control.evaluate(() => window.cmrHub.plugins.scan()); await control.waitForTimeout(500);
-  ok(await opt.locator('.pl-modal').count() === 0, 'plugins/review: a plugin that was decided about is not asked about again');
+  ok(await opt.locator('.pl-modal').count() === 0, 'plugins/quiet: a scan never asks');
   // the tab: netAny: the hosts the plugin asked for wait for the user; the hosts the user allowed are listed and can be taken away
   await opt.locator('.wl-item', { hasText: '알파' }).click(); await control.waitForTimeout(300);
   await control.evaluate(id => import('./settings.js').then(m => m.set({ plugins: { ...m.cfg().plugins, [id]: { ...m.cfg().plugins[id], requested: ['pending.example.net'] } } })), A); await control.waitForTimeout(500);

@@ -166,6 +166,9 @@ function refresh() {
     li.classList.toggle('dot', !!(t.dot && t.dot(settings.cfg())));
   }
 }
+// a tab whose dot depends on something outside the settings (the plugin list) asks for the dots to be drawn again
+function updateDots() { for (const li of $('tabs').children) { const t = TABS.find(x => x.id === li.dataset.id); li.classList.toggle('dot', !!(t && t.dot && t.dot(settings.cfg()))); } }
+document.addEventListener('cmr-dots', updateDots);
 
 function go(next) { view = next; if (view.mode !== 'search') { query = ''; $('q').value = ''; } show(); }
 
@@ -206,7 +209,7 @@ settings.onChange(() => refresh());
 const showTitle = () => { try { window.__TAURI__.window.getCurrentWindow().setTitle(tr('ChatMatrix 옵션')).catch(() => {}); } catch { /* no such window function */ } };
 showTitle(); addEventListener('cmr-language', showTitle);
 try { window.__TAURI__.window.getCurrentWindow().setAlwaysOnTop(false).catch(() => {}); } catch { /* no window api */ }   // (an ordinary window: never above the others)
-document.addEventListener('cmr-show-tab', e => { if (TABS.some(t => t.id === e.detail) && !(view.mode === 'tab' && view.tab === e.detail)) go({ mode: 'tab', tab: e.detail }); });       // (a window of a tab asks for its tab: the plugin that wants to be approved)
+document.addEventListener('cmr-show-tab', e => { if (TABS.some(t => t.id === e.detail) && !(view.mode === 'tab' && view.tab === e.detail)) go({ mode: 'tab', tab: e.detail }); });       // (a window of a tab asks for its tab)
 addEventListener('cmr-language', () => show());      // the texts that are put together while running
 // ---------------------------------------------------------------- the place and size of this window: restored when it opens, saved when it stood still
 {

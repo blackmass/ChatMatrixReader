@@ -89,7 +89,7 @@ const browserCard =
 const webCard =
     { title: '플러그인 웹창', rows: [
       webRow('open_mode', 'never', { type: 'select', label: '열리는 때', keywords: '열기 닫기 항상 플러그인 웹창',
-        options: [['always', '프로그램을 켤 때 항상'], ['voice', '음성 인식을 켤 때만'], ['never', '닫아 둠 (직접 열 때만)']],
+        options: [['always', '프로그램을 켤 때 항상'], ['voice', '음성 인식을 켤 때만'], ['ocr', 'OCR 기능을 켤 때만'], ['never', '닫아 둠 (직접 열 때만)']],
         hints: { always: '프로그램을 켤 때 열립니다.', voice: '음성인식을 켜면 열리고 끄면 닫힙니다.', never: '플러그인이 열 때만 열립니다.' } }),
       { key: 'webwin_kind', type: 'select', label: '창 종류', def: 'top', keywords: '항상 위 맨 위에 와우 위에만 최상위 topmost',
         options: [['top', '항상 위'], ['wow', '와우 위에만']],

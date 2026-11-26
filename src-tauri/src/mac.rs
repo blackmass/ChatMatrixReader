@@ -134,17 +134,29 @@ pub fn screen_rect() -> [i32; 4] {
     [(x0 * s).round() as i32, (y0 * s).round() as i32, ((x1 - x0) * s).round() as i32, ((y1 - y0) * s).round() as i32]
 }
 
+/// Is the screen recording allowed? Without the permission the system gives back only the desktop picture: ask once (a dialog of the system), then say so at every call.
+pub fn screen_access() -> Result<(), String> {
+    if !unsafe { CGPreflightScreenCaptureAccess() } {
+        if !ASKED_SCREEN.swap(true, Ordering::SeqCst) { unsafe { CGRequestScreenCaptureAccess(); } }
+        return Err("the permission \"Screen & System Audio Recording\" is missing (System Settings > Privacy & Security); restart the program after giving it".into());
+    }
+    Ok(())
+}
+
+/// Where a window is now: x, y, width, height in pixels of the screen (None when it cannot be seen).
+pub fn window_rect_px(hwnd: isize) -> Option<[i32; 4]> {
+    let w = window_by_number(hwnd)?;
+    let s = scale();
+    Some([(w.x * s).round() as i32, (w.y * s).round() as i32, (w.w * s).round() as i32, (w.h * s).round() as i32])
+}
+
 /// Copies a rectangle of the screen at the display's real resolution (the pages' pixels: see above). Result: 8 bytes header (width, height
 /// as u32 little endian, of the picture that came back) + width*height*4 bytes BGRA. Needs the permission "Screen & System Audio Recording".
 pub fn capture(x: i32, y: i32, w: i32, h: i32) -> Result<Vec<u8>, String> {
     if w <= 0 || h <= 0 || w > 16384 || h > 16384 {
         return Err(format!("bad size {w}x{h}"));
     }
-    // without the permission the system gives back only the desktop picture: ask once (a dialog of the system), then say so at every call
-    if !unsafe { CGPreflightScreenCaptureAccess() } {
-        if !ASKED_SCREEN.swap(true, Ordering::SeqCst) { unsafe { CGRequestScreenCaptureAccess(); } }
-        return Err("the permission \"Screen & System Audio Recording\" is missing (System Settings > Privacy & Security); restart the program after giving it".into());
-    }
+    screen_access()?;
     let s = scale();
     let rect = CGRect::new(&CGPoint::new(x as f64 / s, y as f64 / s), &CGSize::new(w as f64 / s, h as f64 / s));
     let (ids, _) = CGDisplay::displays_with_rect(rect, 4).map_err(|e| format!("no display ({e})"))?;
@@ -877,6 +889,8 @@ pub fn start_wheel_hook() {}
 static CENTER_NUMS: Mutex<Vec<(isize, isize, isize)>> = Mutex::new(Vec::new());        // the window of each control center: (center, handle, the number the system has for it)
 /// The window of a control center (told by the page of the center): the wheel is not taken where a window of another program stands over it. The number is asked for once for a window (the main thread
 /// is asked: not from the tap).
+/// (Windows only: a window that is cloaked; the screen capture tool of Windows 11 is not here)
+pub fn set_cloak(_hwnd: isize, _on: bool) -> bool { false }
 pub fn set_center_hwnd(center: isize, hwnd: isize) {
     if CENTER_NUMS.lock().map(|l| l.iter().any(|e| e.0 == center && e.1 == hwnd)).unwrap_or(false) { return; }
     let number: isize = on_main(|| unsafe { let n: isize = msg_send![obj(hwnd), windowNumber]; n });

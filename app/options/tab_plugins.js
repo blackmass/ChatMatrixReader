@@ -1,6 +1,6 @@
 // 플러그인: the plugins of the plugins/ folder. A list on the left (a switch for each), the chosen one on the right: who made it, its fingerprint, the permissions it asks for (the user
 // allows each one), its options (declared in its plugin.json) and its log. The state comes from the hub (app/plugin_host.js: event 'plugin-state'); what the user does goes back as
-// 'plugin-command'. A plugin nobody has decided about yet is shown in a window of its own first (askApprovals), one plugin after the other.
+// 'plugin-command'. A plugin that is new is only marked in its tab; the permission window opens when the user turns the plugin on.
 import { tr } from '../core/i18n.js';
 import { isMac } from '../platform.js';
 
@@ -13,16 +13,11 @@ const BASE = isMac ? 'cmrplug://localhost/' : 'http://cmrplug.localhost/';
 let state = [];                                        // the list the hub told
 const redraws = new Set();                             // the panels that are drawn now (they draw again when the state changes)
 const waiting = new Map();                             // 'cmd|id' -> resolve
-let answering = false;                                 // an answer of the approval window is on its way
-const decided = new Set();                             // answered, but the hub's state does not say so yet
-const queue = { done: 0, total: 0 };                   // the plugins asked about in this round ("2 / 3"): how many are answered, how many there were
 
 listen('plugin-state', ev => {
   state = ev.payload.plugins || [];
-  for (const id of [...decided]) if (!state.some(x => x.id === id && x.review)) decided.delete(id);
-  if (modal && modal.review && !state.some(x => x.id === modal.id && x.review && x.ok)) closeModal();          // (decided elsewhere, or the plugin is gone)
   for (const f of redraws) f();
-  askApprovals();
+  document.dispatchEvent(new CustomEvent('cmr-dots'));
 });
 listen('plugin-result', ev => { const k = ev.payload.cmd + '|' + ev.payload.id, r = waiting.get(k); if (r) { waiting.delete(k); r(ev.payload); } });
 // the answers of the hub to the calls of the options pages of the plugins (frames in this window): to the frame that asked
@@ -41,6 +36,8 @@ const ask = (cmd, id, extra = {}) => new Promise(resolve => {
 const PERMS = {
   net: () => tr('인터넷 접속'),
   'chat.inject': () => tr('채팅창에 글 넣기'),
+  'chat.read': () => tr('채팅 줄 읽기 (읽은 줄과 "읽을 수 없는 줄" 알림)'),
+  capture: () => tr('게임 화면의 일부를 그림으로 가져가기'),
   storage: () => tr('자기 저장 공간 쓰기'),
   widgets: () => tr('창에 위젯 올리기'),
   windows: () => tr('플러그인 전용 창 열기'),
@@ -50,7 +47,6 @@ const PERMS = {
 };
 const SCOPES = () => [['host', tr('허용한 사이트 안에서만 이동')], ['domain', tr('허용한 사이트의 도메인 전체 (하위 사이트 포함)')]];
 const OPEN_SCOPES = () => [['true', tr('허용한 사이트(와 웹 창이 갈 수 있는 곳)만 열기')], ['any', tr('허용한 사이트가 아닌 주소도 열기 (https)')]];
-const pendingList = () => state.filter(x => x.review && x.ok && !decided.has(x.id)).sort((a, b) => a.id.localeCompare(b.id));
 const nameOf = p => (p.manifest && p.manifest.name) || p.id;
 
 // what the plugin asks for: [{ key, label, reason, hosts? }]
@@ -61,6 +57,8 @@ const asks = p => {
   if (m.permissions.netAny) out.push({ key: 'netAny', label: PERMS.netAny(), reason: m.reasons.netAny });
   if (m.permissions.net.length) out.push({ key: 'net', label: PERMS.net(), reason: m.reasons.net, hosts: m.permissions.net });
   if (m.permissions['chat.inject']) out.push({ key: 'chat.inject', label: PERMS['chat.inject'](), reason: m.reasons['chat.inject'] });
+  if (m.permissions['chat.read']) out.push({ key: 'chat.read', label: PERMS['chat.read'](), reason: m.reasons['chat.read'] });
+  if (m.permissions.capture) out.push({ key: 'capture', label: PERMS.capture(), reason: m.reasons.capture });
   if (m.permissions.storage) out.push({ key: 'storage', label: PERMS.storage(), reason: m.reasons.storage });
   if (m.permissions.widgets) out.push({ key: 'widgets', label: PERMS.widgets(), reason: m.reasons.widgets });
   if (m.permissions.windows) out.push({ key: 'windows', label: PERMS.windows(), reason: m.reasons.windows });
@@ -106,57 +104,36 @@ function permBoxes(p, start, onChange) {
     root.append(block);
   }
   if (!asks(p).length) root.append(el('small', 'note', tr('이 플러그인은 특별한 권한을 요구하지 않습니다.')));
-  return { root, granted: () => ({ net: boxes.filter(b => b.dataset.host && b.checked).map(b => b.dataset.host), 'chat.inject': !!boxes.find(b => b.dataset.key === 'chat.inject' && b.checked), storage: !!boxes.find(b => b.dataset.key === 'storage' && b.checked), netAny: !!boxes.find(b => b.dataset.key === 'netAny' && b.checked), openUrl: boxes.find(b => b.dataset.key === 'openUrl' && b.checked) ? (openSel && openSel.value === 'any' ? 'any' : true) : false, widgets: !!boxes.find(b => b.dataset.key === 'widgets' && b.checked), windows: !!boxes.find(b => b.dataset.key === 'windows' && b.checked), web: boxes.find(b => b.dataset.key === 'web' && b.checked) && scopeSel ? scopeSel.value : '' }) };
+  return { root, granted: () => ({ net: boxes.filter(b => b.dataset.host && b.checked).map(b => b.dataset.host), 'chat.inject': !!boxes.find(b => b.dataset.key === 'chat.inject' && b.checked), 'chat.read': !!boxes.find(b => b.dataset.key === 'chat.read' && b.checked), capture: !!boxes.find(b => b.dataset.key === 'capture' && b.checked), storage: !!boxes.find(b => b.dataset.key === 'storage' && b.checked), netAny: !!boxes.find(b => b.dataset.key === 'netAny' && b.checked), openUrl: boxes.find(b => b.dataset.key === 'openUrl' && b.checked) ? (openSel && openSel.value === 'any' ? 'any' : true) : false, widgets: !!boxes.find(b => b.dataset.key === 'widgets' && b.checked), windows: !!boxes.find(b => b.dataset.key === 'windows' && b.checked), web: boxes.find(b => b.dataset.key === 'web' && b.checked) && scopeSel ? scopeSel.value : '' }) };
 }
 
-// ---------------------------------------------------------------- the window that asks (a plugin nobody decided about yet)
+// ---------------------------------------------------------------- the window that asks (the user turns a plugin on)
 let modal = null;                                      // { id, root } of the one shown
 function closeModal() { if (modal) { modal.root.remove(); modal = null; } }
 
-// opts.review: the first meeting with the plugin (the "not now" answer is remembered); else it is the user turning on a plugin that has permissions not allowed yet
-function showApproval(p, opts = {}) {
+// the user turning on a plugin that has permissions not allowed yet
+function showApproval(p) {
   closeModal();
   const root = el('div', 'pl-modal'), card = el('div', 'pl-card');
-  queue.total = Math.max(queue.total, queue.done + pendingList().length);
-  const total = queue.total, idx = queue.done;
-  card.append(el('h3', '', opts.review ? tr('새 플러그인: {name}', { name: nameOf(p) }) : tr('플러그인 켜기: {name}', { name: nameOf(p) })));
-  if (opts.review && total > 1) card.append(el('small', 'note', tr('{n} / {total}번째 플러그인', { n: idx + 1, total })));
+  card.append(el('h3', '', tr('플러그인 켜기: {name}', { name: nameOf(p) })));
   const m = p.manifest;
   card.append(el('small', 'note', [m.author ? tr('만든 이: {a}', { a: m.author }) : '', tr('버전 {v}', { v: m.version })].filter(Boolean).join(' · ')));
   if (m.description) card.append(el('p', 'pl-desc', m.description));
   card.append(el('p', 'pl-ask', tr('이 플러그인이 요구하는 권한입니다. 허용할 것을 고르세요:')));
-  const start = { net: m.permissions.net, 'chat.inject': m.permissions['chat.inject'], storage: m.permissions.storage, widgets: m.permissions.widgets, windows: m.permissions.windows, netAny: m.permissions.netAny, openUrl: m.permissions.openUrl, web: m.permissions.web };      // (everything it asks is checked at first, the user may take some away)
+  const start = { net: m.permissions.net, 'chat.inject': m.permissions['chat.inject'], 'chat.read': m.permissions['chat.read'], capture: m.permissions.capture, storage: m.permissions.storage, widgets: m.permissions.widgets, windows: m.permissions.windows, netAny: m.permissions.netAny, openUrl: m.permissions.openUrl, web: m.permissions.web };      // (everything it asks is checked at first, the user may take some away)
   const boxes = permBoxes(p, start);
   card.append(boxes.root);
   card.append(el('small', 'note pl-warn', tr('플러그인은 격리된 곳에서 실행되고 허용한 권한만 쓸 수 있습니다. 믿을 수 있는 곳에서 받은 플러그인인지 확인하세요. 권한은 나중에 이 탭에서 바꿀 수 있습니다.')));
   const row = el('div', 'pl-buttons');
-  const yes = el('button', 'btn', tr('허용하고 켜기')), no = el('button', 'btn', opts.review ? tr('켜지 않음') : tr('취소'));
-  yes.onclick = async () => {
-    answering = true; closeModal();
-    if (opts.review) { queue.done++; decided.add(p.id); await ask('review', p.id, { granted: boxes.granted(), enable: true }); }
-    else { await ask('grant', p.id, { granted: boxes.granted() }); await ask('enable', p.id); }
-    answering = false; askApprovals();
-  };
-  no.onclick = async () => {
-    answering = true; closeModal();
-    if (opts.review) { queue.done++; decided.add(p.id); await ask('review', p.id, { granted: {}, enable: false }); }
-    answering = false; askApprovals();
-  };
+  const yes = el('button', 'btn', tr('허용하고 켜기')), no = el('button', 'btn', tr('취소'));
+  yes.onclick = async () => { closeModal(); await ask('grant', p.id, { granted: boxes.granted() }); await ask('enable', p.id); };
+  no.onclick = () => closeModal();
   row.append(yes, no);
   card.append(row);
   root.append(card);
   document.body.append(root);
-  modal = { id: p.id, root, review: !!opts.review };
+  modal = { id: p.id, root };
   yes.focus();
-}
-
-// plugins nobody decided about yet are shown one after the other (the options window has been opened for them by the hub)
-function askApprovals() {
-  if (answering || modal) return;
-  const next = pendingList()[0];
-  if (!next) { queue.done = 0; queue.total = 0; return; }
-  document.dispatchEvent(new CustomEvent('cmr-show-tab', { detail: 'plugins' }));
-  showApproval(next, { review: true });
 }
 
 // ---------------------------------------------------------------- the tab
@@ -171,7 +148,7 @@ function panel() {
   const choose = id => { sel = id; try { localStorage.setItem(SEL_KEY, id); } catch { /* not kept */ } hashInfo = { id: '', hash: '', files: [], open: false }; draw(); };
 
   const turn = async (p, on) => {
-    if (on && p.missing.length) { showApproval(p, { review: false }); return; }
+    if (on && p.missing.length) { showApproval(p); return; }
     await ask(on ? 'enable' : 'disable', p.id);
   };
 
@@ -192,6 +169,7 @@ function panel() {
       if (!p.ok) tags.append(el('small', 'wl-badge off', tr('오류')));
       else if (p.running) tags.append(el('small', 'wl-badge', tr('실행 중')));
       else if (p.missing.length && p.enabled) tags.append(el('small', 'wl-badge off', tr('권한 필요')));
+      else if (p.review) tags.append(el('small', 'wl-badge', tr('새로 발견됨')));
       row.append(sw, el('span', 'wl-name', nameOf(p)), tags);
       row.onclick = () => choose(p.id);
       row.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(p.id); } };
@@ -289,7 +267,7 @@ function panel() {
 
     // permissions
     detail.append(el('h4', 'pl-h', tr('권한')));
-    const start = { net: p.granted.net || [], 'chat.inject': !!p.granted['chat.inject'], storage: !!p.granted.storage, widgets: !!p.granted.widgets, windows: !!p.granted.windows, netAny: !!p.granted.netAny, openUrl: p.granted.openUrl === 'any' ? 'any' : !!p.granted.openUrl, web: p.granted.web || '' };
+    const start = { net: p.granted.net || [], 'chat.inject': !!p.granted['chat.inject'], 'chat.read': !!p.granted['chat.read'], capture: !!p.granted.capture, storage: !!p.granted.storage, widgets: !!p.granted.widgets, windows: !!p.granted.windows, netAny: !!p.granted.netAny, openUrl: p.granted.openUrl === 'any' ? 'any' : !!p.granted.openUrl, web: p.granted.web || '' };
     const boxes = permBoxes(p, start, () => ask('grant', p.id, { granted: boxes.granted() }));
     detail.append(boxes.root);
     // netAny: the hosts the user allows one by one, and the ones the plugin has asked for and wait for an answer

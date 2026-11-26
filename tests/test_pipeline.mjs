@@ -19,7 +19,7 @@ for (const run of G.runs) {
   const p = new Pipeline({ getCfg: () => run.cfg, translations: svc, getWindows: () => run.windows, clock });
   const got = [];
   for (const [ch, id, who, text, cls, base] of run.steps) {
-    const evs = p.onLine({ channel: ch, id, sender: who, text, cls, base });
+    const evs = p.onLine({ channel: ch === '!RS' ? '@RS' : ch, id, sender: who, text, cls, base });       // (the golden is the 2.0 answer, where the end of the restriction is "!RS"; in 3.x it is the command "@RS")
     got.push(evs);
     for (const e of evs) {
       if (e.type === 'LineAdded' && e.pending) {

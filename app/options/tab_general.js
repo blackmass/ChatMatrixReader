@@ -7,7 +7,7 @@ import * as settings from '../settings.js';
 
 const { emit } = window.__TAURI__.event;
 const { invoke } = window.__TAURI__.core;
-const captureWhy = () => (isMac ? '맥은 아직 지원하지 않습니다' : '');
+const captureWhy = () => '';                     // (the capture of the game window is there on both systems now)
 
 // The test of the capture of the game window: the game window and the screen are read the same way, and what differs is told (the exe: capture_compare). It reads the whole window of the game.
 async function compareCapture() {
@@ -41,6 +41,12 @@ export default {
         note: '게임 창은 먼저 프로그램 이름(Wow*.exe)으로 찾고, 못 찾으면 이 제목과 같은 창을 찾습니다.' },
       { key: 'exit_with_game', type: 'check', label: '와우 종료 시 같이 종료', keywords: '게임 끝 자동 종료 quit exit',
         note: '와우 창이 한 번 보인 뒤 사라지면 5초 뒤에 프로그램을 끝냅니다. 프로그램을 와우보다 먼저 켜 둬도 끝나지 않습니다.' },
+      { key: 'snip_hide', type: 'check', label: '캡처 도구 오버레이 숨기기', keywords: '캡처 도구 스크린샷 창 캡처 win shift s print screen 스니핑 전체 화면 번역창 숨김 오버레이 센터',
+        unsupported: () => (isMac ? '윈도우에서만 쓰입니다' : ''),
+        note: ['윈도우 11의 캡처 도구(Win+Shift+S, Print Screen 키)에서 "창 캡처"를 고르면 마우스를 올린 창을 자동으로 골라 줍니다. 그런데 번역창이 "항상 위"나 "게임 위에만"이면 화면 전체를 덮는 투명한 창 위에 그려지고, 캡처 도구는 그 투명한 창을 하나의 창으로 보기 때문에 어느 창 위에 마우스를 올려도 화면 전체가 골라집니다.',
+          '켜면 이 키를 누르는 순간부터 캡처 도구가 끝날 때까지 번역창이 화면에서 사라집니다. 그러면 캡처 도구가 원래 창들(게임, 탐색기 ...)을 제대로 골라 줍니다. 그동안 번역창이 보이지 않고, 캡처한 그림에도 번역창이 찍히지 않습니다. 캡처가 끝나면 바로 돌아옵니다.',
+          '끄면 번역창은 그대로 보이고 캡처에도 찍히지만, 창 캡처를 고르면 화면 전체가 잡힙니다 (사각형이나 자유 모양 캡처는 영향이 없습니다).',
+          '켜 두면 Win+Shift+S와 Print Screen 키를 누를 때를 감지합니다. Print Screen을 눌렀는데 캡처 도구가 뜨지 않으면(게임의 스크린샷 키로 쓰는 경우 등) 번역창이 1초쯤 사라졌다 돌아옵니다. 번역창을 모두 일반 창(운영체제 창)으로 쓰는 경우에는 이 옵션과 상관없이 문제가 없습니다 (그릴 것이 없는 투명 창은 항상 숨겨 두기 때문입니다).'] },
     ] },
     { title: '읽기', rows: [
       { key: 'read_matrix', type: 'check', label: '매트릭스 읽기', keywords: '매트릭스 캡처 화면 읽기 끄기 오버레이만 웹창 채팅',
@@ -50,7 +56,7 @@ export default {
         options: [['screen', '화면'], ['window', '게임 창']],
         hints: { screen: '화면에 보이는 모습을 그대로 읽습니다. 작업 표시줄이나 다른 창이 매트릭스를 덮으면 읽지 못합니다.',
           window: '게임 창 그림만 읽습니다. 위에 다른 창이나 작업 표시줄이 있어도, 번역창이 있어도 상관없습니다. 안 되면 자동으로 화면으로 읽고 기록에 이유를 남깁니다. 윈도우 10에서는 게임 창에 노란 테두리가 보입니다 (윈도우 11에서는 끕니다).' },
-        note: '바로 적용됩니다. "게임 창"은 윈도우가 게임 창 하나를 따로 그려 주는 기능을 써서 읽는 것이라, 매트릭스를 작업 표시줄이나 다른 창이 덮어도 읽을 수 있습니다. 윈도우 10은 이 기능이 게임 창에 노란 테두리를 표시하며 끌 수 없습니다. 마음에 들지 않으면 "화면"으로 두세요.' },
+        note: '바로 적용됩니다. "게임 창"은 윈도우가 게임 창 하나를 따로 그려 주는 기능을 써서 읽는 것이라, 매트릭스를 작업 표시줄이나 다른 창이 덮어도 읽을 수 있습니다. 윈도우 10은 이 기능이 게임 창에 노란 테두리를 표시하며 끌 수 없습니다. 마음에 들지 않으면 "화면"으로 두세요. 맥에서는 macOS 14 이상에서 되고, 그보다 낮으면 자동으로 화면으로 읽습니다.' },
       { type: 'button', label: '게임 창 읽기 시험', button: '비교해 보기', unsupported: captureWhy, keywords: '캡처 시험 비교 게임 창 화면 픽셀 시간', unsupported: captureWhy,
         note: '게임 창 전체를 두 방식으로 한 번씩 읽어서 걸린 시간과 서로 다른 픽셀 수를 보여 줍니다. 번역창이나 작업 표시줄이 게임 위에 있으면 그 부분은 다르게 나오는 것이 정상입니다.', action: compareCapture },
       { key: 'poll_hz', type: 'number', label: '초당 읽기 횟수', min: 5, max: 60, unit: '회', keywords: 'fps 속도 빈도 캡처' },

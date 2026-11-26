@@ -15,6 +15,7 @@ export function startWindows({ settings }) {
   const manual = new Set();                    // opened by hand (open mode "직접 열 때만")
   const closedBy = new Map();                  // id -> the open mode it had when the user closed it with the X (only for now: see below)
   let pluginCheck = null;                      // (owner, name) -> may the window of this plugin be open now? (set by plugin_host.js)
+  let ocrOn = false;                           // the OCR assist is on
   let voiceOn = false;                         // the voice recognition is on (or starting)
   const children = () => settings.cfg().child_windows;
   const conf = id => children().find(c => c.id === id);
@@ -48,7 +49,7 @@ export function startWindows({ settings }) {
         again = false;
         for (const c of children()) {
           if (c.kind === 'web') continue;                          // (a web window is the exe's own window, opened by the plugin: web_host.js)
-          const want = !winconf.dockHost(children(), c.id) && (!c.owner || !!(pluginCheck && pluginCheck(c.owner, c.owner_win))) && layout.wantedOpen(c, manual, voiceOn, closedBy.get(c.id) === c.open_mode ? new Set([c.id]) : new Set());
+          const want = !winconf.dockHost(children(), c.id) && (!c.owner || !!(pluginCheck && pluginCheck(c.owner, c.owner_win))) && layout.wantedOpen(c, manual, voiceOn, closedBy.get(c.id) === c.open_mode ? new Set([c.id]) : new Set(), ocrOn);
           if (want && !open.has(c.id)) {
             open.add(c.id);                                          // (the window is drawn by the control center of its order: center.js)
           } else if (!want && open.has(c.id)) open.delete(c.id);
@@ -87,6 +88,14 @@ export function startWindows({ settings }) {
       if (on === voiceOn) return;
       voiceOn = on;
       for (const c of children()) if (c.open_mode === 'voice') { manual.delete(c.id); if (closedBy.get(c.id) === 'voice') closedBy.delete(c.id); }
+      sync();
+    },
+    // the OCR assist was turned on / off: the "only while it is on" windows follow it (the same as the voice recognition)
+    setOcr(on) {
+      on = !!on;
+      if (on === ocrOn) return;
+      ocrOn = on;
+      for (const c of children()) if (c.open_mode === 'ocr') { manual.delete(c.id); if (closedBy.get(c.id) === 'ocr') closedBy.delete(c.id); }
       sync();
     },
     // (a window that is a tab of another one has no window of its own: it is open while its window is)

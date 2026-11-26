@@ -171,3 +171,6 @@ body.native .pane.titled .pbody::after, body.native .pane.titled .pgrip { displa
 /* a web window with its bar below the page: the same bar and the same tabs as above it (the rule for the tabs of a translation window, .pane.flip .ptab, must not reach them) */
 .webpane.flip .ptab, .webpane.flip .ptab.on { border: 0; border-radius: 3px; }
 .webpane.flip .ptab.on { box-shadow: inset 0 2px 0 #d9a441; }
+
+/* the manual capture is choosing a part of the screen (center.js 'pick-active'): nothing of ours is drawn over it */
+body.picking .pane, body.picking .webpane, body.picking #ctx { visibility: hidden !important; }

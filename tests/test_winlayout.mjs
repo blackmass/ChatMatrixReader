@@ -26,3 +26,7 @@ check(w.wantedOpen({ id: 3, open_mode: 'always' }, new Set()) && !w.wantedOpen({
   eq([t({}), t({ through: false }), t({ held: true }), t({ held: true, inside: true }), t({ inside: true }), t({ game: false }), t({ drag: true })], [false, true, false, true, false, true, true],
     'takesMouse: not through = yes; through = only with the keys and the pointer over it, with no game, or while a drag goes on');
 }
+
+// 3.3: a window of the mode "ocr" is wanted exactly while the OCR assist is on (the same as "voice" for the voice recognition)
+check(w.wantedOpen({ id: 3, open_mode: 'ocr' }, new Set(), false, new Set(), true) && !w.wantedOpen({ id: 3, open_mode: 'ocr' }, new Set(), true, new Set(), false) && !w.wantedOpen({ id: 3, open_mode: 'voice' }, new Set(), false, new Set(), true), 'an "ocr" window follows the OCR assist only');
+check(!w.wantedOpen({ id: 3, open_mode: 'ocr' }, new Set(), false, new Set([3]), true) && w.wantedOpen({ id: 3, open_mode: 'ocr' }, new Set([3]), false, new Set([3]), true), 'an "ocr" window the user closed stays closed (until the next time), unless it was opened by hand');

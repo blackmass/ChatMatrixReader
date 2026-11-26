@@ -7,6 +7,7 @@ import translation from './tab_translation.js';
 import glossary from './tab_glossary.js';
 import send from './tab_send.js';
 import voice from './tab_voice.js';
+import ocr from './tab_ocr.js';
 import advanced from './tab_advanced.js';
 import plugins from './tab_plugins.js';
 import about from './tab_about.js';
@@ -21,6 +22,7 @@ export const TABS = [
   exceptions,
   send,
   voice,
+  ocr,
   plugins,
   advanced,
   about,

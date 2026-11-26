@@ -65,7 +65,7 @@ export function startCapture({ settings, publish, pipeline }) {
   // while and the reason is in the log; the time of both ways is told now and then.
   const way = { mode: 'screen', started: false, backoffUntil: 0, lastWhy: '', n: { window: 0, screen: 0, failed: 0 }, ms: { window: 0, screen: 0 }, at: nowSec() };
   io.grab = async (x, y, w, h) => {
-    const want = settings.cfg().capture_mode === 'window' && game.hwnd && !isMac;                // (not made for the Mac yet: a setting that came from a Windows computer is read as "screen" here)
+    const want = settings.cfg().capture_mode === 'window' && game.hwnd;                // (a Mac: ScreenCaptureKit, macOS 14 or later; the exe says no on an older one and the screen is read then, see below)
     if (!want && (way.mode === 'window' || way.started)) { if (way.mode === 'window') log.info('캡처: 화면 읽기 방식: 화면'); way.mode = 'screen'; way.started = false; invoke('capture_game_stop').catch(() => {}); }          // (the option is off: the exe lets the window go)
     if (want && nowSec() >= way.backoffUntil) {
       const t0 = performance.now();
@@ -111,11 +111,11 @@ export function startCapture({ settings, publish, pipeline }) {
       }
       // the game came back to the front while the matrix is not being read (covered, or the game was away): search again by itself;
       // the game redraws a moment later, so look twice
-      if (reading && game.front && !wasFront && !connected) for (const ms of [400, 1500]) setTimeout(() => { if (!connected) { log.info('게임으로 돌아옴: 매트릭스를 읽고 있지 않아 다시 찾습니다'); worker.research(); } }, ms);
+      if (reading && !worker.paused && game.front && !wasFront && !connected) for (const ms of [400, 1500]) setTimeout(() => { if (!connected) { log.info('게임으로 돌아옴: 매트릭스를 읽고 있지 않아 다시 찾습니다'); worker.research(); } }, ms);
       wasFront = game.front;
       publish(pipeline.tick(nowSec()));
       wayReport();
-      const act = reading ? lost.check(cfg, game.found ? game : null, connected, nowSec()) : null;
+      const act = reading && !worker.paused ? lost.check(cfg, game.found ? game : null, connected, nowSec()) : null;
       if (act && act[0] === 'show') {
         // act[1] = no position was ever found: the guide of the first start (the game may not even be running)
         const msg = '⚠ ' + (act[1]
@@ -133,9 +133,21 @@ export function startCapture({ settings, publish, pipeline }) {
   else log.info('매트릭스 읽기가 꺼져 있어 화면을 읽지 않습니다');
 
   return {
-    worker, game, reading,
+    worker, game,
+    get reading() { return reading && !worker.paused; },
     research() { if (!reading) { system('ℹ ' + tr('매트릭스 읽기가 꺼져 있습니다. 옵션 > 일반에서 켜고 다시 시작하세요.')); return; } log.info('매트릭스 다시 찾기 요청'); awaiting = true; worker.research(); system('ℹ ' + tr('매트릭스를 다시 찾습니다...')); },
     stop() { worker.stop(); timer.stop(); invoke('capture_game_stop').catch(() => {}); },
     connected: () => connected,
+    // a part of the game window, for the plugins (x, y from the top left of the window, in its own pixels): the same way the screen is read now (the window of the game or the screen, whatever the option says)
+    clientSize: () => (game.found && game.rect ? { width: game.rect[2], height: game.rect[3] } : null),
+    // the screen itself, with no game window needed (the manual capture works without the game): the rectangle of all the screens together [x, y, w, h] in pixels, and a part of it
+    screenRect: async () => invoke('screen_rect'),
+    grabScreen: (x, y, w, h) => grab(x, y, w, h),
+    async grabClient(x, y, w, h) {
+      if (!game.found || !game.rect) throw new Error('the game window is not there (or it is minimized)');
+      const [gx, gy, gw, gh] = game.rect;
+      if (x < 0 || y < 0 || x + w > gw || y + h > gh) throw new Error(`the part is not inside the game window (${gw}x${gh})`);
+      return io.grab(gx + x, gy + y, w, h);
+    },
   };
 }
