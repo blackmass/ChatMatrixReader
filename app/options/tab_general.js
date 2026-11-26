@@ -7,7 +7,7 @@ import * as settings from '../settings.js';
 
 const { emit } = window.__TAURI__.event;
 const { invoke } = window.__TAURI__.core;
-const captureWhy = () => (isMac ? '맥은 아직 지원하지 않습니다' : '');
+const captureWhy = () => '';                     // (the capture of the game window is there on both systems now)
 
 // The test of the capture of the game window: the game window and the screen are read the same way, and what differs is told (the exe: capture_compare). It reads the whole window of the game.
 async function compareCapture() {
@@ -56,7 +56,7 @@ export default {
         options: [['screen', '화면'], ['window', '게임 창']],
         hints: { screen: '화면에 보이는 모습을 그대로 읽습니다. 작업 표시줄이나 다른 창이 매트릭스를 덮으면 읽지 못합니다.',
           window: '게임 창 그림만 읽습니다. 위에 다른 창이나 작업 표시줄이 있어도, 번역창이 있어도 상관없습니다. 안 되면 자동으로 화면으로 읽고 기록에 이유를 남깁니다. 윈도우 10에서는 게임 창에 노란 테두리가 보입니다 (윈도우 11에서는 끕니다).' },
-        note: '바로 적용됩니다. "게임 창"은 윈도우가 게임 창 하나를 따로 그려 주는 기능을 써서 읽는 것이라, 매트릭스를 작업 표시줄이나 다른 창이 덮어도 읽을 수 있습니다. 윈도우 10은 이 기능이 게임 창에 노란 테두리를 표시하며 끌 수 없습니다. 마음에 들지 않으면 "화면"으로 두세요.' },
+        note: '바로 적용됩니다. "게임 창"은 윈도우가 게임 창 하나를 따로 그려 주는 기능을 써서 읽는 것이라, 매트릭스를 작업 표시줄이나 다른 창이 덮어도 읽을 수 있습니다. 윈도우 10은 이 기능이 게임 창에 노란 테두리를 표시하며 끌 수 없습니다. 마음에 들지 않으면 "화면"으로 두세요. 맥에서는 macOS 14 이상에서 되고, 그보다 낮으면 자동으로 화면으로 읽습니다.' },
       { type: 'button', label: '게임 창 읽기 시험', button: '비교해 보기', unsupported: captureWhy, keywords: '캡처 시험 비교 게임 창 화면 픽셀 시간', unsupported: captureWhy,
         note: '게임 창 전체를 두 방식으로 한 번씩 읽어서 걸린 시간과 서로 다른 픽셀 수를 보여 줍니다. 번역창이나 작업 표시줄이 게임 위에 있으면 그 부분은 다르게 나오는 것이 정상입니다.', action: compareCapture },
       { key: 'poll_hz', type: 'number', label: '초당 읽기 횟수', min: 5, max: 60, unit: '회', keywords: 'fps 속도 빈도 캡처' },

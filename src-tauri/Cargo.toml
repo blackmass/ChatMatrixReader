@@ -51,6 +51,8 @@ objc2-core-media = "0.3"
 objc2-core-audio-types = "0.3"
 dispatch2 = "0.3"
 objc2-core-foundation = "0.3"
+# the picture of one window (wincap_mac.rs): the image that ScreenCaptureKit gives
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider"] }
 # macOS Vision OCR (ocr_mac.rs): only the classes that are used
 objc2-vision = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNObservation", "VNTypes", "VNRequestRevisionProviding", "VNUtils"] }
 

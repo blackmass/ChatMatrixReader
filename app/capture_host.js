@@ -65,7 +65,7 @@ export function startCapture({ settings, publish, pipeline }) {
   // while and the reason is in the log; the time of both ways is told now and then.
   const way = { mode: 'screen', started: false, backoffUntil: 0, lastWhy: '', n: { window: 0, screen: 0, failed: 0 }, ms: { window: 0, screen: 0 }, at: nowSec() };
   io.grab = async (x, y, w, h) => {
-    const want = settings.cfg().capture_mode === 'window' && game.hwnd && !isMac;                // (not made for the Mac yet: a setting that came from a Windows computer is read as "screen" here)
+    const want = settings.cfg().capture_mode === 'window' && game.hwnd;                // (a Mac: ScreenCaptureKit, macOS 14 or later; the exe says no on an older one and the screen is read then, see below)
     if (!want && (way.mode === 'window' || way.started)) { if (way.mode === 'window') log.info('캡처: 화면 읽기 방식: 화면'); way.mode = 'screen'; way.started = false; invoke('capture_game_stop').catch(() => {}); }          // (the option is off: the exe lets the window go)
     if (want && nowSec() >= way.backoffUntil) {
       const t0 = performance.now();

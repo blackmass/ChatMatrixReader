@@ -21,6 +21,8 @@ mod extlib;
 mod ocr_win;
 #[cfg(target_os = "macos")]
 mod ocr_mac;
+#[cfg(target_os = "macos")]
+mod wincap_mac;
 mod files;
 mod placement;
 mod pluginlib;
@@ -461,7 +463,13 @@ fn capture(x: i32, y: i32, w: i32, h: i32) -> Result<tauri::ipc::Response, Strin
 fn capture_game(hwnd: i64, x: i32, y: i32, w: i32, h: i32) -> Result<tauri::ipc::Response, String> {
     #[cfg(windows)]
     { wgc::capture(hwnd as isize, x, y, w, h).map(tauri::ipc::Response::new) }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        win::screen_access()?;
+        let rect = win::window_rect_px(hwnd as isize).ok_or("the window of the game cannot be seen")?;
+        wincap_mac::capture(hwnd as u32, rect, x, y, w, h).map(tauri::ipc::Response::new)          // (ScreenCaptureKit, macOS 14 or later: the page reads the screen when this says no)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     { let _ = (hwnd, x, y, w, h); Err("the capture of the game window is not made for this system yet".into()) }
 }
 
