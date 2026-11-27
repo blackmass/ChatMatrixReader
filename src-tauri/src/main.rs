@@ -16,6 +16,10 @@ mod capture;
 mod capturelib;
 #[cfg(windows)]
 mod wgc;
+#[cfg(windows)]
+mod blurgl;
+#[cfg(windows)]
+mod ownblur;
 mod ext;
 mod extlib;
 mod ocr_win;
@@ -603,6 +607,42 @@ fn capture_compare(hwnd: i64, x: i32, y: i32, w: i32, h: i32) -> Result<Value, S
     }
 }
 
+/// The test of the blur that Windows 11 gets from us (blurgl.rs, docs/HANDOFF.md 4-0aq): the lower left corner of the picture of the game window (640x360) is cut and blurred on the graphics card, weak and
+/// strong, and written to logs/blur_none.bmp, blur_weak.bmp and blur_strong.bmp; the time of one blur (with the wait for the card) is the mean of 30 runs.
+#[tauri::command(async)]
+fn blur_probe(hwnd: i64) -> Result<Value, String> {
+    #[cfg(not(windows))]
+    { let _ = hwnd; return Err("this blur is for Windows".into()); }
+    #[cfg(windows)]
+    {
+        let dir = base_dir().join("logs");
+        let _ = std::fs::create_dir_all(&dir);
+        wgc::with_frame(hwnd as isize, |device, ctx, frame, _origin, _n| {
+            let mut d = windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC::default();
+            unsafe { frame.GetDesc(&mut d); }
+            let (fw, fh) = (d.Width as i32, d.Height as i32);
+            let (w, h) = (640.min(fw), 360.min(fh));
+            let rect = [0, fh - h, w, h];
+            let t0 = std::time::Instant::now();
+            let blur = blurgl::Blur::new(device)?;
+            let make_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            let mut out = serde_json::Map::new();
+            for (name, level) in [("none", 0u32), ("weak", 1), ("strong", 2)] {
+                let tex = blur.run(device, ctx, frame, rect, level)?;
+                let (pw, ph, px) = blurgl::read_back(device, ctx, &tex)?;
+                let mut pic = Vec::with_capacity(8 + px.len());
+                pic.extend_from_slice(&pw.to_le_bytes()); pic.extend_from_slice(&ph.to_le_bytes()); pic.extend_from_slice(&px);
+                let _ = write_bmp(&dir.join(format!("blur_{name}.bmp")), &pic, (0, 0, pw as i32, ph as i32));
+                let t1 = std::time::Instant::now();
+                for _ in 0..30 { let t = blur.run(device, ctx, frame, rect, level)?; blurgl::wait_done(device, ctx, &t)?; }
+                out.insert(format!("{name}_ms"), json!((t1.elapsed().as_secs_f64() * 1000.0 / 30.0 * 100.0).round() / 100.0));
+            }
+            out.insert("ok".into(), json!(true)); out.insert("rect".into(), json!(rect)); out.insert("compile_ms".into(), json!(make_ms.round()));
+            Ok(Value::Object(out))
+        })
+    }
+}
+
 /// The usable area (without the taskbar) and the scale of the monitor that has the point; nothing known = a huge area (nothing is moved).
 fn monitor_at(win: &WebviewWindow, x: i32, y: i32) -> (placement::Area, f64) {
     let m = win.monitor_from_point(x as f64, y as f64).ok().flatten().or_else(|| win.primary_monitor().ok().flatten());
@@ -1111,6 +1151,21 @@ fn os_kind() -> &'static str {
     if cfg!(target_os = "macos") { "macos" } else if cfg!(windows) { "windows" } else { "other" }
 }
 
+/// The build number of Windows (22000 or more is Windows 11), 0 elsewhere.
+#[tauri::command]
+fn os_build() -> u32 {
+    #[cfg(windows)]
+    {
+        #[repr(C)] struct OsVer { size: u32, major: u32, minor: u32, build: u32, platform: u32, csd: [u16; 128] }
+        #[link(name = "ntdll")] extern "system" { fn RtlGetVersion(v: *mut OsVer) -> i32; }
+        let mut v = OsVer { size: std::mem::size_of::<OsVer>() as u32, major: 0, minor: 0, build: 0, platform: 0, csd: [0; 128] };
+        unsafe { RtlGetVersion(&mut v); }
+        v.build
+    }
+    #[cfg(not(windows))]
+    { 0 }
+}
+
 /// The version of macOS ("14.5"), "" elsewhere. (The voice recognition needs 13 or later.)
 #[tauri::command]
 fn os_version() -> String {
@@ -1211,6 +1266,19 @@ fn make_tray(app: &tauri::App) -> tauri::Result<()> {
         .icon(icon)
         .tooltip("ChatMatrix")
         .menu(&menu)
+        // (only for the detailed log "main": what the mouse does at the icon, to be read together with the stalls of the main thread)
+        .on_tray_icon_event(|_tray, event| {
+            use tauri::tray::TrayIconEvent as E;
+            if !debug_on("main") { return; }
+            let what = match &event {
+                E::Click { button, button_state, .. } => format!("click {button:?} {button_state:?}"),
+                E::DoubleClick { .. } => "double click".to_string(),
+                E::Enter { .. } => "the mouse comes to the icon".to_string(),
+                E::Leave { .. } => "the mouse leaves the icon".to_string(),
+                _ => return,
+            };
+            debug_log("main", &format!("tray: {what}"));
+        })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "options" => {
                 let h = app.clone();
@@ -1223,6 +1291,22 @@ fn make_tray(app: &tauri::App) -> tauri::Result<()> {
         })
         .build(app)?;
     Ok(())
+}
+
+/// The detailed log "main": every half second the main thread (the one that runs the windows, the tray icon and the menus) is asked to answer, and when it takes more than 100 ms the line says how long.
+/// A tray icon that shows the busy cursor, a menu that is late, a click that is answered late: they are all the main thread being busy or waiting for another thread.
+fn main_watch(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(500));
+        if !debug_on("main") { continue; }
+        let t0 = std::time::Instant::now();
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        if app.run_on_main_thread(move || { let _ = tx.send(()); }).is_err() { continue; }
+        match rx.recv_timeout(Duration::from_secs(20)) {
+            Ok(()) => { let ms = t0.elapsed().as_millis(); if ms >= 100 { debug_log("main", &format!("the main thread answered after {ms} ms")); } }
+            Err(_) => debug_log("main", "the main thread did not answer for 20 s"),
+        }
+    });
 }
 
 /// Asks the program to end: the hub saves what is unsaved and then calls quit_app. When the hub does not answer, the program ends anyway.
@@ -1445,7 +1529,9 @@ fn main() {
             plugin_open_url,
             process_stats,
             center::center_rects,
-            center::set_snip_hide,
+            center::set_overlay_hide,
+            center::set_blur_mode,
+            os_build,
             center::center_wheel,
             center::center_layout,
             center::center_ready,
@@ -1483,6 +1569,7 @@ fn main() {
             ocr_windows_release,
             capture_game_info,
             capture_compare,
+            blur_probe,
             open_options,
             pick_region_open,
             native_open,
@@ -1600,7 +1687,10 @@ fn main() {
                 match make_window(&handle, label, page, kind) { Ok(_) => startup_log(&format!("window {label} made")), Err(e) => { startup_log(&format!("window {label} FAILED: {e}")); return Err(e.into()); } }
             }
             center::start(handle.clone());                              // (the translation windows are panes of the control centers)
+            #[cfg(windows)]
+            ownblur::start(handle.clone());                             // (the blur of Windows 11: asleep until the hub says "own")
             make_tray(app)?;
+            main_watch(handle.clone());                                 // (only does something while the detailed log "main" is on)
             let h = handle.clone();
             let open = move || {
                 let h = h.clone();

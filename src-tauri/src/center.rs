@@ -3,7 +3,9 @@
 //! page (center.html). A center takes the mouse only while the pointer is over one of its panes (read here, 60 times a second, from the system); the rest of it lets the mouse go
 //! through to the game. The translation windows that are neither on top nor above the game are windows of the system (main.rs native_open), not panes of these.
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+#[cfg(windows)]
+use crate::ownblur;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -141,26 +143,55 @@ pub fn start(app: AppHandle) {
 // that list. Two reasons to cloak a center: it has NOTHING TO DRAW (no pane, no tooltip, no menu: its page says so with `drawn`; always, it costs nothing: the center is an empty transparent window then),
 // and the option "캡처 도구 오버레이 숨기기": while a capture tool is being used the centers are cloaked (see snip_watch), so the translation windows are not seen then and not in the capture.
 static IDLE: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(|| Mutex::new(HashMap::new()));             // label -> the center has nothing to draw
-static CLOAKED: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(|| Mutex::new(HashMap::new()));         // label -> what the system was asked (only a change is asked)
-static SNIP_HIDE: AtomicBool = AtomicBool::new(false);                      // the option
+static CLOAKED: LazyLock<Mutex<HashMap<String, (isize, bool)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));         // label -> the window and what the system was asked (only a change is asked)
+static HIDE_MODE: AtomicU8 = AtomicU8::new(0);                              // the option "overlay_hide": 0 off, 1 capture (a capture tool is being used), 2 away (that too, and whenever the game is not in front)
+static AWAY: AtomicBool = AtomicBool::new(false);                           // mode 2: the game is running and neither it nor a window of ours is in front (the loop of the centers)
 static SNIP_ON: AtomicBool = AtomicBool::new(false);                        // a capture tool is being used now (snip_watch)
 
+/// Cloaks (or shows again) what the option hides: the centers (also a center with nothing to draw, always), and while a capture tool is used or the game is away, the blur windows and the web windows
+/// (the pages of the mini browser) of the centers too: they are windows of their own, not parts of a center. Only a change is asked of the system; it is looked at again at every round of the loop
+/// (a blur or web window that is made while the rest is hidden is hidden at the next look).
 fn sync_cloak(app: &AppHandle) {
-    let snip = SNIP_HIDE.load(Ordering::Relaxed) && SNIP_ON.load(Ordering::Relaxed);
+    let hide = (HIDE_MODE.load(Ordering::Relaxed) >= 1 && SNIP_ON.load(Ordering::Relaxed)) || AWAY.load(Ordering::Relaxed);
     let idle = IDLE.lock().map(|i| i.clone()).unwrap_or_default();
-    for (label, _) in MODES {
-        let want = snip || idle.get(label).copied().unwrap_or(false);
+    // the labels first (the locks are let go before a window is asked)
+    let mut labels: Vec<(String, bool, Option<isize>)> = MODES.iter().map(|(l, _)| (l.to_string(), hide || idle.get(*l).copied().unwrap_or(false), None)).collect();
+    if let Ok(b) = BLURS.lock() { labels.extend(b.keys().map(|k| (k.clone(), hide, None))); }
+    if let Ok(w) = WEBS.lock() { labels.extend(w.keys().map(|k| (k.clone(), hide, None))); }
+    #[cfg(windows)]
+    labels.extend(ownblur::all_windows().into_iter().map(|(k, h)| (k, hide, Some(h))));                  // (the blur windows of Windows 11 are not web windows: their handle is known)
+    for (label, want, known) in &labels {
+        let Some(h) = known.or_else(|| app.get_webview_window(label).and_then(|w| hwnd_of(&w).ok())) else { continue };
         let Ok(mut last) = CLOAKED.lock() else { return };
-        if last.get(label).copied().unwrap_or(false) == want { continue; }
-        if let Some(h) = app.get_webview_window(label).and_then(|w| hwnd_of(&w).ok()) {
-            if win::set_cloak(h, want) { last.insert(label.to_string(), want); }
-        }
+        let was = last.get(label).map_or(false, |(lh, on)| *lh == h && *on);        // (a window that was made again under the same label is a new window)
+        if was == *want { continue; }
+        if win::set_cloak(h, *want) { last.insert(label.clone(), (h, *want)); }
     }
+    if let Ok(mut last) = CLOAKED.lock() { last.retain(|k, _| labels.iter().any(|(l, _, _)| l == k)); }      // (a window that is gone leaves no note)
 }
 
-/// The option "캡처 도구 오버레이 숨기기" (the hub tells it at the start and whenever it changes).
-#[tauri::command]
-pub fn set_snip_hide(app: AppHandle, on: bool) { SNIP_HIDE.store(on, Ordering::Relaxed); sync_cloak(&app); }
+/// Which blur the translation windows get (the hub tells it at the start and at every change): "system" (Windows 10, macOS: the blur of the system, blur windows with the accent), "own" (Windows 11 with
+/// the way of reading "game window": our own blur of the picture of the game, ownblur.rs), "none" (Windows 11 without it: no blur; the option is off in the options then).
+#[tauri::command(async)]
+pub fn set_blur_mode(app: AppHandle, mode: String) {
+    let m = match mode.as_str() { "own" => 1, "none" => 2, _ => 0 };
+    if BLUR_MODE.swap(m, Ordering::Relaxed) == m { return; }
+    #[cfg(windows)]
+    ownblur::set_enabled(m == 1);
+    let panes: Vec<(String, Vec<Pane>)> = RECTS.lock().map(|r| r.iter().map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default();
+    for (label, list) in panes { sync_blur(&app, &label, &list); }                       // (what the centers have drawn is made again for the new mode)
+}
+static BLUR_MODE: AtomicU8 = AtomicU8::new(0);                              // 0 system, 1 own, 2 none
+
+/// The option "overlay_hide" (the hub tells it at the start and whenever it changes): "off", "capture" or "away".
+// (`async`: a command that is not async runs on the MAIN thread, and these take the locks of the blur and web windows, which another thread holds while it waits for the main thread to make or
+// close a window: the main thread would wait for that lock and the program would stop. Run on the main thread, a stop also stops the tray icon.)
+#[tauri::command(async)]
+pub fn set_overlay_hide(app: AppHandle, mode: String) {
+    HIDE_MODE.store(match mode.as_str() { "capture" => 1, "away" => 2, _ => 0 }, Ordering::Relaxed);
+    if HIDE_MODE.load(Ordering::Relaxed) != 2 { AWAY.store(false, Ordering::Relaxed); }
+    sync_cloak(&app);
+}
 
 /// The programs whose window in front is a screen capture tool (the name of the file, in lower case). More can be added here.
 const SNIP_TOOLS: [&str; 2] = ["snippingtool.exe", "screenclippinghost.exe"];
@@ -179,7 +210,7 @@ fn snip_watch(app: AppHandle) {
     let mut prev = false;
     let mut state: Option<(Instant, bool, Option<Instant>)> = None;            // (since when, the tool has been in front, since when it is not in front any more)
     loop {
-        if !SNIP_HIDE.load(Ordering::Relaxed) {
+        if HIDE_MODE.load(Ordering::Relaxed) == 0 {
             if state.take().is_some() { SNIP_ON.store(false, Ordering::Relaxed); sync_cloak(&app); }
             prev = false;
             std::thread::sleep(Duration::from_millis(500));
@@ -254,6 +285,17 @@ fn sync_blur(app: &AppHandle, center: &str, panes: &[Pane]) {
         key(&p.id),
         (p.blur, [p.x.round() as i32, (p.y + if p.below { 0.0 } else { p.bar }).round() as i32, p.w.round().max(1.0) as i32, (p.h - p.bar).round().max(1.0) as i32]),
     )).collect();
+    let mode = BLUR_MODE.load(Ordering::Relaxed);
+    #[cfg(windows)]
+    {
+        let ch = app.get_webview_window(center).and_then(|w| hwnd_of(&w).ok()).unwrap_or(0);
+        let own: Vec<ownblur::Want> = if mode == 1 {
+            panes.iter().filter(|p| p.blur > 0).map(|p| ownblur::Want { key: format!("own_{}_{}", center, p.id), center: center.to_string(), center_hwnd: ch, level: p.blur,
+                rect: [p.x.round() as i32, (p.y + if p.below { 0.0 } else { p.bar }).round() as i32, p.w.round().max(1.0) as i32, (p.h - p.bar).round().max(1.0) as i32] }).collect()
+        } else { Vec::new() };
+        ownblur::set_wants(center, own);
+    }
+    let want: HashMap<String, (u32, [i32; 4])> = if mode == 0 { want } else { HashMap::new() };          // (own or none: the system's blur windows are taken off)
     let mut have = match BLURS.lock() { Ok(h) => h, Err(_) => return };
     // the windows of this center whose pane has no blur at the moment
     let none: Vec<(String, Option<Instant>)> = have.iter().filter(|(k, v)| v.0 == center && !want.contains_key(*k)).map(|(k, v)| (k.clone(), v.4)).collect();
@@ -529,6 +571,13 @@ fn run(app: AppHandle) {
             game = win::find_game(game, &GAME_TITLE.lock().map(|t| t.clone()).unwrap_or_else(|_| "World of Warcraft".to_string())).map(|g| g.hwnd).unwrap_or(0);
             game_at = Instant::now();
         }
+        #[cfg(windows)]
+        ownblur::set_game(game);
+        // the option "away": the game is running and neither it nor a window of ours is in front -> everything the centers show is hidden (it is looked at again every round while hidden: a window made meanwhile is hidden too)
+        if cfg!(windows) {
+            let away = HIDE_MODE.load(Ordering::Relaxed) == 2 && game > 0 && win::foreground() != game && !win::self_front();
+            if AWAY.swap(away, Ordering::Relaxed) != away || away { sync_cloak(&app); }
+        }
         // the screens changed (a screen plugged in or out, another resolution): the centers cover the new area and the pages are told (they bring back what is out of sight)
         if screens_at.elapsed() > Duration::from_secs(2) {
             screens_at = Instant::now();
@@ -553,7 +602,9 @@ fn run(app: AppHandle) {
             let Ok(ch) = hwnd_of(&c) else { continue };
             win::keep_style(ch);
             // the blur windows of this center follow it: the same order (the layer of the center), and directly under it
-            let blurs: Vec<(String, isize)> = BLURS.lock().map(|b| b.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (k.clone(), v.2)).collect()).unwrap_or_default();
+            let mut blurs: Vec<(String, isize)> = BLURS.lock().map(|b| b.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (k.clone(), v.2)).collect()).unwrap_or_default();
+            #[cfg(windows)]
+            blurs.extend(ownblur::windows_of(label));                          // (the blur windows of Windows 11 stand directly under the center the same way)
             // the web windows: in the order the center draws their frames (the highest `z` first), so that a page and its frame are never one over and one under another window's
             let entries: Vec<(i64, String)> = WEBS.lock().map(|m| m.iter().filter(|(_, v)| v.0 == label).map(|(k, v)| (v.2, k.clone())).collect()).unwrap_or_default();       // (the lock is let go before the windows are asked)
             let mut webs: Vec<(i64, isize, String)> = entries.into_iter().filter_map(|(z, k)| app.get_webview_window(&k).and_then(|w| hwnd_of(&w).ok()).map(|h| (z, h, k))).collect();

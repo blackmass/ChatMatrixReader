@@ -12,6 +12,7 @@ import { Glossary } from './core/glossary.js';
 import { glossaryFiles, withMethod } from './core/translate_rules.js';
 import { startI18n } from './i18n_host.js';
 import { tr } from './core/i18n.js';
+import { isWin11 } from './platform.js';
 import { startUpkeep } from './upkeep_host.js';
 import * as version from './core/version.js';
 import * as updatecheck from './core/updatecheck.js';
@@ -224,8 +225,15 @@ const plugins = startPlugins({ settings, files, publish, pipeline, invoke: tauri
 // the option "캡처 도구 오버레이 숨기기": the exe is told at the start and at every change (center.rs: while a screen capture tool is used the centers are cloaked)
 {
   let told = null;
-  const tellSnip = () => { const on = !!settings.cfg().snip_hide; if (on === told) return; told = on; tauriInvoke('set_snip_hide', { on }).catch(() => {}); };
+  const tellSnip = () => { const mode = settings.cfg().overlay_hide || 'off'; if (mode === told) return; told = mode; tauriInvoke('set_overlay_hide', { mode }).catch(() => {}); };
   tellSnip(); settings.onChange(tellSnip);
+}
+// Which blur the translation windows get (center.rs set_blur_mode, docs/HANDOFF.md 4-0aq): the blur of the system (Windows 10, macOS), our own blur of the picture of the game (Windows 11 with the way of
+// reading "game window"), or none (Windows 11 otherwise). The exe is told at the start and at every change.
+{
+  let told = null;
+  const tellBlur = () => { const mode = !isWin11 ? 'system' : (settings.cfg().capture_mode === 'window' ? 'own' : 'none'); if (mode === told) return; told = mode; tauriInvoke('set_blur_mode', { mode }).catch(() => {}); };
+  tellBlur(); settings.onChange(tellBlur);
 }
 const browsers = startBrowsers({ settings, invoke: tauriInvoke, emit: tauriEmit, listen: tauriListen, note: hubLog });          // (the windows of the mini browser: core/browsers.js)
 windows.setPluginCheck((owner, name) => plugins.windowAllowed(owner, name));       // (a window of a plugin opens only while its plugin runs and may have it)

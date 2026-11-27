@@ -39,6 +39,7 @@ struct Session {
     size: (i32, i32),
     latest: Option<ID3D11Texture2D>,                     // a copy of the newest picture of the window
     stage: Option<((u32, u32), ID3D11Texture2D)>,        // where the asked rectangle is read from
+    frames: u64,                                         // how many pictures were taken into `latest` (the blur of the translation windows draws only when this has moved)
 }
 // (the objects are used only while SESSION is locked: one thread at a time)
 unsafe impl Send for Session {}
@@ -83,7 +84,7 @@ impl Session {
             };
             if let Ok(mut b) = BORDER.lock() { *b = status; }
             session.StartCapture().map_err(err("the capture did not start"))?;
-            Ok(Session { hwnd, device, context, d3d, pool, session, size: (size.Width, size.Height), latest: None, stage: None })
+            Ok(Session { hwnd, device, context, d3d, pool, session, size: (size.Width, size.Height), latest: None, stage: None, frames: 0 })
         }
     }
 
@@ -115,7 +116,7 @@ impl Session {
                 self.device.CreateTexture2D(&mine, None, Some(&mut t)).map_err(err("no texture of our own"))?;
                 self.latest = t;
             }
-            if let Some(t) = &self.latest { self.context.CopyResource(t, &tex); }
+            if let Some(t) = &self.latest { self.context.CopyResource(t, &tex); self.frames += 1; }
             let _ = frame.Close();
             Ok(self.latest.is_some())
         }
@@ -182,6 +183,26 @@ pub fn capture(hwnd: isize, x: i32, y: i32, w: i32, h: i32) -> Result<Vec<u8>, S
     let s = guard.as_mut().ok_or("no capture session")?;
     s.read(x - ox, y - oy, w, h, &mut out[8..])?;
     Ok(out)
+}
+
+/// Gives `f` the newest picture of the window (a texture of the graphics card that is NOT read back to the processor) with the device and context it lives on, and where the picture starts on the
+/// screen (the same origin `capture` uses), and how many pictures the session has taken so far (it is the same number as long as the window has sent nothing new). The capture session is kept as it is (opened here if it is not there). The session is locked while `f` runs: keep it short.
+/// (For the blur of the translation windows, docs/HANDOFF.md 4-0aq.)
+pub fn with_frame<R>(hwnd: isize, f: impl FnOnce(&ID3D11Device, &ID3D11DeviceContext, &ID3D11Texture2D, (i32, i32), u64) -> Result<R, String>) -> Result<R, String> {
+    if !GraphicsCaptureSession::IsSupported().unwrap_or(false) { return Err("this Windows has no capture of a window (Windows 10 version 1903 or later is needed)".into()); }
+    let origin = frame_origin(hwnd)?;
+    let mut guard = SESSION.lock().map_err(|_| "the capture is locked")?;
+    if guard.as_ref().map(|s| s.hwnd) != Some(hwnd) { *guard = None; *guard = Some(Session::open(hwnd)?); }
+    let started = Instant::now();
+    loop {
+        let s = guard.as_mut().ok_or("no capture session")?;
+        if s.refresh()? { break; }
+        if started.elapsed() > FIRST_FRAME_WAIT { *guard = None; return Err("the window sent no picture (minimized, or a mode of the game that cannot be captured)".into()); }
+        std::thread::sleep(Duration::from_millis(8));
+    }
+    let s = guard.as_mut().ok_or("no capture session")?;
+    let latest = s.latest.clone().ok_or("no picture")?;
+    f(&s.device, &s.context, &latest, origin, s.frames)
 }
 
 /// Ends the capture session (the option is off, or the game is gone).

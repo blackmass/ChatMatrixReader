@@ -9,6 +9,7 @@ import { entries as fontItems } from '../fonts.js';
 import { registry as widgetRegistry } from '../widgets/defaults.js';
 import { widgetsRow } from './widget_row.js';
 import { toolbarRow } from './toolbar_row.js';
+import { isWin11 } from '../platform.js';
 
 const { emit, listen } = window.__TAURI__.event;
 
@@ -142,9 +143,15 @@ const tab = {
         note: '항상 맨 위에 / 와우 위에만 번역창의 위쪽 바 모양입니다. 일반 창(작업 표시줄에 나오는 창)은 늘 "꽉 찬 바"입니다. 웹창도 늘 "꽉 찬 바"입니다.' },
     ] },
     { title: '배경', rows: [
-      { win: true, key: 'blur', type: 'select', label: '배경 흐림', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 아직 지원하지 않습니다' : ''), options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴',
-        note: ['윈도우의 문제로, 흐림을 켠 창이 여러 개 있으면 컴퓨터 전체가 느려질 수 있습니다. 한두 개 창에서만 쓰는 것을 권합니다.',
-          '윈도우 11에서는 "약하게"가 동작하지 않습니다 (흐려지지 않고 단색 배경으로 보입니다). 윈도우 11에서는 "강하게"를 쓰세요. 윈도우 10에서는 둘 다 됩니다.'] },
+      { type: 'notice', label: '', show: (c, x) => isWin11 && x.cfg().capture_mode !== 'window',
+        text: '윈도우 11에서 배경 흐림은 읽기 방식이 "게임 창"일 때만 동작합니다. 옵션 → 일반 → 읽기 방식에서 "게임 창"을 고르면 흐림을 쓸 수 있습니다. 지금은 흐림이 꺼진 것처럼 동작합니다.' },
+      { win: true, key: 'blur', type: 'select', label: '배경 흐림',
+        unsupported: (c, x) => (isNative(c, x) ? '일반 창은 아직 지원하지 않습니다' : (isWin11 && x.cfg().capture_mode !== 'window' ? '윈도우 11에서는 읽기 방식이 "게임 창"일 때만 쓸 수 있습니다' : '')),
+        options: [[0, '끔'], [1, '약하게'], [2, '강하게']], keywords: '블러 아크릴',
+        note: isWin11
+          ? ['윈도우 11에서는 시스템의 흐림이 제대로 동작하지 않아서, 프로그램이 게임 화면을 직접 흐려서 깔아 줍니다 (약하게, 강하게 모두 됩니다). 그래서 읽기 방식이 "게임 창"일 때만 쓸 수 있습니다.',
+            '번역창이 와우 창 밖으로 걸친 부분과, 와우가 아닌 다른 프로그램 위에 있는 번역창은 흐려지지 않습니다.']
+          : ['윈도우의 문제로, 흐림을 켠 창이 여러 개 있으면 컴퓨터 전체가 느려질 수 있습니다. 한두 개 창에서만 쓰는 것을 권합니다.'] },
       { win: true, key: 'bg_opacity', type: 'percent', min: 0.03, max: 0.99, label: '배경 진하기', unsupported: (c, x) => (isNative(c, x) ? '일반 창은 아직 지원하지 않습니다' : ''), keywords: '투명도 불투명',
         note: '99%까지 지정할 수 있습니다. 100%로 두면 웹뷰(엔진)가 글자를 그리는 방식이 수시로 바뀌어 글자 굵기와 밝기가 흔들리는 문제가 있어 제한했습니다. 눈으로는 100%와 구분되지 않습니다.' },
       { win: true, key: 'tab_opacity', type: 'percent', min: 0.05, label: '탭 배경 진하기', unsupported: (c, x) => (isNative(c, x) ? '일반 창의 바는 늘 진하게 보입니다' : ''), keywords: '투명도 불투명 탭 상단 바 아이콘 버튼',

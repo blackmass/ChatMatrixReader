@@ -99,7 +99,7 @@ export const DEFAULTS = {
     bg_opacity: 0.99,   // background (the dark area; at most 99 %: winconf.js MAX_BG_OPACITY)
     text_opacity: 1.0,   // text, title bar, scrollbar
     topmost: true,   // above every other window
-    snip_hide: false,                      // the centers (the windows that draw the translation windows over the game) are hidden while the screen capture tool of Windows is used (docs/HANDOFF.md 4-0aj)
+    overlay_hide: 'off',                   // off | capture | away: the centers (the windows that draw the translation windows over the game), their blur windows and the web windows are hidden while the screen capture tool of Windows is used (capture), or also whenever the game is running and not in front (away) (docs/HANDOFF.md 4-0aj, 4-0ap)
     exit_with_game: false,   // quit this program 5 s after the game has been closed
     topmost_wow_only: false,   // only just above the game window, behind all other windows
     wow_window_title: 'World of Warcraft',
@@ -227,7 +227,9 @@ export function normalize(saved) {
   cfg.ocr_win_lang = typeof cfg.ocr_win_lang === 'string' ? cfg.ocr_win_lang.trim().slice(0, 20) : '';
   cfg.ocr_ai_parallel = Math.min(4, Math.max(1, Math.round(Number(cfg.ocr_ai_parallel) || 1)));
   cfg.ocr_region = cleanRegion(cfg.ocr_region);
-  cfg.snip_hide = cfg.snip_hide === true;
+  if (!own(s, 'overlay_hide') && s.snip_hide === true) cfg.overlay_hide = 'capture';
+  if (!['off', 'capture', 'away'].includes(cfg.overlay_hide)) cfg.overlay_hide = 'off';          // (snip_hide: the yes/no of the first version of the option)
+  delete cfg.snip_hide;
   cfg.ocr_cap_hotkey = (() => { const t = String(cfg.ocr_cap_hotkey ?? '').trim(); if (!t) return ''; try { return hotkeys.normalize(t); } catch { return ''; } })();     // (a hotkey that does not parse is no hotkey)
   if (!(cfg.ocr_prompt || '').trim()) cfg.ocr_prompt = DEFAULT_OCR_PROMPT;
   if (!(cfg.ocr_cap_prompt || '').trim()) cfg.ocr_cap_prompt = DEFAULT_CAPTURE_PROMPT;
