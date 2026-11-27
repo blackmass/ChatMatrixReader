@@ -11,7 +11,7 @@ The WoW addon **ChatMatrix** draws the chat as a small block of colored cells (t
 
 # Design principles
 - **Light**: small download. No heavy frameworks, and no AI model bundled.
-- **Exact**: no OCR, no AI vision. The addon takes the chat data directly from the game and passes it on as it is, so the text is 100% accurate.
+- **Exact**: by default there is no OCR and no AI vision. The addon takes the chat data directly from the game and passes it on as it is, so the text is 100% accurate. Reading the screen (OCR) is only an optional helper for what the addon cannot read (chat censored during boss fights) and for areas you pick yourself.
 - **Minimal**: no needless design or interface. The goal is that you only see the translated text.
 - **Learning**: I will never try to erase English and replace it. Showing the original next to the translation is the default.
 - **Reliable**: it is an exe, so here is what I did to make it trustworthy.
@@ -24,15 +24,16 @@ The WoW addon **ChatMatrix** draws the chat as a small block of colored cells (t
 
 # Features
 - Detects only the chat and translates it live. Shows original and translation together, can swap their order, and sets the translation method per channel.
-- Several translation windows. Channels, font, size, opacity, background blur and text outline are set per window.
+- Several translation windows. Channels, font, size, opacity, background blur (Windows 11 supports only the strong blur) and text outline are set per window.
 - Each window is **always on top**, **on top of WoW only**, or an **ordinary window**. "On top of WoW only" keeps the window from covering your other work when you leave the game. An ordinary window is a normal window in the task bar: the system does the resizing, maximizing and snapping (good for another monitor). The top bar of the first two can be "floating tabs" or a "full bar".
 - **Click-through**: title bar and border disappear, only the translation is visible, and the game is not disturbed. Hold Shift and move the mouse over the window to use it.
 - Transparent background, text size, line spacing, font and shadow can be tuned so that it blends into the WoW screen.
 - **Mini browser**: a small browser window over the game (mobile or PC view, bookmarks, keeping logins, click-through). You can read a guide or a link without the game losing your controls. A web address in the chat can be clicked to open in the mini browser or in your own browser.
 - **Glossary**: add terms on the fly. Defaults are set for both Google and the AI prompt, and each translation method (Google, AI server, custom server) can have its own glossary and prompt.
 - String rules (regex): drop a message from translation, or hide it from the window, when it contains certain text (e.g. exclude anything with Korean characters).
-- **Send**: press `Shift+Enter` in game, type in your language, and the English translation goes to the clipboard (optional auto-paste; the final Enter is yours).
-- **Reading the game window** (Windows, Options → General → Reading): instead of reading the screen, only the WoW window is read, so the matrix is still read when the task bar or another window covers it. Windows 10 shows a yellow frame on the game window and cannot turn it off (Windows 11 does). So the default is "Screen", and WoW must be in windowed or windowed fullscreen mode.
+- **Send**: press `Shift+Enter` in game, type in your language, and the English translation goes to the clipboard (optional auto-paste; the final Enter is yours). With the addon option turned on, `Shift+Enter` in the WoW chat box itself translates too (off by default).
+- **Reading the game window** (Windows and Mac, Options → General → Reading): instead of reading the screen, only the WoW window is read, so the matrix is still read when the task bar or another window covers it. Windows 10 shows a yellow frame on the game window and cannot turn it off (Windows 11 does). So the default is "Screen", and WoW must be in windowed or windowed fullscreen mode. On Mac it works on macOS 14 or later.
+- **Reading text on the screen (OCR, optional)**: chat that the addon cannot read during boss fights is read from the chat window on screen and translated, marked `[OCR]`. With **Manual capture** in the translation window menu (or a hotkey you choose) you can also drag over any text you see, such as a tooltip or a group listing (the game does not have to be running). The reader is chosen among an AI server, Windows OCR and macOS Vision (Options → OCR). There is also an option that hides the translation windows from screen capture tools such as Win+Shift+S.
 - Multilingual: it works on text, not images, so every language Google detects can be translated. The interface is Korean and English; to add another language, put a text file in the `locale` folder.
 - Voice recognition (STT): turns the voice of Discord, WoW or other programs into text and translates it (Windows).
 - Options apply the moment you change them. Open them with the ⚙ on the window, the tray icon, or `Ctrl+Alt+O`.
@@ -45,15 +46,15 @@ You need both the addon and the program.
 - If the newest version waits for approval on CurseForge, it is also on <a href="https://drive.google.com/drive/u/0/folders/1vAJJ8w9MMW5qJzxfjg5qSktN5XhH77ow">Google Drive</a>.
 
 **2. The program (ChatMatrixReader): Windows**
-1. Download `ChatMatrixReader-v<version>-windows-x64.zip` from the <a href="https://github.com/blackmass/ChatMatrixReader/releases">Releases page</a> (not the source code zip).
+1. Download `ChatMatrixReader-v<version>-windows-x64.zip` from the <a href="https://github.com/blackmass/ChatMatrixReader/releases/latest">latest release page</a> (not the source code zip).
 2. Unzip it anywhere and run `ChatMatrixReader.exe`. The program is not signed, so if Windows warns you, choose "More info → Run anyway". Keep the `app` folder next to the exe.
 3. Needs Windows 10 or 11 and the WebView2 runtime (included in Windows 11; on Windows 10, install Microsoft's WebView2 runtime if the program does not start).
 4. Run WoW in **windowed or windowed fullscreen** mode (in exclusive fullscreen other windows cannot be shown on top).
 
 **The program: Mac (experimental)**
-- For Apple Silicon (M1 and later), and it needs **macOS 13 or later**. Translation windows, always on top, on top of WoW only, ordinary windows, the mini browser, click-through, matrix reading and voice recognition work. Reading the game window is not there yet. On macOS 12 and earlier only the voice recognition is turned off; everything else works as usual.
+- For Apple Silicon (M1 and later), and it needs **macOS 13 or later**. Translation windows, always on top, on top of WoW only, ordinary windows, the mini browser, click-through, matrix reading, voice recognition and screen text reading (macOS Vision) work. Reading the game window works on **macOS 14 or later** (on 13 the screen is read). On macOS 12 and earlier only the voice recognition is turned off; everything else works as usual.
 - I did not register as an Apple developer, so a security warning appears on first run (right-click → Open). If needed, remove the quarantine with `xattr -dr com.apple.quarantine <folder path>` in the Terminal.
-- You must allow the **Screen & System Audio Recording** permission yourself. Run WoW in windowed (fullscreen window) mode.
+- You must allow the **Screen & System Audio Recording** permission yourself (reading the game window and manual capture use it too). Run WoW in windowed (fullscreen window) mode.
 - Tested only on my own MacBook, so expect some rough edges.
 
 # First setup
@@ -98,7 +99,7 @@ Turns voice chat (Discord and the like) into text with Whisper and shows it in t
 - **Coming from 1.x (the Python version)**: the cleanest way is to unzip into a new folder and copy only `config.json`, the `fonts` folder (and `Glossary.txt`) from the old folder. The settings are carried over (the original stays as `config.1x.json`). Overwriting the old folder also works: on the first start the program recognizes the files of the old version and asks to move them into the `old_version_backup` folder (they are moved, never deleted). If you do not move them, the program does not start.
 
 # Notes
-- Limit: since the Midnight expansion, WoW restricts addons more strongly, so some messages (guild management, battlegrounds, boss fights) cannot be collected. There is a safety net, so everything else is collected (check "Other" in the addon options, and it depends on your own chat filter settings). It is not a big problem on NA servers. The recent official API patch notes suggest it may get better.
+- Limit: since the Midnight expansion, WoW restricts addons more strongly, so some messages (guild management, battlegrounds, boss fights) cannot be collected by the addon. Boss-fight chat can be covered by the screen text reading (OCR) above, and there is a safety net, so everything else is collected (check "Other" in the addon options, and it depends on your own chat filter settings). It is not a big problem on NA servers. The recent official API patch notes suggest it may get better.
 - WoW Retail (live) and the Forever servers are tested because those are what I play. Classic and others are unknown; it may only need the version added to the toc.
 - Both Windows and Mac are tested. The Mac version was only tested on my MacBook, so expect more rough edges.
 - If **Smart App Control** of Windows 11 is on, it can block this program because it is not signed (there is no "run anyway"). If it does, turn it off to use the program (Windows Security → App & browser control).
